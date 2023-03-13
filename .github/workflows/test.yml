@@ -39,17 +39,17 @@ jobs:
       - name: Lint with flake8
         run: |
           pip install flake8
-          flake8 src/trurl --count --show-source --statistics
+          flake8 src/lvmguider --count --show-source --statistics
 
       - name: Lint with black
         run: |
           pip install black
-          black --check src/trurl
+          black --check src/lvmguider
 
       - name: Lint with isort
         run: |
           pip install isort
-          isort -c src/trurl
+          isort -c src/lvmguider
 
       - name: Test with pytest
         run: |
