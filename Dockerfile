@@ -7,8 +7,8 @@ WORKDIR /opt
 
 COPY . lvmguider
 
-RUN sudo apt update -y
-RUN sudo apt install -y build-essential
+RUN apt update -y
+RUN apt install -y build-essential
 
 RUN pip3 install -U pip setuptools wheel
 RUN cd lvmguider && pip3 install .
