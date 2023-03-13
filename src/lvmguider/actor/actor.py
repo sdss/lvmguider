@@ -19,3 +19,6 @@ class LVMGuiderActor(AMQPActor):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+
+        self.telescope: str
+        self.telescope = self.config.get("telescope", None) or self.name.split(".")[1]

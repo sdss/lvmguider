@@ -1,4 +1,6 @@
 ---
+telescope: skyw
+
 actor:
   name: lvm.skyw.guider
   host: 10.8.38.21

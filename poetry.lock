@@ -502,7 +502,7 @@ test = ["flake8 (==3.7.8)", "hypothesis (==3.55.3)"]
 name = "contourpy"
 version = "1.0.7"
 description = "Python library for calculating contours of 2D quadrilateral grids"
-category = "dev"
+category = "main"
 optional = false
 python-versions = ">=3.8"
 files = [
@@ -641,7 +641,7 @@ toml = ["tomli"]
 name = "cycler"
 version = "0.11.0"
 description = "Composable style cycles"
-category = "dev"
+category = "main"
 optional = false
 python-versions = ">=3.6"
 files = [
@@ -773,7 +773,7 @@ pyflakes = ">=3.0.0,<3.1.0"
 name = "fonttools"
 version = "4.39.0"
 description = "Tools to manipulate font files"
-category = "dev"
+category = "main"
 optional = false
 python-versions = ">=3.8"
 files = [
@@ -1008,7 +1008,7 @@ format-nongpl = ["fqdn", "idna", "isoduration", "jsonpointer (>1.13)", "rfc3339-
 name = "kiwisolver"
 version = "1.4.4"
 description = "A fast implementation of the Cassowary constraint solver"
-category = "dev"
+category = "main"
 optional = false
 python-versions = ">=3.7"
 files = [
@@ -1199,7 +1199,7 @@ files = [
 name = "matplotlib"
 version = "3.7.1"
 description = "Python plotting package"
-category = "dev"
+category = "main"
 optional = false
 python-versions = ">=3.8"
 files = [
@@ -1630,47 +1630,6 @@ files = [
 ptyprocess = ">=0.5"
 
 [[package]]
-name = "photutils"
-version = "1.6.0"
-description = "An Astropy package for source detection and photometry"
-category = "main"
-optional = false
-python-versions = ">=3.8"
-files = [
-    {file = "photutils-1.6.0-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:8f3540ed2cc9b0c4907fdc1a416ed5c7b9b38ac4a1651fe3f7e425e7e01ffe3d"},
-    {file = "photutils-1.6.0-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:51df5234b3c188aac63cccf54be773ca8d045796098ff83b17c2ff9507cb911a"},
-    {file = "photutils-1.6.0-cp310-cp310-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:733ed51d42783f65e750ab77430c9cbfd5502420efd39927b6f6fde1023e5078"},
-    {file = "photutils-1.6.0-cp310-cp310-win32.whl", hash = "sha256:a6e106e38025c4256006a4ae3386859de309c819977ec8a0c67860183b7f6964"},
-    {file = "photutils-1.6.0-cp310-cp310-win_amd64.whl", hash = "sha256:ab376b011eccfbf85d87c0b2937ca53c6fae0bd515d197a71f4d8e64599c12ff"},
-    {file = "photutils-1.6.0-cp311-cp311-macosx_10_9_x86_64.whl", hash = "sha256:4df3760068542cfa5f2608e424bb2d1125b65f114105aba663f344cda2af1565"},
-    {file = "photutils-1.6.0-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:4d75a270492336fbad352bba2334c65804201b245f7bae55ea10dbb17baedf96"},
-    {file = "photutils-1.6.0-cp311-cp311-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:673b1ebc56096b3949c64d6911972d15560ee4dedc6ddd7f8c87990432a56eed"},
-    {file = "photutils-1.6.0-cp311-cp311-win32.whl", hash = "sha256:f5db33332ff4021d986e94b4bb37b09e7a62e152eb06d88a56bf3072fed63ddc"},
-    {file = "photutils-1.6.0-cp311-cp311-win_amd64.whl", hash = "sha256:c6940a3b436a172398366b7d35ed04dac0f71bd7beb990986f32b4730bbfb5eb"},
-    {file = "photutils-1.6.0-cp38-cp38-macosx_10_9_x86_64.whl", hash = "sha256:7da1bb1b9688f202d0c00e5a45b3b1583365f25aed7c2d425e6c799c433ded8c"},
-    {file = "photutils-1.6.0-cp38-cp38-macosx_11_0_arm64.whl", hash = "sha256:34510ac4a2c5c12cd0a8f212ed6924978b21ed0da102c8ddd5b1ec65dee546f6"},
-    {file = "photutils-1.6.0-cp38-cp38-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:f2b1f1a46fbf61416bffe60155407f8dc1c0d1f638289a9a44c843b5d0832b1c"},
-    {file = "photutils-1.6.0-cp38-cp38-win32.whl", hash = "sha256:4556ee3e58e1e277d02a3a5631cc1e42c19c79609a0cdc74126abc1f24592ea1"},
-    {file = "photutils-1.6.0-cp38-cp38-win_amd64.whl", hash = "sha256:8a50b4618d57d69f801ea8edfbeebee61a6fc1cff478b92241ce363f2ed2909f"},
-    {file = "photutils-1.6.0-cp39-cp39-macosx_10_9_x86_64.whl", hash = "sha256:210511619e0592f336ea7ce67a066b01d01739822efb24bbf61d3bf15f889dab"},
-    {file = "photutils-1.6.0-cp39-cp39-macosx_11_0_arm64.whl", hash = "sha256:c38e703c094e610c31bf568f0f4efdc2647abb245f6bd3b7bdab46bfa18b8fab"},
-    {file = "photutils-1.6.0-cp39-cp39-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:90091f7dd9e7d33e2f07893c5a63fb044b1c5ba959991e0803f6d3fa8376d093"},
-    {file = "photutils-1.6.0-cp39-cp39-win32.whl", hash = "sha256:ff6ea600767f6bfdae4e84e75a403bd1611f6d788f1cb340a6245d0203488d3d"},
-    {file = "photutils-1.6.0-cp39-cp39-win_amd64.whl", hash = "sha256:f521d3648d93ac222dabeae1b0eabd6c6b3722e65fa675e77a106028a7e5f109"},
-    {file = "photutils-1.6.0.tar.gz", hash = "sha256:6da7f1bfef5f445161bc6f3fa4a6ae9599c727183c4f93c6e6e24aac0ced9370"},
-]
-
-[package.dependencies]
-astropy = ">=5.0"
-numpy = ">=1.20"
-setuptools = "*"
-
-[package.extras]
-all = ["bottleneck", "gwcs (>=0.16)", "matplotlib (>=3.3.0)", "scikit-image (>=0.18.0)", "scikit-learn (>=1.0)", "scipy (>=1.6.0)", "tqdm"]
-docs = ["gwcs (>=0.16)", "matplotlib (>=3.3.0)", "scikit-image (>=0.18.0)", "scikit-learn (>=1.0)", "scipy (>=1.6.0)", "sphinx", "sphinx-astropy (>=1.6)"]
-test = ["pytest-astropy"]
-
-[[package]]
 name = "pickleshare"
 version = "0.7.5"
 description = "Tiny 'shelve'-like database with concurrency support"
@@ -1686,7 +1645,7 @@ files = [
 name = "pillow"
 version = "9.4.0"
 description = "Python Imaging Library (Fork)"
-category = "dev"
+category = "main"
 optional = false
 python-versions = ">=3.7"
 files = [
@@ -2030,7 +1989,7 @@ plugins = ["importlib-metadata"]
 name = "pyparsing"
 version = "3.0.9"
 description = "pyparsing module - Classes and methods to define and execute parsing grammars"
-category = "dev"
+category = "main"
 optional = false
 python-versions = ">=3.6.8"
 files = [
@@ -2390,6 +2349,28 @@ invoke = ">=1.3.0,<2.0.0"
 packaging = ">=20.4"
 pygments = ">=2.5.2,<3.0.0"
 pyyaml = ">=4.0"
+
+[[package]]
+name = "seaborn"
+version = "0.12.2"
+description = "Statistical data visualization"
+category = "main"
+optional = false
+python-versions = ">=3.7"
+files = [
+    {file = "seaborn-0.12.2-py3-none-any.whl", hash = "sha256:ebf15355a4dba46037dfd65b7350f014ceb1f13c05e814eda2c9f5fd731afc08"},
+    {file = "seaborn-0.12.2.tar.gz", hash = "sha256:374645f36509d0dcab895cba5b47daf0586f77bfe3b36c97c607db7da5be0139"},
+]
+
+[package.dependencies]
+matplotlib = ">=3.1,<3.6.1 || >3.6.1"
+numpy = ">=1.17,<1.24.0 || >1.24.0"
+pandas = ">=0.25"
+
+[package.extras]
+dev = ["flake8", "flit", "mypy", "pandas-stubs", "pre-commit", "pytest", "pytest-cov", "pytest-xdist"]
+docs = ["ipykernel", "nbconvert", "numpydoc", "pydata_sphinx_theme (==0.10.0rc2)", "pyyaml", "sphinx-copybutton", "sphinx-design", "sphinx-issues"]
+stats = ["scipy (>=1.3)", "statsmodels (>=0.10)"]
 
 [[package]]
 name = "sep"
@@ -3019,4 +3000,4 @@ multidict = ">=4.0"
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.11,<4.0"
-content-hash = "3e0b908ab0215463957b9079b369b27fac341f6f264378830ec7212f0d5c759f"
+content-hash = "4c3fc0ae5138a8ead8032bb5935113b2d11926dbc66aefce7b4ca16f46caac48"
