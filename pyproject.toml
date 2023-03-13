@@ -34,6 +34,11 @@ sdss-clu = "^2.0.1"
 click-default-group = "^1.2.2"
 setuptools = "^67.6.0"
 typing-extensions = "^4.5.0"
+astropy = "^5.2.1"
+astrometry = "^4.1.1"
+pandas = "^1.5.3"
+sep = "^1.2.1"
+photutils = "^1.6.0"
 
 [tool.poetry.dev-dependencies]
 ipython = ">=8.0.0"

@@ -1,0 +1,6 @@
+---
+actor:
+  name: lvm.skyw.guider
+  host: 10.8.38.21
+  port: 5672
+  log_dir: /data/logs/lvm.skyw.guider

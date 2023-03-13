@@ -1,7 +1,6 @@
 import os
 
 from pkg_resources import parse_version
-
 from trurl import __version__
 
 

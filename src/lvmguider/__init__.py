@@ -1,15 +1,9 @@
 # encoding: utf-8
 
-from sdsstools import get_config, get_logger, get_package_version
+from sdsstools import get_package_version
 
 
-# pip package name
 NAME = "lvmguider"
-
-# Loads config. config name is the package name.
-config = get_config("lvmguider")
-
-log = get_logger(NAME)
 
 
 # package name should be pip package name

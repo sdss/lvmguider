@@ -10,13 +10,11 @@ from __future__ import annotations
 
 from clu.actor import AMQPActor
 
-from trurl.core import Trurl
+
+__all__ = ["LVMGuiderActor"]
 
 
-__all__ = ["LVMActor"]
-
-
-class LVMActor(AMQPActor):
+class LVMGuiderActor(AMQPActor):
     """The ``lvmguider`` actor."""
 
     def __init__(self, *args, **kwargs):

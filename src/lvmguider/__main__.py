@@ -47,7 +47,10 @@ def lvmguider(
         click.echo(__version__)
         sys.exit(0)
 
-    default_config_file = os.path.join(os.path.dirname(__file__), "etc/lvmguider.yml")
+    default_config_file = os.path.join(
+        os.path.dirname(__file__),
+        "etc/lvm.skyw.guider.yml",
+    )
 
     ctx.obj = {"config_file": config_file or default_config_file}
 
