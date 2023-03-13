@@ -20,6 +20,9 @@ if TYPE_CHECKING:
     from lvmguider.actor import GuiderCommand
 
 
+__all__ = ["focus"]
+
+
 @lvmguider_parser.group()
 def focus():
     """Commands to Focus the telescope."""
@@ -48,15 +51,33 @@ def focus():
     default=7,
     help="Number of steps (will be rounded to the closest odd number).",
 )
+@click.option(
+    "-t",
+    "--exp-time",
+    type=float,
+    default=10,
+    help="Exposure time in seconds.",
+)
 async def fine(
     command: GuiderCommand,
     guess: float | None = None,
     step_size: float = 0.5,
     steps: int = 7,
+    exp_time: float = 10,
 ):
     """Performs a focus sweep."""
 
-    focuser = Focuser(command, guess=guess, step_size=step_size, steps=steps)
-    await focuser.focus()
+    focuser = Focuser(
+        command,
+        guess=guess,
+        step_size=step_size,
+        steps=steps,
+        exp_time=exp_time,
+    )
+
+    try:
+        await focuser.focus()
+    except Exception as err:
+        return command.fail(f"Failed to focus with error: {err}")
 
     return command.finish()
