@@ -13,7 +13,7 @@ jobs:
   docker:
     runs-on: ubuntu-latest
     env:
-      USER: sdss
+      USER: albireox
       APP: lvmguider
     steps:
       - name: Set docker tags
