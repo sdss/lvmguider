@@ -14,6 +14,11 @@ from astropy.wcs.utils import pixel_to_skycoord
 from lvmguider.astrometrynet import astrometrynet_quick
 
 
+# Middle of an AG frame or full frame
+XZ_FULL_FRAME = (2500.0, 1000.0)
+XZ_FRAME = (800.0, 550.0)
+
+
 def rot_shift_locs(
     camera: str,
     in_locs: numpy.ndarray,
@@ -138,14 +143,16 @@ def solve_locs(
     radius = 1  # Search radius in degrees
 
     if full_frame:
-        midX, midZ = 2500.0, 1000.0  # Middle of Master Frame
-        scales = [4, 5, 6, 7, 8]
+        midX, midZ = XZ_FULL_FRAME  # Middle of Master Frame
+        series = 5200
+        scales = [4, 5, 6]
     else:
-        midX, midZ = 800.0, 550.0  # Middle of AG camera Frame
+        midX, midZ = XZ_FRAME  # Middle of AG camera Frame
+        series = 5200
         scales = [5, 6]
 
     wcs = astrometrynet_quick(
-        "/data/astrometrynet/5200",
+        f"/data/astrometrynet/{series}",
         locs,
         ra=ra,
         dec=dec,
@@ -154,7 +161,7 @@ def solve_locs(
         pixel_scale_factor_hi=upper_bound,
         pixel_scale_factor_lo=lower_bound,
         scales=scales,
-        series=5200,
+        series=series,
     )
 
     if verbose:
