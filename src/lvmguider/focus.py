@@ -63,6 +63,15 @@ def fit_hyperbola(
     return coeffs[2], cov[2][2]
 
 
+def fit_parabola(x_arr: list[float], y_arr: list[float], y_err: list[float]):
+    """Fits a parabola to the data."""
+
+    w = 1 / numpy.array(y_err)
+    a, b, c = numpy.polyfit(x_arr, y_arr, 2, w=w, full=False)
+
+    return (a, b, c)
+
+
 class Focuser:
     """Performs focus on a telescope."""
 
@@ -137,29 +146,42 @@ class Focuser:
 
         sources = pandas.concat(source_list)
 
-        best, cov = fit_hyperbola(
-            sources.dt.tolist(),
-            sources.xstd.tolist(),
-            sources.xrms.tolist(),
-        )
+        best = cov = fwhm_best = -999.0
+        if curve == "hyperbola":
+            best, cov = fit_hyperbola(
+                sources.dt.tolist(),
+                sources.xstd.tolist(),
+                sources.xrms.tolist(),
+            )
 
-        if cov > max_cov:
-            best_focus_idx = numpy.argmin(mean_fwhm)
-            self.initial_guess = focus_grid[best_focus_idx]
-            self.command.warning(
-                "Covariance not reached. Trying again "
-                f"with initial guess {self.initial_guess:.1f} DT."
-            )
-            await self.focus()
-        else:
-            self.command.info(
-                best_focus=dict(
-                    focus=numpy.round(best, 1),
-                    n_sources=len(sources),
-                    cov=numpy.round(cov, 2),
+            if cov > max_cov:
+                best_focus_idx = numpy.argmin(mean_fwhm)
+                self.initial_guess = focus_grid[best_focus_idx]
+                self.command.warning(
+                    "Covariance not reached. Trying again "
+                    f"with initial guess {self.initial_guess:.1f} DT."
                 )
+                await self.focus()
+
+        elif curve == "parabola":
+            a, b, c = fit_parabola(
+                sources.dt.tolist(),
+                sources.xstd.tolist(),
+                sources.xrms.tolist(),
             )
-            await self.goto_focus_position(numpy.round(best, 2))
+            best = -b / 2 / a
+            fwhm_best = a * best**2 + b * best + c
+            cov = -999.0
+            self.initial_guess = best
+
+        self.command.info(
+            best_focus=dict(
+                focus=numpy.round(best, 1),
+                fwhm=numpy.round(fwhm_best, 2),
+                cov=numpy.round(cov, 2),
+            )
+        )
+        await self.goto_focus_position(numpy.round(best, 2))
 
     async def goto_focus_position(self, focus_position: float):
         """Moves the focuser to a position."""
