@@ -15,3 +15,4 @@ from .actor import LVMGuiderActor
 GuiderCommand = Command["LVMGuiderActor"]
 
 from .commands.focus import *
+from .commands.guide import *

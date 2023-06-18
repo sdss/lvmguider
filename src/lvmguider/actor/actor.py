@@ -10,6 +10,9 @@ from __future__ import annotations
 
 from clu.actor import AMQPActor
 
+from lvmguider.cameras import Cameras
+from lvmguider.maskbits import GuiderStatus
+
 
 __all__ = ["LVMGuiderActor"]
 
@@ -23,5 +26,7 @@ class LVMGuiderActor(AMQPActor):
         if self.model and self.model.schema:
             self.model.schema["additionalProperties"] = True
 
-        self.telescope: str
-        self.telescope = self.config.get("telescope", None) or self.name.split(".")[1]
+        self.telescope: str = self.config.get("telescope", self.name.split(".")[1])
+        self.cameras = Cameras(self.telescope)
+
+        self.status = GuiderStatus.IDLE
