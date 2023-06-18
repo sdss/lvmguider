@@ -1,0 +1,8 @@
+---
+telescope: sci
+
+actor:
+  name: lvm.sci.guider
+  host: 10.8.38.21
+  port: 5672
+  log_dir: /data/logs/lvm.sci.guider

@@ -39,7 +39,9 @@ from lvmguider.actor.actor import LVMGuiderActor
 )
 @click.pass_context
 def lvmguider(
-    ctx: click.Context, config_file: str | None = None, version: bool = False
+    ctx: click.Context,
+    config_file: str | None = None,
+    version: bool = False,
 ):
     """HAL actor."""
 
@@ -49,7 +51,7 @@ def lvmguider(
 
     default_config_file = os.path.join(
         os.path.dirname(__file__),
-        "etc/lvm.skyw.guider.yml",
+        "etc/lvm.sci.guider.yml",
     )
 
     ctx.obj = {"config_file": config_file or default_config_file}
