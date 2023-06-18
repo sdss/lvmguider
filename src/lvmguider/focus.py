@@ -8,17 +8,11 @@
 
 from __future__ import annotations
 
-import asyncio
-
 from typing import TYPE_CHECKING
 
 import numpy
 import pandas
-from astropy.io import fits
 from scipy.optimize import curve_fit
-
-from lvmguider.extraction import extract_marginal
-from lvmguider.tools import run_in_executor
 
 
 if TYPE_CHECKING:
@@ -93,11 +87,10 @@ class Focuser:
             self.steps += 1
 
         self.telescope = self.command.actor.telescope
+        self.cameras = self.command.actor.cameras
+        self.foc_actor = f"lvm.{self.telescope}.foc"  # Focuser
 
-        self.agcam_actor = f"lvm.{self.telescope}.agcam"
-        self.foc_actor = f"lvm.{self.telescope}.foc"
-
-    async def focus(self, max_cov: float = 5.0):
+    async def focus(self, max_cov: float = 5.0, curve="parabola"):
         """Performs the focus routine."""
 
         if self.initial_guess is None:
@@ -120,24 +113,22 @@ class Focuser:
         source_list = []
         for focus_position in focus_grid:
             await self.goto_focus_position(focus_position)
-            filenames = await self.expose_cameras()
+            _, sources = await self.cameras.expose(self.command, extract_sources=True)
 
-            sources = pandas.concat(
-                await asyncio.gather(*[self.extract_sources(fn) for fn in filenames])
-            )
-            if len(sources) == 0:
+            if sources is None or len(sources) == 0:
                 self.command.warning(f"No sources detected at {focus_position} DT.")
                 mean_fwhm.append(1e6)
                 continue
 
-            sources.loc[:, "dt"] = focus_position
+            asources = pandas.concat(sources)
+            asources.loc[:, "dt"] = focus_position
 
-            fwhm = sources.loc[:, "xstd"].median()
+            fwhm = asources.loc[:, "xstd"].median()
             self.command.info(
                 focus_point=dict(
                     focus=focus_position,
                     n_sources=len(sources),
-                    fwhm=round(fwhm, 1),
+                    fwhm=round(fwhm, 2),
                 )
             )
             mean_fwhm.append(fwhm)
@@ -194,34 +185,3 @@ class Focuser:
             raise RuntimeError(f"Failed reaching focus {focus_position:.1f} DT.")
         if cmd.replies.get("AtLimit") is True:
             raise RuntimeError("Hit a limit while focusing.")
-
-    async def expose_cameras(self):
-        """Exposes the cameras and returns the filenames."""
-
-        cmd = await self.command.send_command(
-            self.agcam_actor,
-            f"expose {self.exp_time}",
-        )
-        if cmd.status.did_fail:
-            raise RuntimeError("Failed while exposing cameras.")
-
-        filenames: set[str] = set()
-        for reply in cmd.replies:
-            for cam_name in ["east", "west"]:
-                if cam_name in reply.message:
-                    if reply.message[cam_name].get("state", None) == "written":
-                        filenames.add(reply.message[cam_name]["filename"])
-
-        if len(filenames) == 0:
-            raise ValueError("Exposure did not produce any images.")
-
-        return list(filenames)
-
-    async def extract_sources(self, filename: str):
-        """Extracts sources from a file."""
-
-        data = fits.getdata(filename)
-
-        sources = await run_in_executor(extract_marginal, data, box_size=31)
-
-        return sources
