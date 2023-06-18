@@ -23,14 +23,7 @@ if TYPE_CHECKING:
 __all__ = ["focus"]
 
 
-@lvmguider_parser.group()
-def focus():
-    """Commands to Focus the telescope."""
-
-    pass
-
-
-@focus.command()
+@lvmguider_parser.command()
 @click.option(
     "-g",
     "--guess",
@@ -58,7 +51,7 @@ def focus():
     default=10,
     help="Exposure time in seconds.",
 )
-async def fine(
+async def focus(
     command: GuiderCommand,
     guess: float | None = None,
     step_size: float = 0.5,
