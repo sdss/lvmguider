@@ -46,7 +46,7 @@ __all__ = ["focus"]
 )
 @click.option(
     "-t",
-    "--exp-time",
+    "--exposure-time",
     type=float,
     default=10,
     help="Exposure time in seconds.",
@@ -56,7 +56,7 @@ async def focus(
     guess: float | None = None,
     step_size: float = 0.5,
     steps: int = 7,
-    exp_time: float = 10,
+    exposure_time: float = 10,
 ):
     """Performs a focus sweep."""
 
@@ -65,7 +65,7 @@ async def focus(
         guess=guess,
         step_size=step_size,
         steps=steps,
-        exp_time=exp_time,
+        exposure_time=exposure_time,
     )
 
     try:

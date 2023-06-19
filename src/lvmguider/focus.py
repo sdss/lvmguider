@@ -75,13 +75,13 @@ class Focuser:
         guess: float | None = None,
         step_size: float = 0.5,
         steps: int = 7,
-        exp_time: float = 5.0,
+        exposure_time: float = 5.0,
     ):
         self.command = command
         self.initial_guess = guess
         self.step_size = step_size
         self.steps = int(steps)
-        self.exp_time = exp_time
+        self.exposure_time = exposure_time
 
         if self.steps % 2 == 0:
             self.steps += 1
@@ -113,7 +113,11 @@ class Focuser:
         source_list = []
         for focus_position in focus_grid:
             await self.goto_focus_position(focus_position)
-            _, sources = await self.cameras.expose(self.command, extract_sources=True)
+            _, sources = await self.cameras.expose(
+                self.command,
+                exposure_time=self.exposure_time,
+                extract_sources=True,
+            )
 
             if sources is None or len(sources) == 0:
                 self.command.warning(f"No sources detected at {focus_position} DT.")
