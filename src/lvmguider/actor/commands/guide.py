@@ -13,6 +13,11 @@ from typing import TYPE_CHECKING
 import click
 
 from lvmguider.actor import lvmguider_parser
+from lvmguider.guider import (
+    calculate_telescope_offset,
+    determine_pointing,
+    offset_telescope,
+)
 from lvmguider.maskbits import GuiderStatus
 
 
@@ -21,6 +26,10 @@ if TYPE_CHECKING:
 
 
 __all__ = ["guide"]
+
+
+def is_stopping(command: GuiderCommand):
+    return command.actor.status & GuiderStatus.STOPPING
 
 
 @lvmguider_parser.group()
@@ -75,17 +84,77 @@ async def expose(
 
 
 @guide.command()
-async def start(command: GuiderCommand):
+@click.argument("FIELDRA", type=float)
+@click.argument("FIELDDEC", type=float)
+@click.option(
+    "--exposure-time",
+    "-t",
+    type=float,
+    default=5,
+    help="Exposure time.",
+)
+@click.option(
+    "--reference-pixel",
+    type=click.Tuple((float, float)),
+    help="The pixel of the master frame to use as pointing reference.",
+)
+async def start(
+    command: GuiderCommand,
+    fieldra: float,
+    fielddec: float,
+    exposure_time: float = 5.0,
+    reference_pixel: tuple[float, float] | None = None,
+):
+    """Starts the guide loop."""
+
+    cameras = command.actor.cameras
+
     if command.actor.status & GuiderStatus.NON_IDLE:
         return command.finish("Guider is not idle.")
 
     while True:
-        filenames, sources = await command.actor.cameras.expose(
-            command,
-            extract_sources=True,
+        try:
+            filenames, sources = await cameras.expose(
+                command,
+                extract_sources=True,
+                exposure_time=exposure_time,
+            )
+            if sources is None:
+                raise ValueError("No sources found.")
+        except Exception as err:
+            command.warning(f"Failed taking exposure: {err}")
+            if is_stopping(command):
+                break
+            continue
+
+        try:
+            ra_p, dec_p = await determine_pointing(
+                command.actor.telescope,
+                filenames,
+                pixel=reference_pixel,
+            )
+        except Exception as err:
+            command.warning(f"Failed determining telescope pointing: {err}")
+            if is_stopping(command):
+                break
+            continue
+
+        offset, sep = calculate_telescope_offset((ra_p, dec_p), (fieldra, fielddec))
+        command.info(
+            pointing_correction={
+                "separation": sep,
+                "offset_measured": offset,
+                "offset_applied": offset,
+            }
         )
-        if command.actor.status & GuiderStatus.STOPPING:
-            break
+
+        try:
+            await offset_telescope(command, *offset)
+        except RuntimeError as err:
+            command.warning(f"Failed applying pointing correction: {err}")
+            if is_stopping(command):
+                break
+            continue
 
     command.actor.status = GuiderStatus.IDLE
 
