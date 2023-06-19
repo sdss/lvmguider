@@ -56,6 +56,7 @@ class Cameras:
         exposure_time: float = 5.0,
         flavour: str = "object",
         extract_sources: bool = False,
+        nretries: int = 3,
     ) -> tuple[list[str], list[pandas.DataFrame] | None]:
         """Exposes the cameras and returns the filenames."""
 
@@ -97,6 +98,19 @@ class Cameras:
 
         if len(filenames) == 0:
             raise ValueError("Exposure did not produce any images.")
+
+        if any([self.is_shifted(filename) for filename in filenames]):
+            if nretries > 0:
+                command.warning("Found shifted images. Retrying.")
+                return await self.expose(
+                    command,
+                    exposure_time=exposure_time,
+                    flavour=flavour,
+                    extract_sources=extract_sources,
+                    nretries=nretries - 1,
+                )
+            else:
+                raise RuntimeError("Run out of retries. Exposing failed.")
 
         # Create a new extension with the dark-subtracted image.
         if self.dark_file:
@@ -204,3 +218,24 @@ class Cameras:
             self.last_seqno = max(seqnos)
 
         return self.last_seqno + 1
+
+    def is_shifted(self, filename: str | numpy.ndarray):
+        """Determines if an image is "shifted".
+
+        Performs a linear fit along the collapsed y direction of the image.
+        In shifted images this results in a very high slope.
+
+        """
+
+        data: numpy.ndarray
+        if isinstance(filename, (str, pathlib.Path)):
+            data = fits.getdata(str(filename))
+        else:
+            data = filename
+
+        ydata = data.mean(axis=1)
+        m, _ = numpy.polyfit(numpy.arange(ydata), ydata, 1)
+
+        if abs(m) > 10:
+            return True
+        return False
