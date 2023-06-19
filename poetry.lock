@@ -67,62 +67,6 @@ files = [
 test = ["coverage", "mypy", "pexpect", "ruff", "wheel"]
 
 [[package]]
-name = "astrometry"
-version = "4.1.2"
-description = "Astrometry.net solver interface"
-optional = false
-python-versions = "*"
-files = [
-    {file = "astrometry-4.1.2-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:40c90491a31981f8f8d9bef3bed9f608de762eb8b641a60142d4533160db0a5b"},
-    {file = "astrometry-4.1.2-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:dcabd5ca5b5f32cd08bb1a8b711abde28411a96d0539f18a69ec9317600f5205"},
-    {file = "astrometry-4.1.2-cp310-cp310-manylinux_2_12_i686.manylinux2010_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:11e2a3806b8c7e5ad80e653b8b91809972346f0d77946682f250831272a2d678"},
-    {file = "astrometry-4.1.2-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:d81ee0b35e0dabaf2a8510c70f67b1b270cb3c99c7004eb930708f621c809620"},
-    {file = "astrometry-4.1.2-cp310-cp310-musllinux_1_1_i686.whl", hash = "sha256:0867df53d83c0e74603d9aa5184bf6c321dacd0fe057a94eb49bc9df5a771985"},
-    {file = "astrometry-4.1.2-cp310-cp310-musllinux_1_1_x86_64.whl", hash = "sha256:06503dd8a420db0f22bf08659db5c460d38619e78122a23e7ac136d49ae423b6"},
-    {file = "astrometry-4.1.2-cp311-cp311-macosx_10_9_x86_64.whl", hash = "sha256:db0442ba302eab1192da76a6c93df71fcacfb4b129c33ad96e30ad5bf2ad0648"},
-    {file = "astrometry-4.1.2-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:acd708ad63319f653402cd51e3e1b362a289c8c462db634dbc90dfe5bb1531b6"},
-    {file = "astrometry-4.1.2-cp311-cp311-manylinux_2_12_i686.manylinux2010_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:b0f216f55a1565655eb010f7a441dc063aa32e6e83a50c7e1bdd26f1dbf09863"},
-    {file = "astrometry-4.1.2-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:0bfd12d099129b67e3fc81dada6ec4c6bd5aa0e335a94f23c55dc31f06b04774"},
-    {file = "astrometry-4.1.2-cp311-cp311-musllinux_1_1_i686.whl", hash = "sha256:39f7aa7914cd17a2b40aa425da7f1b225c2597a92ba8350470c0c5c44a3852bb"},
-    {file = "astrometry-4.1.2-cp311-cp311-musllinux_1_1_x86_64.whl", hash = "sha256:38b6d54deb515d7883370cde444d444de47bb2738921ea8366793b32d46bbef7"},
-    {file = "astrometry-4.1.2-cp36-cp36m-macosx_10_9_x86_64.whl", hash = "sha256:3ad0c44aa19234ee7c42a42236d83acb861469c65b0166bbad111b7942dc0b35"},
-    {file = "astrometry-4.1.2-cp36-cp36m-manylinux_2_12_i686.manylinux2010_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:a70a9586aef90700c548d571b30610337b8e348e89f5cef5190e8d03e5524822"},
-    {file = "astrometry-4.1.2-cp36-cp36m-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:87ab09775e9047f8f977322008cbf016a8510217b3e9d2c9ae6ab0b70051f14c"},
-    {file = "astrometry-4.1.2-cp36-cp36m-musllinux_1_1_i686.whl", hash = "sha256:678f971ca2eadc525b19ec160802aa2ab9eb69abc12684598cbd686ee264b28a"},
-    {file = "astrometry-4.1.2-cp36-cp36m-musllinux_1_1_x86_64.whl", hash = "sha256:e759339b23a65f50f44b5ddb7a9d6223d40ca706949d47d47919a6fdd6fe6e71"},
-    {file = "astrometry-4.1.2-cp37-cp37m-macosx_10_9_x86_64.whl", hash = "sha256:6bb058c7e978cbc1b7875d4ad5e9e544f313c994796027a840e494b7912946f8"},
-    {file = "astrometry-4.1.2-cp37-cp37m-manylinux_2_12_i686.manylinux2010_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:2bf20cb856ec392e68b7fd1425bce737d898528d8cef1ed6cbb0dda7d49c89f9"},
-    {file = "astrometry-4.1.2-cp37-cp37m-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:40ddc283fd0d7db48c6cd125262d6ba279268f92a67a6faec6c2dc8a927feafa"},
-    {file = "astrometry-4.1.2-cp37-cp37m-musllinux_1_1_i686.whl", hash = "sha256:ce1e099d3cd78c44d2f97b5d582da5fccc0cc71e6e8fd8c3a9eb2906ece448bb"},
-    {file = "astrometry-4.1.2-cp37-cp37m-musllinux_1_1_x86_64.whl", hash = "sha256:a0fa85d41eef74cc94bb1f4d2ca75590ac55984056e25a705539bd54c25c06da"},
-    {file = "astrometry-4.1.2-cp38-cp38-macosx_10_9_x86_64.whl", hash = "sha256:d8e6038be0534b397d43ccb76ee2a4d53b0a346f2756d628463512c19f7264e5"},
-    {file = "astrometry-4.1.2-cp38-cp38-macosx_11_0_arm64.whl", hash = "sha256:ed3d2fca00412b45743bd6dcc3a674f51ef66805272eb91dbf3cd0bc04fc61d0"},
-    {file = "astrometry-4.1.2-cp38-cp38-manylinux_2_12_i686.manylinux2010_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:05e3018e2626256e167e75f7da9c5e1bbe4850ead90b8fe3940e7b362f9f950a"},
-    {file = "astrometry-4.1.2-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:503d28139db4752e06443f75a6d29803eea3ca6ea5f85b900af76245d0e056a2"},
-    {file = "astrometry-4.1.2-cp38-cp38-musllinux_1_1_i686.whl", hash = "sha256:81ec67d99aabc67a369c3b63cf61e8c30ae6f3e9cd0b5a2e8b507487a55a04c2"},
-    {file = "astrometry-4.1.2-cp38-cp38-musllinux_1_1_x86_64.whl", hash = "sha256:0e579c0604fe34ded944daedfeee31e5121f9fe4cddc9d6bfdfaf5200c10722d"},
-    {file = "astrometry-4.1.2-cp39-cp39-macosx_10_9_x86_64.whl", hash = "sha256:0874f7bcc86436a166edd5e307de1e681062097832c2d485f3a10caf849bd10b"},
-    {file = "astrometry-4.1.2-cp39-cp39-macosx_11_0_arm64.whl", hash = "sha256:1fc2394970e9d78c7f1b410dc3576679206f5c77f3ef0b39b945f330d1bae288"},
-    {file = "astrometry-4.1.2-cp39-cp39-manylinux_2_12_i686.manylinux2010_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:d6af506125b393a9a40af18ccdfaa43acf8f0d5104784ef9f7be0d6c1cbf19af"},
-    {file = "astrometry-4.1.2-cp39-cp39-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:a784f7b45159f067af33f17a28c49e8f17ad137f4646707a13c98f3c04eeb030"},
-    {file = "astrometry-4.1.2-cp39-cp39-musllinux_1_1_i686.whl", hash = "sha256:22c00a1c69e760a83fb612e9f060f1c8f91cfe3265a814c50c62ffda938952c1"},
-    {file = "astrometry-4.1.2-cp39-cp39-musllinux_1_1_x86_64.whl", hash = "sha256:16b57b79fcff255bfe85ed72aa54c21ee60c1a5839e7315484a1fdcd1cc54d7d"},
-    {file = "astrometry-4.1.2-pp37-pypy37_pp73-macosx_10_9_x86_64.whl", hash = "sha256:0e462ae7a2b290a535bcc1169badcb11a29f1add36eb2c0c57e5f2ee5e6087b3"},
-    {file = "astrometry-4.1.2-pp37-pypy37_pp73-manylinux_2_12_i686.manylinux2010_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:5625bca0a934796881c2ce2a68f0779405e8075f3641269b71f4cc3e6f27701f"},
-    {file = "astrometry-4.1.2-pp37-pypy37_pp73-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:276868f8d453160f3998d6a735c25f413fb7121858cfeb7867c6331b5f11b9e0"},
-    {file = "astrometry-4.1.2-pp38-pypy38_pp73-macosx_10_9_x86_64.whl", hash = "sha256:903415b42ceb29ed6b9fe4cea09d75de378f6d8b7df4f0eb116ea2bb3f4a8dcb"},
-    {file = "astrometry-4.1.2-pp38-pypy38_pp73-manylinux_2_12_i686.manylinux2010_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:c0c56bdad83139af0d88607767e4e9ef59ff999be50fb118d5b1143a819a6a17"},
-    {file = "astrometry-4.1.2-pp38-pypy38_pp73-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:88484a069b70ab3070e1eef73ba5b2e150a31b01eb511ae025bd9320098ddb1d"},
-    {file = "astrometry-4.1.2-pp39-pypy39_pp73-macosx_10_9_x86_64.whl", hash = "sha256:920295858db24ba874f625c2085b83c01665dac7afa44725dd887671f3a83c8c"},
-    {file = "astrometry-4.1.2-pp39-pypy39_pp73-manylinux_2_12_i686.manylinux2010_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:6bdab4d706549ccfc7e0f8c2a97d605818b39d436bb21e971dfa2f5b7093752e"},
-    {file = "astrometry-4.1.2-pp39-pypy39_pp73-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:9c55f821db82a9c01184863c0980a7b43cb8bd0d3d052fb68fdc1b835f8d4107"},
-    {file = "astrometry-4.1.2.tar.gz", hash = "sha256:cd208c4a17edada174a42981b7c77bcd970dc07194eda8c8bfb5c008b3280177"},
-]
-
-[package.dependencies]
-requests = "*"
-
-[[package]]
 name = "astropy"
 version = "5.3"
 description = "Astronomy and astrophysics core library"
@@ -1871,13 +1815,13 @@ plugins = ["importlib-metadata"]
 
 [[package]]
 name = "pyparsing"
-version = "3.0.9"
+version = "3.1.0"
 description = "pyparsing module - Classes and methods to define and execute parsing grammars"
 optional = false
 python-versions = ">=3.6.8"
 files = [
-    {file = "pyparsing-3.0.9-py3-none-any.whl", hash = "sha256:5026bae9a10eeaefb61dab2f09052b9f4307d44aee4eda64b309723d8d206bbc"},
-    {file = "pyparsing-3.0.9.tar.gz", hash = "sha256:2b020ecf7d21b687f219b71ecad3631f644a47f01403fa1d1036b0c6416d70fb"},
+    {file = "pyparsing-3.1.0-py3-none-any.whl", hash = "sha256:d554a96d1a7d3ddaf7183104485bc19fd80543ad6ac5bdb6426719d766fb06c1"},
+    {file = "pyparsing-3.1.0.tar.gz", hash = "sha256:edb662d6fe322d6e990b1594b5feaeadf806803359e3d4d42f11e295e588f0ea"},
 ]
 
 [package.extras]
@@ -2195,13 +2139,13 @@ unclick = ">=0.1.0b4,<0.2.0"
 
 [[package]]
 name = "sdsstools"
-version = "1.0.2"
+version = "1.1.0"
 description = "Small tools for SDSS products"
 optional = false
 python-versions = ">=3.8,<4.0"
 files = [
-    {file = "sdsstools-1.0.2-py3-none-any.whl", hash = "sha256:e6f3ed62fa79e7de84bb496c13cdcadbfd1ecbdf6660bae7a5dad237dfd4c6e2"},
-    {file = "sdsstools-1.0.2.tar.gz", hash = "sha256:74a477430155993e6a1dd8f7c780cbab7cce907c83d87f17553c614c90aea44b"},
+    {file = "sdsstools-1.1.0-py3-none-any.whl", hash = "sha256:d4d57855a9ac779399a68994374dc577deb9f27436019c99f248249070b754a4"},
+    {file = "sdsstools-1.1.0.tar.gz", hash = "sha256:083dee962600c479e3a0304a1648713df471725e65f64f880280f33014184feb"},
 ]
 
 [package.dependencies]
@@ -2210,6 +2154,7 @@ invoke = ">=1.3.0,<2.0.0"
 packaging = ">=20.4"
 pygments = ">=2.5.2,<3.0.0"
 pyyaml = ">=4.0"
+typing-extensions = ">=4.6.3,<5.0.0"
 
 [[package]]
 name = "seaborn"
@@ -2780,4 +2725,4 @@ multidict = ">=4.0"
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.10,<3.12"
-content-hash = "d4ba29dd34d0f5a4b841acabcc5f7bca2ef1ab50c209b08e78f18c0f2973ab22"
+content-hash = "2b969bd50426b23b25b342d164059335d570208c37e55f0de051c015451bae2b"
