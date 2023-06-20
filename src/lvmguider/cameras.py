@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import pathlib
 import re
 
@@ -94,7 +95,7 @@ class Cameras:
                         filename = reply.message[cam_name]["filename"]
                         filenames.add(filename)
                         if flavour == "dark":
-                            self.dark_file[cam_name] = filename
+                            self._write_dark_info(cam_name, filename)
 
         if len(filenames) == 0:
             raise ValueError("Exposure did not produce any images.")
@@ -113,34 +114,31 @@ class Cameras:
                 raise RuntimeError("Run out of retries. Exposing failed.")
 
         # Create a new extension with the dark-subtracted image.
-        if self.dark_file:
-            for fn in filenames:
-                with fits.open(fn, mode="update") as hdul:
-                    data = hdul[0].data.astype(numpy.float32)
-                    exptime = hdul[0].header["EXPTIME"]
-                    camname = hdul[0].header["CAMNAME"].lower()
+        for fn in filenames:
+            with fits.open(fn, mode="update") as hdul:
+                data = hdul[0].data.astype(numpy.float32)
+                exptime = hdul[0].header["EXPTIME"]
+                camname = hdul[0].header["CAMNAME"].lower()
 
-                    dark_file = self.dark_file.get(camname, None)
-                    if dark_file is None:
-                        command.warning(f"No dark frame found for camera {camname}.")
-                        continue
+                dark_file = self._get_dark_frame(fn, camname)
+                if dark_file is None:
+                    command.warning(f"No dark frame found for camera {camname}.")
+                    continue
 
-                    dark_data = fits.getdata(dark_file).astype(numpy.float32)
-                    dark_exptime = fits.getheader(dark_file)["EXPTIME"]
+                dark_data = fits.getdata(dark_file).astype(numpy.float32)
+                dark_exptime = fits.getheader(dark_file)["EXPTIME"]
 
-                    data_sub = data - (dark_data / dark_exptime) * exptime
+                data_sub = data - (dark_data / dark_exptime) * exptime
 
-                    proc_header = hdul[0].header.copy()
-                    proc_header["DARKFILE"] = dark_file
-                    hdul.append(
-                        fits.ImageHDU(
-                            data=data_sub,
-                            header=proc_header,
-                            name="PROC",
-                        )
+                proc_header = hdul[0].header.copy()
+                proc_header["DARKFILE"] = dark_file
+                hdul.append(
+                    fits.ImageHDU(
+                        data=data_sub,
+                        header=proc_header,
+                        name="PROC",
                     )
-        else:
-            command.warning("No dark frames found.")
+                )
 
         sources = []
         if flavour == "object" and extract_sources:
@@ -154,9 +152,12 @@ class Cameras:
             else:
                 for ifn, fn in enumerate(filenames):
                     with fits.open(fn, mode="update") as hdul:
+                        camname = hdul[0].header["CAMNAME"].lower()
+                        isources = sources[ifn]
+                        isources["camera"] = camname
                         hdul.append(
                             fits.BinTableHDU(
-                                data=Table.from_pandas(sources[ifn]),
+                                data=Table.from_pandas(isources),
                                 name="SOURCES",
                             )
                         )
@@ -173,7 +174,7 @@ class Cameras:
                 "seqno": next_seqno,
                 "filenames": list(filenames),
                 "flavour": flavour,
-                "nsources": len(all_sources),
+                "n_sources": len(all_sources),
                 "fwhm": fwhm,
             }
         )
@@ -234,8 +235,35 @@ class Cameras:
             data = filename
 
         ydata = data.mean(axis=1)
-        m, _ = numpy.polyfit(numpy.arange(ydata), ydata, 1)
+        m, _ = numpy.polyfit(numpy.arange(len(ydata)), ydata, 1)
 
         if abs(m) > 10:
             return True
         return False
+
+    def _get_dark_frame(self, filename: str, cam_name: str):
+        """Gets the path to the dark frame."""
+
+        dark_file = self.dark_file.get(cam_name, None)
+        if dark_file is not None:
+            return dark_file
+
+        dirname = os.path.dirname(filename)
+        path = os.path.join(dirname, f"lvm.{self.telescope}.agcam.{cam_name}.dark.dat")
+
+        if os.path.exists(path):
+            dark_file = open(path, "r").read().strip()
+            self.dark_file[cam_name] = dark_file
+            return dark_file
+
+        return None
+
+    def _write_dark_info(self, cam_name: str, filename: str):
+        """Writes a file with the current dark frame."""
+
+        self.dark_file[cam_name] = filename
+
+        dirname = os.path.dirname(filename)
+        path = os.path.join(dirname, f"lvm.{self.telescope}.agcam.{cam_name}.dark.dat")
+        with open(path, "w") as fd:
+            print(str(filename), file=fd)
