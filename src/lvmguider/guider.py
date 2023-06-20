@@ -26,7 +26,7 @@ async def determine_pointing(
     telescope: str,
     filenames: list[str],
     pixel: tuple[float, float] | None = None,
-) -> tuple[float, float]:
+) -> tuple[float, float, WCS]:
     """Returns the pointing of a telescope based on AG frames.
 
     Parameters
@@ -55,7 +55,7 @@ async def determine_pointing(
 
     pointing = wcs.pixel_to_world(*pixel)
 
-    return (pointing.ra.deg, pointing.dec.deg)  # type:ignore
+    return (pointing.ra.deg, pointing.dec.deg, wcs)  # type:ignore
 
 
 def calculate_telescope_offset(

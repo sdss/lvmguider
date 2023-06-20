@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import click
+from astropy.io import fits
 
 from lvmguider.actor import lvmguider_parser
 from lvmguider.guider import (
@@ -128,7 +129,7 @@ async def start(
             continue
 
         try:
-            ra_p, dec_p = await determine_pointing(
+            ra_p, dec_p, wcs = await determine_pointing(
                 command.actor.telescope,
                 filenames,
                 pixel=reference_pixel,
@@ -139,22 +140,45 @@ async def start(
                 break
             continue
 
+        command.info(measured_pointing={"ra": ra_p, "dec": dec_p})
+
         offset, sep = calculate_telescope_offset((ra_p, dec_p), (fieldra, fielddec))
+
+        # PID k=0.7
+        correction = list(offset)
+        correction[0] *= 0.7
+        correction[1] *= 0.7
+
         command.info(
             pointing_correction={
                 "separation": sep,
                 "offset_measured": offset,
-                "offset_applied": offset,
+                "offset_applied": correction,
             }
         )
 
+        for fn in filenames:
+            with fits.open(fn, mode="update") as hdu:
+                pointing_hdu = fits.ImageHDU(name="ASTROMETRY")
+                pointing_hdu.header["RAMEAS"] = ra_p
+                pointing_hdu.header["DECMEAS"] = dec_p
+                pointing_hdu.header["OFFRAMEA"] = offset[0]
+                pointing_hdu.header["OFFDEMEA"] = offset[1]
+                pointing_hdu.header["OFFRACOR"] = correction[0]
+                pointing_hdu.header["OFFDECOR"] = correction[1]
+                pointing_hdu.header += wcs.to_header()
+                hdu.append(pointing_hdu)
+
         try:
-            await offset_telescope(command, *offset)
+            await offset_telescope(command, *correction)
         except RuntimeError as err:
             command.warning(f"Failed applying pointing correction: {err}")
             if is_stopping(command):
                 break
             continue
+
+        if is_stopping(command):
+            break
 
     command.actor.status = GuiderStatus.IDLE
 
