@@ -125,19 +125,29 @@ class Focuser:
                 continue
 
             asources = pandas.concat(sources)
-            asources.loc[:, "dt"] = focus_position
+            if len(asources) == 0:
+                self.command.warning(
+                    f"No sources found for focus position {focus_position} DT. "
+                    "Skipping this point."
+                )
+                continue
 
-            fwhm = asources.loc[:, "xstd"].median()
+            asources["dt"] = focus_position
+
+            fwhm = asources["xstd"].median()
             self.command.info(
                 focus_point=dict(
                     focus=focus_position,
-                    n_sources=len(sources),
+                    n_sources=len(asources),
                     fwhm=round(fwhm, 2),
                 )
             )
             mean_fwhm.append(fwhm)
 
-            source_list.append(sources)
+            source_list.append(asources)
+
+        if len(source_list) < 3:
+            raise ValueError("Insufficient number of focus points.")
 
         sources = pandas.concat(source_list)
 

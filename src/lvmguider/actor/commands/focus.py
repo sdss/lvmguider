@@ -71,6 +71,6 @@ async def focus(
     try:
         await focuser.focus()
     except Exception as err:
-        return command.fail(f"Failed to focus with error: {err}")
+        return command.fail(err)
 
     return command.finish()
