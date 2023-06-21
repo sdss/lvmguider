@@ -175,7 +175,7 @@ class Cameras:
                 "filenames": list(filenames),
                 "flavour": flavour,
                 "n_sources": len(all_sources),
-                "fwhm": fwhm,
+                "fwhm": numpy.round(fwhm, 3) if fwhm else fwhm,
             }
         )
 
