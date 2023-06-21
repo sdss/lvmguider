@@ -147,16 +147,15 @@ def solve_locs(
 
     lower_bound = 0.8  # Pixel scale hints (arcsec/pixel)
     upper_bound = 1.2
-    radius = 1  # Search radius in degrees
+    radius = 5  # Search radius in degrees
 
     if full_frame:
         midX, midZ = XZ_FULL_FRAME  # Middle of Master Frame
-        series = 5200
-        scales = [4, 5, 6]
     else:
         midX, midZ = XZ_FRAME  # Middle of AG camera Frame
-        series = 5200
-        scales = [5, 6]
+
+    series = 5200
+    scales = [5, 6]
 
     wcs = astrometrynet_quick(
         f"/data/astrometrynet/{series}",
@@ -169,6 +168,9 @@ def solve_locs(
         pixel_scale_factor_lo=lower_bound,
         scales=scales,
         series=series,
+        width=midX * 2,
+        height=midZ * 2,
+        verbose=True,
     )
 
     if verbose:
