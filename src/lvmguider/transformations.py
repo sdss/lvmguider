@@ -28,6 +28,8 @@ def rot_shift_locs(
     """Rotate and shift the star locations from an AG frame to the correct locations in
     the large "master frame" corresponding to the full focal plane.
 
+    Adapted from Tom Herbst's code.
+
     Parameters
     ----------
     camera:
@@ -111,6 +113,8 @@ def solve_locs(
     verbose=False,
 ):
     """Use astrometry.net to solve field, given a series of star locations.
+
+    Adapted from Tom Herbst's code.
 
     Parameters
     ----------
