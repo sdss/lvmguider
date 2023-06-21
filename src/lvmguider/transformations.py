@@ -105,7 +105,7 @@ def rot_shift_locs(
     rsLoc = numpy.dot(M, in_locs.T - rOff) + rOff + off
 
     # Return calculated positions (need to transpose for standard layout)
-    return rsLoc.T
+    return (rsLoc.T, (th, Sx, Sz))
 
 
 def solve_locs(
@@ -239,7 +239,7 @@ def solve_from_files(files: list[str], telescope: str):
         xy = sources[["x", "y"]].values
 
         camera = f"{telescope}-{camname}"
-        file_locs = rot_shift_locs(camera, xy)
+        file_locs, _ = rot_shift_locs(camera, xy)
         sources.loc[:, ["x", "y"]] = file_locs
         mf_sources.append(sources)
 
