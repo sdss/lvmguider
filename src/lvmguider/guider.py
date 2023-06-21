@@ -8,9 +8,12 @@
 
 from __future__ import annotations
 
+import os.path
+
 from typing import TYPE_CHECKING, Any
 
 import numpy
+import pandas
 from astropy.io import fits
 from astropy.table import Table
 from simple_pid import PID
@@ -56,13 +59,20 @@ class Guider:
         self.pixel = pixel
 
         self.config = command.actor.config
+
         # Use negative values because we apply the correction in the
         # same direction as the measured offset between pointing and
         # reference position.
-        self.pid = PID(
-            Kp=-self.config["pid"]["Kp"],
-            Ki=-self.config["pid"]["Ki"],
-            Kd=-self.config["pid"]["Kd"],
+        self.pid_ra = PID(
+            Kp=-self.config["pid"]["ra"]["Kp"],
+            Ki=-self.config["pid"]["ra"]["Ki"],
+            Kd=-self.config["pid"]["ra"]["Kd"],
+        )
+
+        self.pid_dec = PID(
+            Kp=-self.config["pid"]["dec"]["Kp"],
+            Ki=-self.config["pid"]["dec"]["Ki"],
+            Kd=-self.config["pid"]["dec"]["Kd"],
         )
 
     async def guide_one(self, exposure_time: float = 5.0):
@@ -94,7 +104,10 @@ class Guider:
         self.command.actor.status &= ~GuiderStatus.IDLE
 
         try:
-            ra_p, dec_p, wcs = await self.determine_pointing(filenames)
+            ra_p, dec_p, wcs = await self.determine_pointing(
+                filenames,
+                pixel=self.pixel,
+            )
         except Exception as err:
             raise RuntimeError(f"Failed determining telescope pointing: {err}")
 
@@ -110,9 +123,10 @@ class Guider:
 
         # Calculate the correction.
         offset = numpy.array(offset)
-        corr = numpy.array(offset)
-        corr[0] = self.pid(corr[0])
-        corr[1] = self.pid(corr[1])
+
+        corr = offset.copy()
+        corr[0] = self.pid_ra(corr[0])
+        corr[1] = self.pid_dec(corr[1])
         corr = numpy.round(corr, 3)
 
         self.command.actor.status &= ~GuiderStatus.PROCESSING
@@ -129,38 +143,44 @@ class Guider:
             self.command.info(
                 pointing_correction={
                     "separation": sep,
-                    "offset_measured": offset,
-                    "offset_applied": corr,
+                    "offset_measured": list(offset),
+                    "offset_applied": list(corr),
                 }
             )
 
             # Create new proc- image with astrometric solution and
             # measured and applied corrections.
 
-            proc_image = "proc-" + filenames[0]
+            dirname = os.path.dirname(filenames[0])
+            basename = os.path.basename(filenames[0])
+            proc_image = os.path.join(dirname, "proc-" + basename)
             proc_image = proc_image.replace(".east", "").replace(".west", "")
 
-            astro_hdu = fits.PrimaryHDU(name="ASTROMETRY")
-            astro_hdu.header["RAFIELD"] = (self.field_centre[0], "RA of field centre")
-            astro_hdu.header["DECFIELD"] = (self.field_centre[1], "Dec of field centre")
-            astro_hdu.header["RAMEAS"] = (ra_p, "Measured RA position")
-            astro_hdu.header["DECMEAS"] = (dec_p, "Measured Dec position")
-            astro_hdu.header["OFFRAMEA"] = (offset[0], "RA measured offset [arcsec]")
-            astro_hdu.header["OFFDEMEA"] = (offset[1], "Dec measured offset [arcsec]")
-            astro_hdu.header["OFFRACOR"] = (corr[0], "RA applied correction [arcsec]")
-            astro_hdu.header["OFFDECOR"] = (corr[1], "Dec applied correction [arcsec]")
-            astro_hdu.header["Kp"] = (self.pid.Kp, "PID K term")
-            astro_hdu.header["Ki"] = (self.pid.Ki, "PID I term")
-            astro_hdu.header["Kd"] = (self.pid.Kd, "PID D term")
+            astro_hdu = fits.ImageHDU(name="ASTROMETRY")
+            astro_hdu.header["RAFIELD"] = (self.field_centre[0], "[deg] Field RA")
+            astro_hdu.header["DECFIELD"] = (self.field_centre[1], "[deg] Field Dec")
+            astro_hdu.header["RAMEAS"] = (ra_p, "[deg] Measured RA position")
+            astro_hdu.header["DECMEAS"] = (dec_p, "[deg] Measured Dec position")
+            astro_hdu.header["OFFRAMEA"] = (offset[0], "[arcsec] RA measured offset")
+            astro_hdu.header["OFFDEMEA"] = (offset[1], "[arcsec] Dec measured offset")
+            astro_hdu.header["OFFRACOR"] = (corr[0], "[arcsec] RA applied correction")
+            astro_hdu.header["OFFDECOR"] = (corr[1], "[arcsec] Dec applied correction")
+            astro_hdu.header["RAKP"] = (self.pid_ra.Kp, "RA PID K term")
+            astro_hdu.header["RAKI"] = (self.pid_ra.Ki, "RA PID I term")
+            astro_hdu.header["RAKD"] = (self.pid_ra.Kd, "RA PID D term")
+            astro_hdu.header["DECKP"] = (self.pid_dec.Kp, "Dec PID K term")
+            astro_hdu.header["DECKI"] = (self.pid_dec.Ki, "Dec PID I term")
+            astro_hdu.header["DECKD"] = (self.pid_dec.Kd, "Dec PID D term")
             astro_hdu.header += wcs.to_header()
 
-            proc_hdu = fits.HDUList([astro_hdu])
+            proc_hdu = fits.HDUList([fits.PrimaryHDU(), astro_hdu])
             proc_hdu.append(
                 fits.BinTableHDU(
-                    data=Table.from_pandas(sources),
+                    data=Table.from_pandas(pandas.concat(sources)),
                     name="SOURCES",
                 )
             )
+            proc_hdu.writeto(proc_image)
 
     async def determine_pointing(
         self,
