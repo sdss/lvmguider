@@ -8,17 +8,15 @@
 
 from __future__ import annotations
 
+import asyncio
+from contextlib import suppress
+
 from typing import TYPE_CHECKING
 
 import click
-from astropy.io import fits
 
 from lvmguider.actor import lvmguider_parser
-from lvmguider.guider import (
-    calculate_telescope_offset,
-    determine_pointing,
-    offset_telescope,
-)
+from lvmguider.guider import Guider
 from lvmguider.maskbits import GuiderStatus
 
 
@@ -108,86 +106,48 @@ async def start(
 ):
     """Starts the guide loop."""
 
-    cameras = command.actor.cameras
+    actor = command.actor
 
-    if command.actor.status & GuiderStatus.NON_IDLE:
-        return command.finish("Guider is not idle.")
+    if actor.status & GuiderStatus.NON_IDLE:
+        return command.finish("Guider is not idle. Stop the guide loop.")
+
+    guider = Guider(command, (fieldra, fielddec), pixel=reference_pixel)
 
     while True:
+        actor.status = GuiderStatus.GUIDING
+
         try:
-            filenames, sources = await cameras.expose(
-                command,
-                extract_sources=True,
-                exposure_time=exposure_time,
-            )
-            if sources is None:
-                raise ValueError("No sources found.")
+            actor.guide_task = asyncio.create_task(guider.guide_one(exposure_time))
+            await actor.guide_task
         except Exception as err:
-            command.warning(f"Failed taking exposure: {err}")
+            command.warning(f"Failed guiding with error: {err}")
+        finally:
             if is_stopping(command):
                 break
-            continue
 
-        try:
-            ra_p, dec_p, wcs = await determine_pointing(
-                command.actor.telescope,
-                filenames,
-                pixel=reference_pixel,
-            )
-        except Exception as err:
-            command.warning(f"Failed determining telescope pointing: {err}")
-            if is_stopping(command):
-                break
-            continue
-
-        command.info(measured_pointing={"ra": ra_p, "dec": dec_p})
-
-        offset, sep = calculate_telescope_offset((ra_p, dec_p), (fieldra, fielddec))
-
-        # PID k=0.7
-        correction = list(offset)
-        correction[0] *= 0.7
-        correction[1] *= 0.7
-
-        command.info(
-            pointing_correction={
-                "separation": sep,
-                "offset_measured": offset,
-                "offset_applied": correction,
-            }
-        )
-
-        for fn in filenames:
-            with fits.open(fn, mode="update") as hdu:
-                pointing_hdu = fits.ImageHDU(name="ASTROMETRY")
-                pointing_hdu.header["RAMEAS"] = ra_p
-                pointing_hdu.header["DECMEAS"] = dec_p
-                pointing_hdu.header["OFFRAMEA"] = offset[0]
-                pointing_hdu.header["OFFDEMEA"] = offset[1]
-                pointing_hdu.header["OFFRACOR"] = correction[0]
-                pointing_hdu.header["OFFDECOR"] = correction[1]
-                pointing_hdu.header += wcs.to_header()
-                hdu.append(pointing_hdu)
-
-        try:
-            await offset_telescope(command, *correction)
-        except RuntimeError as err:
-            command.warning(f"Failed applying pointing correction: {err}")
-            if is_stopping(command):
-                break
-            continue
-
-        if is_stopping(command):
-            break
-
-    command.actor.status = GuiderStatus.IDLE
+    actor.status = GuiderStatus.IDLE
 
     return command.finish("The guide loop has finished.")
 
 
 @guide.command()
-async def stop(command: GuiderCommand):
+@click.option("--now", is_flag=True, help="Aggressively stops the loop.")
+async def stop(command: GuiderCommand, now=False):
     """Stops the guide loop."""
+
+    status = command.actor.status
+    if status & GuiderStatus.IDLE:
+        return command.finish("Guider is not active.")
+
+    if now:
+        if command.actor.guide_task and not command.actor.guide_task.done():
+            command.actor.guide_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await command.actor.guide_task
+        return command.finish("Guider was forcibly stopped.")
+
+    if command.actor.status & GuiderStatus.STOPPING:
+        return command.fail("Guider loop is already stopping.")
 
     command.actor.status |= GuiderStatus.STOPPING
     return command.finish("Stopping the guide loop.")

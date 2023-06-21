@@ -8,6 +8,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from clu.actor import AMQPActor
 
 from lvmguider.cameras import Cameras
@@ -30,3 +32,4 @@ class LVMGuiderActor(AMQPActor):
         self.cameras = Cameras(self.telescope)
 
         self.status = GuiderStatus.IDLE
+        self.guide_task: asyncio.Task | None = None

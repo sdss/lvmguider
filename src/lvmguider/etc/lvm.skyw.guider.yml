@@ -1,6 +1,11 @@
 ---
 telescope: skyw
 
+pid:
+  Kp: 0.7
+  Ki: 0.0
+  Kd: 0.0
+
 actor:
   name: lvm.skyw.guider
   host: 10.8.38.21

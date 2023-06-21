@@ -1,6 +1,11 @@
 ---
 telescope: skye
 
+pid:
+  Kp: 0.7
+  Ki: 0.0
+  Kd: 0.0
+
 actor:
   name: lvm.skye.guider
   host: 10.8.38.21
