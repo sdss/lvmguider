@@ -6,12 +6,15 @@
 # @Filename: transformations.py
 # @License: BSD 3-clause (http://www.opensource.org/licenses/BSD-3-Clause)
 
+import warnings
+
 import numpy
 import pandas
 from astropy.io import fits
 from astropy.wcs.utils import pixel_to_skycoord
 
 from lvmguider.astrometrynet import astrometrynet_quick
+from lvmguider.extraction import extract_marginal
 
 
 # Middle of an AG frame or full frame
@@ -227,7 +230,12 @@ def solve_from_files(files: list[str], telescope: str):
         ra = header["RA"]
         dec = header["DEC"]
 
-        sources = pandas.DataFrame(fits.getdata(file, "SOURCES"))
+        try:
+            sources = pandas.DataFrame(fits.getdata(file, "SOURCES"))
+        except KeyError:
+            warnings.warn("SOURCES ext not found. Extracting sources", UserWarning)
+            sources = extract_marginal(fits.getdata(file))
+
         xy = sources[["x", "y"]].values
 
         camera = f"{telescope}-{camname}"
