@@ -321,8 +321,8 @@ def astrometrynet_quick(
     pixel_scale_factor_lo: float = 0.9,
     scales: int | list[int] | None = None,
     radius: float = 0.5,
-    width: float = 2048,
-    height: float = 2048,
+    width: float | None = None,
+    height: float | None = None,
     series: int | None = None,
     verbose: bool = False,
     **kwargs,
@@ -416,8 +416,8 @@ add_path {index_path}
 
     opts = dict(
         backend_config=str(backend_config),
-        width=width,
-        height=height,
+        width=width or max(regions.loc[:, "x"]),
+        height=height or max(regions.loc[:, "y"]),
         no_plots=True,
         scale_low=pixel_scale * pixel_scale_factor_lo,
         scale_high=pixel_scale * pixel_scale_factor_hi,
