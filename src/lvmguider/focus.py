@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 import numpy
 import pandas
-from scipy.optimize import curve_fit
+from scipy.optimize import curve_fit  # type: ignore
 
 
 if TYPE_CHECKING:
