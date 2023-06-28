@@ -15,6 +15,7 @@ from astropy.wcs.utils import pixel_to_skycoord
 
 from lvmguider.astrometrynet import astrometrynet_quick
 from lvmguider.extraction import extract_marginal
+from lvmguider.tools import get_proc_path
 
 
 # Middle of an AG frame or full frame
@@ -113,6 +114,7 @@ def solve_locs(
     ra: float,
     dec: float,
     full_frame=True,
+    output_root: str | None = None,
     verbose=False,
 ):
     """Use astrometry.net to solve field, given a series of star locations.
@@ -130,6 +132,9 @@ def solve_locs(
     full_frame
         Whether this is a full "master frame" field, requiring a different set of
         index files.
+    output_root
+        The path where to write the astrometry.net files. If `None`, uses temporary
+        files.
     verbose
         Output additional information.
 
@@ -171,6 +176,8 @@ def solve_locs(
         width=midX * 2,
         height=midZ * 2,
         verbose=True,
+        plot=True,
+        output_root=output_root,
     )
 
     if verbose:
@@ -246,6 +253,19 @@ def solve_from_files(files: list[str], telescope: str):
         mf_sources.append(sources)
 
     locs = pandas.concat(mf_sources)
-    wcs, _ = solve_locs(locs[["x", "y", "flux"]], ra=ra, dec=dec, full_frame=True)
+
+    # Generate root path for astrometry files.
+    proc_path = get_proc_path(files[0])
+    dirname = proc_path.parent
+    proc_base = proc_path.name.replace(".fits", "")
+    output_root = str(dirname / "astrometry" / proc_base)
+
+    wcs, _ = solve_locs(
+        locs[["x", "y", "flux"]],
+        ra=ra,
+        dec=dec,
+        full_frame=True,
+        output_root=output_root,
+    )
 
     return wcs
