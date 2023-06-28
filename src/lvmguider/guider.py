@@ -133,6 +133,12 @@ class Guider:
         self.command.actor.status |= GuiderStatus.CORRECTING
 
         try:
+            if numpy.any(numpy.abs(corr) > 500):
+                raise ValueError(
+                    "Correction is too big. Maybe an issue with the "
+                    "astrometric solution?"
+                )
+
             await self.offset_telescope(*corr)
         except Exception:
             corr = numpy.array([0.0, 0.0])
