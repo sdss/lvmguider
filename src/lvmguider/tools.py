@@ -124,3 +124,14 @@ def create_summary_table(
     tt.sort(["frameno", "telescope", "camera"])
 
     return tt
+
+
+def get_proc_path(filename: str | pathlib.Path):
+    """Returns the proc- path for a given file."""
+
+    path = pathlib.Path(filename).absolute()
+    dirname = path.parent
+    basename = path.name.replace(".east", "").replace(".west", "")
+    proc_path = dirname / ("proc-" + basename)
+
+    return proc_path

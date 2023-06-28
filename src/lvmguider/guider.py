@@ -156,11 +156,7 @@ class Guider:
 
             # Create new proc- image with astrometric solution and
             # measured and applied corrections.
-
-            dirname = os.path.dirname(filenames[0])
-            basename = os.path.basename(filenames[0])
-            proc_image = os.path.join(dirname, "proc-" + basename)
-            proc_image = proc_image.replace(".east", "").replace(".west", "")
+            proc_path = get_proc_path(filenames[0])
 
             astro_hdu = fits.ImageHDU(name="ASTROMETRY")
             astro_hdu.header["RAFIELD"] = (self.field_centre[0], "[deg] Field RA")
@@ -186,7 +182,7 @@ class Guider:
                     name="SOURCES",
                 )
             )
-            proc_hdu.writeto(proc_image)
+            proc_hdu.writeto(str(proc_path))
 
     async def determine_pointing(
         self,
