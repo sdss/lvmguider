@@ -8,8 +8,13 @@
 
 import asyncio
 import concurrent.futures
+import pathlib
+import re
 import warnings
 from functools import partial
+
+from astropy.io import fits
+from astropy.table import Table
 
 
 async def run_in_executor(fn, *args, catch_warnings=False, executor="thread", **kwargs):
@@ -48,3 +53,74 @@ async def run_in_executor(fn, *args, catch_warnings=False, executor="thread", **
             result = await asyncio.get_running_loop().run_in_executor(pool, fn)
 
     return result
+
+
+def create_summary_table(
+    path: str | pathlib.Path = ".",
+    pattern: str = "lvm.*.agcam*.fits*",
+) -> Table:
+    """Returns a table with a summary of agcam information for the files in a directory.
+
+    Parameters
+    ----------
+    path
+        The path in which to search for file.
+    pattern
+        A pattern to select files. Defaults to selecting all raw frames.
+
+    Returns
+    -------
+    table
+        A table of frame data.
+
+    """
+
+    path = pathlib.Path(path)
+    files = path.glob(pattern)
+
+    columns = [
+        "frameno",
+        "telescope",
+        "camera",
+        "filename",
+        "date-obs",
+        "exptime",
+        "imagetype",
+        "ra",
+        "dec",
+        "nsources",
+    ]
+    data = []
+    for file_ in files:
+        file_match = re.match(r"lvm\.([a-z]+)\..+?\_([0-9]+)\.fits", file_.name)
+
+        telescope = file_match.group(1) if file_match else ""
+        frameno = int(file_match.group(2)) if file_match else -1
+
+        hdus = fits.open(file_)
+        if "SOURCES" in hdus:
+            nsources = len(hdus["SOURCES"].data)
+        else:
+            nsources = -1
+
+        header = hdus[0].header
+
+        data.append(
+            (
+                frameno,
+                telescope,
+                header["CAMNAME"],
+                file_.name,
+                header["DATE-OBS"],
+                header["EXPTIME"],
+                header["IMAGETYP"],
+                header["RA"],
+                header["DEC"],
+                nsources,
+            )
+        )
+
+    tt = Table(rows=data, names=columns)
+    tt.sort(["frameno", "telescope", "camera"])
+
+    return tt
