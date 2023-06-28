@@ -19,7 +19,7 @@ from simple_pid import PID
 from lvmguider.maskbits import GuiderStatus
 
 from .tools import get_proc_path, run_in_executor
-from .transformations import XZ_FULL_FRAME, solve_from_files
+from .transformations import XZ_FULL_FRAME, delta_radec2mot_axis, solve_from_files
 
 
 if TYPE_CHECKING:
@@ -77,6 +77,7 @@ class Guider:
         self,
         exposure_time: float = 5.0,
         apply_correction: bool = True,
+        use_motor_offsets: bool = False,
     ):
         """Performs one guide iteration.
 
@@ -121,7 +122,10 @@ class Guider:
         )
 
         # Offset is field centre - current pointing.
-        offset, sep = self.calculate_telescope_offset((ra_p, dec_p))
+        offset, sep = self.calculate_telescope_offset(
+            (ra_p, dec_p),
+            use_motor_axes=use_motor_offsets,
+        )
 
         # Calculate the correction.
         offset = numpy.array(offset)
@@ -143,7 +147,7 @@ class Guider:
                 self.command.actor.status &= ~GuiderStatus.PROCESSING
                 self.command.actor.status |= GuiderStatus.CORRECTING
 
-                await self.offset_telescope(*corr)
+                await self.offset_telescope(*corr, use_motor_axes=use_motor_offsets)
 
         except Exception:
             corr = numpy.array([0.0, 0.0])
@@ -228,6 +232,7 @@ class Guider:
     def calculate_telescope_offset(
         self,
         pointing: tuple[float, float],
+        use_motor_axes: bool = False,
     ) -> tuple[tuple[float, float], float]:
         """Determines the offset to send to the telescope to acquire the field centre.
 
@@ -270,9 +275,19 @@ class Guider:
         dec_arcsec = numpy.round(dec_off * 3600, 3)
         sep_arcsec = numpy.round(sep * 3600, 3)
 
+        if use_motor_axes:
+            saz_diff_d, sel_diff_d = delta_radec2mot_axis(fra, fdec, pra, pdec)
+            ra_arcsec = saz_diff_d
+            dec_arcsec = sel_diff_d
+
         return ((ra_arcsec, dec_arcsec), sep_arcsec)
 
-    async def offset_telescope(self, ra_off: float, dec_off: float):
+    async def offset_telescope(
+        self,
+        ra_off: float,
+        dec_off: float,
+        use_motor_axes: bool = False,
+    ):
         """Sends a correction offset to the telescope.
 
         Parameters
@@ -287,10 +302,12 @@ class Guider:
         telescope = self.command.actor.telescope
         pwi = f"lvm.{telescope}.pwi"
 
-        cmd = await self.command.send_command(
-            pwi,
-            f"offset --ra_add_arcsec {ra_off} --dec_add_arcsec {dec_off}",
-        )
+        if use_motor_axes is False:
+            cmd_str = f"offset --ra_add_arcsec {ra_off} --dec_add_arcsec {dec_off}"
+        else:
+            cmd_str = f"offset --axis0_add_arcsec {ra_off} --axis1_add_arcsec {dec_off}"
+
+        cmd = await self.command.send_command(pwi, cmd_str)
 
         if cmd.status.did_fail:
             raise RuntimeError(f"Failed offsetting telescope {telescope}.")

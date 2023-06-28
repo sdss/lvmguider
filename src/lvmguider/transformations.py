@@ -7,10 +7,13 @@
 # @License: BSD 3-clause (http://www.opensource.org/licenses/BSD-3-Clause)
 
 import warnings
+from datetime import datetime
 
 import numpy
 import pandas
+from astropy.coordinates import EarthLocation
 from astropy.io import fits
+from astropy.time import Time
 from astropy.wcs.utils import pixel_to_skycoord
 
 from lvmguider.astrometrynet import astrometrynet_quick
@@ -269,3 +272,112 @@ def solve_from_files(files: list[str], telescope: str):
     )
 
     return wcs
+
+
+def radec2azel(raD, decD, lstD):
+    """Returns the Azimuth and Elevation for the supplied RA, Dec, and sidereal time.
+
+    From Tom Herbst and Florian Briegel.
+
+    Parameters
+    ----------
+    ra,dec
+        Right Ascension and Declination in decimal degrees.
+    lst
+        Local Sideral Time in decimal degrees.
+
+    Returns
+    -------
+    az,el
+        Azimuth and Elevation (Altitude) in decimal degrees
+
+    """
+
+    site = EarthLocation.of_site("Las Campanas Observatory")
+
+    lat_r = numpy.radians(site.lat)
+
+    ra, dec, lst = (
+        numpy.radians(raD),
+        numpy.radians(decD),
+        numpy.radians(lstD),
+    )  # Convert to radians
+
+    ha = lst - ra
+
+    el = numpy.arcsin(
+        numpy.sin(dec) * numpy.sin(lat_r)
+        + numpy.cos(dec) * numpy.cos(lat_r) * numpy.cos(ha)
+    )
+
+    rat = (numpy.sin(dec) - numpy.sin(el) * numpy.sin(lat_r)) / (
+        numpy.cos(el) * numpy.cos(lat_r)
+    )  # Ratio - need to pin [-1,1]
+
+    if rat < -1.0:  # Goes wonky if roundoff puts it outside [1,1]
+        rat = -1.0
+
+    if rat > 1.0:
+        rat = 1.0
+
+    if numpy.sin(ha) < 0.0:
+        az = numpy.arccos(rat)
+    else:
+        az = 2.0 * numpy.pi - numpy.arccos(rat)
+
+    return numpy.degrees(az), numpy.degrees(el)
+
+
+def azel2sazsel(azD, elD):
+    """Returns the siderostat coordinates (saz, Sel) for the supplied Az-El.
+
+    From Tom Herbst and Florian Briegel.
+
+    Parameters
+    ----------
+    az,el
+        Azimuth and Elevation (Altitude) in decimal degrees
+
+    Returns
+    -------
+    sazD,selD
+        Siderostat angles in degrees
+
+    """
+
+    r90 = numpy.radians(90.0)  # 90 deg in radians
+    az, el = numpy.radians(azD), numpy.radians(elD)  # Convert to radians
+    SEl = numpy.arccos(numpy.cos(el) * numpy.cos(az)) - r90  # SEl in radians
+    rat = numpy.sin(el) / numpy.cos(SEl)  # Ratio
+    if azD < 180.0:
+        SAz = r90 - numpy.arcsin(rat)  # saz in radians
+    else:
+        SAz = numpy.arcsin(rat) - r90
+
+    return numpy.degrees(SAz), numpy.degrees(SEl)  # Return values in degrees
+
+
+def delta_radec2mot_axis(ra_ref, dec_ref, ra_new, dec_new):
+    """RA/Dec offset to motor axes.
+
+    From Tom Herbst and Florian Briegel.
+
+    """
+
+    observing_location = EarthLocation.of_site("Las Campanas Observatory")
+    observing_time = Time(datetime.utcnow(), scale="utc", location=observing_location)
+    lst = observing_time.sidereal_time("mean")
+
+    ref_az_d, ref_el_d = radec2azel(ra_ref, dec_ref, lst.deg)
+    new_az_d, new_el_d = radec2azel(ra_new, dec_new, lst.deg)
+
+    ref_saz_d, ref_sel_d = azel2sazsel(ref_az_d, ref_el_d)
+    new_saz_d, new_sel_d = azel2sazsel(new_az_d, new_el_d)
+
+    saz_diff_d = ref_saz_d - new_saz_d
+    sel_diff_d = ref_sel_d - new_sel_d
+
+    saz_diff_d *= -3600.0
+    sel_diff_d *= -3600.0
+
+    return saz_diff_d, sel_diff_d
