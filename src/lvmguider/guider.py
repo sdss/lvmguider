@@ -8,8 +8,6 @@
 
 from __future__ import annotations
 
-import os.path
-
 from typing import TYPE_CHECKING, Any
 
 import numpy
@@ -20,7 +18,7 @@ from simple_pid import PID
 
 from lvmguider.maskbits import GuiderStatus
 
-from .tools import run_in_executor
+from .tools import get_proc_path, run_in_executor
 from .transformations import XZ_FULL_FRAME, solve_from_files
 
 
