@@ -10,9 +10,11 @@ import asyncio
 import concurrent.futures
 import pathlib
 import re
+import shutil
 import warnings
 from functools import partial
 
+import pandas
 from astropy.io import fits
 from astropy.table import Table
 
@@ -135,3 +137,108 @@ def get_proc_path(filename: str | pathlib.Path):
     proc_path = dirname / ("proc-" + basename)
 
     return proc_path
+
+
+def reprocess_proc_image(
+    filename: str | pathlib.Path,
+    telescope: str,
+    output_path: str | pathlib.Path,
+    keep_previous_wcs: bool = True,
+    solve_individual_cameras: bool = True,
+    generate_astrometrynet_outputs: bool = False,
+):
+    """Reprocesses a proc- file."""
+
+    from lvmguider.astrometrynet import astrometrynet_quick
+    from lvmguider.transformations import rot_shift_locs, solve_locs
+
+    proc_orig = pathlib.Path(filename).absolute()
+    output_path = pathlib.Path(output_path).absolute()
+
+    hdus = fits.open(str(proc_orig))
+    header = hdus[1].header
+
+    ra = header["RAFIELD"]
+    dec = header["DECFIELD"]
+
+    if "SOURCES" not in hdus:
+        warnings.warn("No SOURCES found.", UserWarning)
+        return None
+
+    sources = pandas.DataFrame(hdus["SOURCES"].data)
+    sources.loc[:, "x_master"] = 0.0
+    sources.loc[:, "y_master"] = 0.0
+
+    output_path.mkdir(parents=True, exist_ok=True)
+    proc_new = output_path / proc_orig.name
+
+    shutil.copyfile(proc_orig, proc_new)
+
+    proc_new = output_path / proc_orig.name
+    new_sources_cam = []
+    for camname in ["east", "west"]:
+        sources_cam = sources.loc[sources.camera == camname]
+        xy = sources_cam[["x", "y"]].values
+
+        camera = f"{telescope}-{camname[0]}"
+        file_locs, _ = rot_shift_locs(camera, xy)
+        sources_cam.loc[:, ["x_master", "y_master"]] = file_locs
+        new_sources_cam.append(sources_cam)
+
+    new_sources = pandas.concat(new_sources_cam)
+    output_root = str(proc_new).replace(".fits", "")
+
+    xyls = new_sources.loc[:, ["x_master", "y_master", "flux"]]
+    xyls.rename(columns={"x_master": "x", "y_master": "y"}, inplace=True)
+    new_wcs, _ = solve_locs(
+        xyls,
+        ra=ra,
+        dec=dec,
+        full_frame=True,
+        output_root=output_root if generate_astrometrynet_outputs else None,
+    )
+
+    with fits.open(str(proc_new), "update") as hdul:
+        del hdul["SOURCES"]
+        new_sources_t = Table.from_pandas(new_sources)
+        hdul.append(fits.BinTableHDU(data=new_sources_t, name="SOURCES"))
+
+        if new_wcs is None and keep_previous_wcs:
+            hdul.append(fits.ImageHDU(name="REPROC"))
+        elif new_wcs:
+            if keep_previous_wcs:
+                new_hdu = fits.ImageHDU(name="REPROC")
+                new_hdu.header += new_wcs.to_header(relax=True)
+                hdul.append(new_hdu)
+            else:
+                orig_hdu = hdul[1]
+                orig_hdu.header += new_wcs.to_header(relax=True)
+
+    if solve_individual_cameras:
+        for camname in ["east", "west"]:
+            sources_cam = new_sources.loc[new_sources.camera == camname]
+
+            series = 5200
+            wcs = astrometrynet_quick(
+                f"/data/astrometrynet/{series}",
+                sources_cam,
+                ra=ra,
+                dec=dec,
+                radius=5.0,
+                pixel_scale=1.0,
+                pixel_scale_factor_hi=1.2,
+                pixel_scale_factor_lo=0.8,
+                scales=[5, 6],
+                series=series,
+                verbose=False,
+                plot=False,
+            )
+
+            with fits.open(str(proc_new), "update") as hdul:
+                new_hdu = fits.ImageHDU(name=camname.upper())
+                if wcs:
+                    new_hdu.header += wcs.to_header(relax=True)
+                    new_hdu.header["SOLVED"] = True
+                else:
+                    new_hdu.header["SOLVED"] = False
+                hdul.append(new_hdu)

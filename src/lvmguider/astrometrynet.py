@@ -392,6 +392,7 @@ def astrometrynet_quick(
         output_root = os.path.abspath(output_root)
     else:
         output_root = tempfile.NamedTemporaryFile().name
+        plot = False
 
     dirname = os.path.dirname(output_root)
     outfile = os.path.basename(output_root)
@@ -469,7 +470,7 @@ add_path {index_path}
     if wcs_output.exists():
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            wcs = WCS(open(wcs_output).read())
+            wcs = WCS(open(wcs_output).read(), relax=True)
         wcs_output.unlink()
         return wcs
     else:
