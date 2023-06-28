@@ -22,6 +22,7 @@ from typing import NamedTuple, Optional, TypeVar
 
 import numpy
 import pandas
+from astropy.io import fits
 from astropy.table import Table
 from astropy.wcs import WCS
 
@@ -319,11 +320,13 @@ def astrometrynet_quick(
     pixel_scale: float,
     pixel_scale_factor_hi: float = 1.1,
     pixel_scale_factor_lo: float = 0.9,
+    output_root: str | None = None,
     scales: int | list[int] | None = None,
     radius: float = 0.5,
     width: float | None = None,
     height: float | None = None,
     series: int | None = None,
+    plot: bool = False,
     verbose: bool = False,
     **kwargs,
 ):
@@ -349,6 +352,10 @@ def astrometrynet_quick(
     pixel_scale_factor_hi
         A multiplicative factor for the pixel scale to calculate the
         highest possible pixel scale to attempt.
+    output_root
+        The path where to save astrometry.net file. Must include the directory
+        and a root after which input and output files will be named. If `None`,
+        the xyls file is saved to a temporary file.
     scales
         Index files scales to use. Otherwise uses all index files.
     radius
@@ -360,6 +367,8 @@ def astrometrynet_quick(
     series
         The index series. If not provided and needed, will try to determine from
         ``index_path``.
+    plot
+        Whether to have astrometry.net generate plots.
     verbose
         Raise an error if the field is not solved.
     kwargs
@@ -379,7 +388,16 @@ def astrometrynet_quick(
     else:
         xyls = regions
 
-    outtempfile = tempfile.NamedTemporaryFile().name
+    if output_root:
+        output_root = os.path.abspath(output_root)
+    else:
+        output_root = tempfile.NamedTemporaryFile().name
+
+    dirname = os.path.dirname(output_root)
+    outfile = os.path.basename(output_root)
+
+    if not os.path.exists(dirname):
+        os.makedirs(dirname, exist_ok=True)
 
     index_path = os.path.abspath(index_path)
     index_files = glob("index-*.fit*", root_dir=index_path)
@@ -387,7 +405,7 @@ def astrometrynet_quick(
     if len(index_files) == 0:
         raise ValueError(f"No index files found in {index_path}.")
 
-    backend_config = os.path.join(os.path.dirname(outtempfile), "astrometrynet.cfg")
+    backend_config = os.path.join(dirname, f"{outfile}.cfg")
     with open(backend_config, "w") as ff:
         ff.write(
             f"""inparallel
@@ -418,7 +436,7 @@ add_path {index_path}
         backend_config=str(backend_config),
         width=width or max(regions.loc[:, "x"]),
         height=height or max(regions.loc[:, "y"]),
-        no_plots=True,
+        no_plots=not plot,
         scale_low=pixel_scale * pixel_scale_factor_lo,
         scale_high=pixel_scale * pixel_scale_factor_hi,
         scale_units="arcsecperpix",
@@ -429,16 +447,19 @@ add_path {index_path}
 
     astrometry = AstrometryNet(**opts)
 
-    xyls_path = outtempfile + ".xyls"
-    xyls.write(xyls_path, format="fits", overwrite=True)
+    xyls_path = os.path.join(dirname, outfile + ".xyls")
+    hdus = fits.HDUList([fits.PrimaryHDU(), fits.BinTableHDU(data=xyls.as_array())])
+    hdus.writeto(xyls_path, overwrite=True)
 
-    wcs_output = pathlib.Path(outtempfile + ".wcs")
+    wcs_output = pathlib.Path(dirname) / (outfile + ".wcs")
     wcs_output.unlink(missing_ok=True)
 
+    stdout = os.path.join(dirname, outfile + ".stdout")
+    stderr = os.path.join(dirname, outfile + ".stderr")
     astrometry.run_sync(
         [xyls_path],
-        stdout=outtempfile + ".stdout",
-        stderr=outtempfile + ".stderr",
+        stdout=stdout,
+        stderr=stderr,
         ra=ra,
         dec=dec,
     )
@@ -451,9 +472,9 @@ add_path {index_path}
         return wcs
     else:
         if verbose:
-            if os.path.exists(outtempfile + ".stdout"):
-                stdout = open(outtempfile + ".stdout").read()
-                stderr = open(outtempfile + ".stderr").read()
+            if os.path.exists(stdout):
+                stdout = open(stderr).read()
+                stderr = open(stderr).read()
                 raise RuntimeError(stdout + "\n" + stderr)
             else:
                 raise RuntimeError("Unexpected error. No stderr was generated.")
