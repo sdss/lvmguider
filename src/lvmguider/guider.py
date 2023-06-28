@@ -73,7 +73,11 @@ class Guider:
             Kd=-self.config["pid"]["dec"]["Kd"],
         )
 
-    async def guide_one(self, exposure_time: float = 5.0):
+    async def guide_one(
+        self,
+        exposure_time: float = 5.0,
+        apply_correction: bool = True,
+    ):
         """Performs one guide iteration.
 
         In order, it does the following:
@@ -121,26 +125,30 @@ class Guider:
 
         # Calculate the correction.
         offset = numpy.array(offset)
-
-        corr = offset.copy()
-        corr[0] = self.pid_ra(corr[0])
-        corr[1] = self.pid_dec(corr[1])
-        corr = numpy.round(corr, 3)
-
-        self.command.actor.status &= ~GuiderStatus.PROCESSING
-        self.command.actor.status |= GuiderStatus.CORRECTING
+        corr = numpy.array([0.0, 0.0])
 
         try:
-            if numpy.any(numpy.abs(corr) > 500):
-                raise ValueError(
-                    "Correction is too big. Maybe an issue with the "
-                    "astrometric solution?"
-                )
+            if apply_correction:
+                corr = offset.copy()
+                corr[0] = self.pid_ra(corr[0])
+                corr[1] = self.pid_dec(corr[1])
+                corr = numpy.round(corr, 3)
 
-            await self.offset_telescope(*corr)
+                if numpy.any(numpy.abs(corr) > 500):
+                    raise ValueError(
+                        "Correction is too big. Maybe an issue with the "
+                        "astrometric solution?"
+                    )
+
+                self.command.actor.status &= ~GuiderStatus.PROCESSING
+                self.command.actor.status |= GuiderStatus.CORRECTING
+
+                await self.offset_telescope(*corr)
+
         except Exception:
             corr = numpy.array([0.0, 0.0])
             raise
+
         finally:
             self.command.actor.status &= ~GuiderStatus.CORRECTING
 

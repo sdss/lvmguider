@@ -97,12 +97,19 @@ async def expose(
     type=click.Tuple((float, float)),
     help="The pixel of the master frame to use as pointing reference.",
 )
+@click.option(
+    "--apply-corrections/--no-apply-corrections",
+    is_flag=True,
+    default=True,
+    help="Whether apply the measured corrections.",
+)
 async def start(
     command: GuiderCommand,
     fieldra: float,
     fielddec: float,
     exposure_time: float = 5.0,
     reference_pixel: tuple[float, float] | None = None,
+    apply_corrections: bool = True,
 ):
     """Starts the guide loop."""
 
@@ -117,7 +124,12 @@ async def start(
         actor.status = GuiderStatus.GUIDING
 
         try:
-            actor.guide_task = asyncio.create_task(guider.guide_one(exposure_time))
+            actor.guide_task = asyncio.create_task(
+                guider.guide_one(
+                    exposure_time,
+                    apply_correction=apply_corrections,
+                )
+            )
             await actor.guide_task
         except Exception as err:
             command.warning(f"Failed guiding with error: {err}")
