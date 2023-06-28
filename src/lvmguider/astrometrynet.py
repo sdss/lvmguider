@@ -448,7 +448,9 @@ add_path {index_path}
     astrometry = AstrometryNet(**opts)
 
     xyls_path = os.path.join(dirname, outfile + ".xyls")
-    hdus = fits.HDUList([fits.PrimaryHDU(), fits.BinTableHDU(data=xyls.as_array())])
+    hdus = fits.HDUList(
+        [fits.PrimaryHDU(), fits.BinTableHDU(data=xyls.as_array())]  # type:ignore
+    )
     hdus.writeto(xyls_path, overwrite=True)
 
     wcs_output = pathlib.Path(dirname) / (outfile + ".wcs")
