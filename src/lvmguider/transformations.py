@@ -162,11 +162,8 @@ def solve_locs(
     else:
         midX, midZ = XZ_FRAME  # Middle of AG camera Frame
 
-    series = 5200
-    scales = [5, 6]
-
     wcs = astrometrynet_quick(
-        f"/data/astrometrynet/{series}",
+        ["/data/astrometrynet/5200", "/data/astrometrynet/4100"],
         locs,
         ra=ra,
         dec=dec,
@@ -174,8 +171,6 @@ def solve_locs(
         pixel_scale=(upper_bound + lower_bound) / 2,
         pixel_scale_factor_hi=upper_bound,
         pixel_scale_factor_lo=lower_bound,
-        scales=scales,
-        series=series,
         width=midX * 2,
         height=midZ * 2,
         verbose=True,

@@ -313,7 +313,7 @@ class AstrometryNet:
 
 
 def astrometrynet_quick(
-    index_path: str,
+    index_paths: list[str],
     regions: pandas.DataFrame | Table | numpy.ndarray,
     ra: float,
     dec: float,
@@ -325,7 +325,7 @@ def astrometrynet_quick(
     radius: float = 0.5,
     width: float | None = None,
     height: float | None = None,
-    series: int | None = None,
+    series: list[int] | None = None,
     plot: bool = False,
     verbose: bool = False,
     **kwargs,
@@ -334,8 +334,8 @@ def astrometrynet_quick(
 
     Parameters
     ----------
-    index_path
-        The path to the index files to use.
+    index_paths
+        The paths to the index files to use.
     regions
         A pandas data frame of source detections with at least three columns:
         ``x``, ``y``, and ``flux``. ``flux`` can be set to all ones if the
@@ -400,38 +400,43 @@ def astrometrynet_quick(
     if not os.path.exists(dirname):
         os.makedirs(dirname, exist_ok=True)
 
-    index_path = os.path.abspath(index_path)
-    index_files = glob("index-*.fit*", root_dir=index_path)
-
-    if len(index_files) == 0:
-        raise ValueError(f"No index files found in {index_path}.")
-
     backend_config = os.path.join(dirname, f"{outfile}.cfg")
     with open(backend_config, "w") as ff:
         ff.write(
-            f"""inparallel
+            """inparallel
 cpulimit 30
-add_path {index_path}
 """
         )
 
-        if scales is None:
-            ff.write("autoindex\n")
-        else:
-            if series is None:
-                match = re.match(r"index\-([0-9]+)\-", str(index_files[0]))
-                if match:
-                    series = int(int(match.group(1)) / 100) * 100
-                else:
-                    raise ValueError("Index series cannot be determined.")
+        for index_path in index_paths:
+            ff.write(f"add_path {index_path}\n")
 
-            if isinstance(scales, int):
-                scales = [scales]
-            for scale in scales:
-                series_scale = series + scale
-                scale_files = glob(f"index-{series_scale}-*.fits", root_dir=index_path)
-                for scale_file in scale_files:
-                    ff.write(f"index {scale_file}\n")
+        for ii, index_path in enumerate(index_paths):
+            index_path = os.path.abspath(index_path)
+            index_files = glob("index-*.fit*", root_dir=index_path)
+
+            if scales is None:
+                ff.write("autoindex\n")
+                break
+            else:
+                if series is None:
+                    match = re.match(r"index\-([0-9]+)\-", str(index_files[0]))
+                    if match:
+                        this_series = int(int(match.group(1)) / 100) * 100
+                    else:
+                        raise ValueError("Index series cannot be determined.")
+                else:
+                    this_series = series[ii]
+
+                if isinstance(scales, int):
+                    scales = [scales]
+                for scale in scales:
+                    series_scale = this_series + scale
+                    scale_files = glob(
+                        f"index-{series_scale}-*.fits", root_dir=index_path
+                    )
+                    for scale_file in scale_files:
+                        ff.write(f"index {scale_file}\n")
 
     opts = dict(
         backend_config=str(backend_config),

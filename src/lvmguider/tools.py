@@ -218,9 +218,8 @@ def reprocess_proc_image(
         for camname in ["east", "west"]:
             sources_cam = new_sources.loc[new_sources.camera == camname]
 
-            series = 5200
             wcs = astrometrynet_quick(
-                f"/data/astrometrynet/{series}",
+                ["/data/astrometrynet/5200"],
                 sources_cam,
                 ra=ra,
                 dec=dec,
@@ -229,7 +228,7 @@ def reprocess_proc_image(
                 pixel_scale_factor_hi=1.2,
                 pixel_scale_factor_lo=0.8,
                 scales=[5, 6],
-                series=series,
+                series=[5200],
                 verbose=False,
                 plot=False,
             )
