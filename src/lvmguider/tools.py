@@ -146,6 +146,8 @@ def reprocess_proc_image(
     keep_previous_wcs: bool = True,
     solve_individual_cameras: bool = True,
     generate_astrometrynet_outputs: bool = False,
+    index_paths: dict[int, str] | None = None,
+    scales: dict[int, list[int]] | None = None,
 ):
     """Reprocesses a proc- file."""
 
@@ -190,13 +192,20 @@ def reprocess_proc_image(
 
     xyls = new_sources.loc[:, ["x_master", "y_master", "flux"]]
     xyls.rename(columns={"x_master": "x", "y_master": "y"}, inplace=True)
-    new_wcs, _ = solve_locs(
-        xyls,
-        ra=ra,
-        dec=dec,
-        full_frame=True,
-        output_root=output_root if generate_astrometrynet_outputs else None,
-    )
+
+    try:
+        new_wcs, _ = solve_locs(
+            xyls,
+            ra=ra,
+            dec=dec,
+            full_frame=True,
+            index_paths=index_paths,
+            scales=scales,
+            output_root=output_root if generate_astrometrynet_outputs else None,
+        )
+    except RuntimeError:
+        print(f"[WARNING]: Failed solving {filename}.")
+        new_wcs = None
 
     with fits.open(str(proc_new), "update") as hdul:
         del hdul["SOURCES"]
@@ -218,8 +227,8 @@ def reprocess_proc_image(
         for camname in ["east", "west"]:
             sources_cam = new_sources.loc[new_sources.camera == camname]
 
-            wcs = astrometrynet_quick(
-                ["/data/astrometrynet/5200"],
+            wcs, *_ = astrometrynet_quick(
+                {5200: "/data/astrometrynet/5200"},
                 sources_cam,
                 ra=ra,
                 dec=dec,
@@ -227,11 +236,13 @@ def reprocess_proc_image(
                 pixel_scale=1.0,
                 pixel_scale_factor_hi=1.2,
                 pixel_scale_factor_lo=0.8,
-                scales=[5, 6],
-                series=[5200],
-                verbose=False,
+                scales={5200: [5, 6]},
                 plot=False,
+                output_root=(output_root + f"_{camname}") if output_root else None,
             )
+
+            if wcs is None:
+                print(f"[WARNING]: Failed solving {filename} ({camname}).")
 
             with fits.open(str(proc_new), "update") as hdul:
                 new_hdu = fits.ImageHDU(name=camname.upper())
@@ -241,3 +252,93 @@ def reprocess_proc_image(
                 else:
                     new_hdu.header["SOLVED"] = False
                 hdul.append(new_hdu)
+
+    return new_wcs
+
+
+def reprocess_files(
+    filenames: list[str],
+    telescope: str,
+    proc_output_path: str | pathlib.Path,
+    solve_individual_cameras: bool = True,
+    generate_astrometrynet_outputs: bool = False,
+    index_paths: dict[int, str] | None = None,
+    scales: dict[int, list[int]] | None = None,
+):
+    """Reprocesses raw files.
+
+    This basically calls `.solve_from_files` but writes the proc- file
+    to a new location and allows to specify indexes and scales.
+
+    """
+
+    from lvmguider.astrometrynet import astrometrynet_quick
+    from lvmguider.transformations import solve_from_files
+
+    proc_output_path = pathlib.Path(proc_output_path)
+    parent = proc_output_path.parent
+    parent.mkdir(parents=True, exist_ok=True)
+
+    output_root = (
+        str(proc_output_path).replace(".fits", "")
+        if generate_astrometrynet_outputs
+        else None
+    )
+
+    wcs, new_sources = solve_from_files(
+        filenames,
+        telescope,
+        reextract_sources=True,
+        solve_locs_kwargs={
+            "index_paths": index_paths,
+            "output_root": output_root,
+            "scales": scales,
+        },
+    )
+    assert wcs
+
+    new_sources_t = Table.from_pandas(new_sources)
+    hdul = fits.HDUList(
+        [
+            fits.PrimaryHDU(header=wcs.to_header(relax=True)),
+            fits.BinTableHDU(data=new_sources_t, name="SOURCES"),
+        ]
+    )
+
+    if solve_individual_cameras:
+        header = fits.getheader(filenames[0])
+        ra = header["RA"]
+        dec = header["DEC"]
+
+        for camname in ["east", "west"]:
+            sources_cam = new_sources.loc[new_sources.camera == camname]
+
+            wcs, *_ = astrometrynet_quick(
+                {5200: "/data/astrometrynet/5200"},
+                sources_cam,
+                ra=ra,
+                dec=dec,
+                radius=5.0,
+                pixel_scale=1.0,
+                pixel_scale_factor_hi=1.2,
+                pixel_scale_factor_lo=0.8,
+                scales={5200: [5, 6]},
+                plot=False,
+                raise_on_unsolved=True,
+                output_root=(output_root + f"_{camname}") if output_root else None,
+            )
+
+            if wcs is None:
+                print(f"[WARNING]: Failed solving {camname}.")
+
+            new_hdu = fits.ImageHDU(name=camname.upper())
+            if wcs:
+                new_hdu.header += wcs.to_header(relax=True)
+                new_hdu.header["SOLVED"] = True
+            else:
+                new_hdu.header["SOLVED"] = False
+            hdul.append(new_hdu)
+
+    hdul.writeto(str(proc_output_path), overwrite=True)
+
+    return wcs
