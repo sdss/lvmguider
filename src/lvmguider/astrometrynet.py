@@ -11,7 +11,6 @@ from __future__ import annotations
 import asyncio
 import os
 import pathlib
-import re
 import subprocess
 import tempfile
 import time
@@ -468,7 +467,7 @@ def astrometrynet_quick(
             warnings.simplefilter("ignore")
             wcs = WCS(open(wcs_output).read(), relax=True)
         wcs_output.unlink()
-        return wcs
+        return wcs, open(stdout).read(), open(stderr).read()
     else:
         if raise_on_unsolved:
             if os.path.exists(stdout):
@@ -478,4 +477,4 @@ def astrometrynet_quick(
             else:
                 raise RuntimeError("Unexpected error. No stderr was generated.")
 
-    return None
+    return (None, "", "")
