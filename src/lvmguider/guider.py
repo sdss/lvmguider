@@ -77,7 +77,7 @@ class Guider:
         self,
         exposure_time: float = 5.0,
         apply_correction: bool = True,
-        use_motor_offsets: bool = False,
+        use_motor_offsets: bool = True,
     ):
         """Performs one guide iteration.
 
@@ -122,13 +122,15 @@ class Guider:
         )
 
         # Offset is field centre - current pointing.
-        offset, sep = self.calculate_telescope_offset(
-            (ra_p, dec_p),
-            use_motor_axes=use_motor_offsets,
-        )
+        offset, offset_motax, sep = self.calculate_telescope_offset((ra_p, dec_p))
 
         # Calculate the correction.
         offset = numpy.array(offset)
+
+        offset_motax = numpy.array(offset_motax)
+        offset_motax[0] = self.pid_ra(offset_motax[0])
+        offset_motax[1] = self.pid_dec(offset_motax[1])
+
         corr = numpy.array([0.0, 0.0])
 
         try:
@@ -138,16 +140,23 @@ class Guider:
                 corr[1] = self.pid_dec(corr[1])
                 corr = numpy.round(corr, 3)
 
-                if numpy.any(numpy.abs(corr) > 500):
-                    raise ValueError(
-                        "Correction is too big. Maybe an issue with the "
-                        "astrometric solution?"
-                    )
+                # if numpy.any(numpy.abs(corr) > 500):
+                #     raise ValueError(
+                #         "Correction is too big. Maybe an issue with the "
+                #         "astrometric solution?"
+                #     )
 
                 self.command.actor.status &= ~GuiderStatus.PROCESSING
                 self.command.actor.status |= GuiderStatus.CORRECTING
 
-                await self.offset_telescope(*corr, use_motor_axes=use_motor_offsets)
+                if use_motor_offsets:
+                    await self.offset_telescope(
+                        *offset_motax,
+                        use_motor_axes=use_motor_offsets,
+                    )
+                    corr = offset_motax.copy()
+                else:
+                    await self.offset_telescope(*corr)
 
         except Exception:
             corr = numpy.array([0.0, 0.0])
@@ -232,8 +241,7 @@ class Guider:
     def calculate_telescope_offset(
         self,
         pointing: tuple[float, float],
-        use_motor_axes: bool = False,
-    ) -> tuple[tuple[float, float], float]:
+    ) -> tuple[tuple[float, float], tuple[float, float], float]:
         """Determines the offset to send to the telescope to acquire the field centre.
 
         Parameters
@@ -275,12 +283,9 @@ class Guider:
         dec_arcsec = numpy.round(dec_off * 3600, 3)
         sep_arcsec = numpy.round(sep * 3600, 3)
 
-        if use_motor_axes:
-            saz_diff_d, sel_diff_d = delta_radec2mot_axis(fra, fdec, pra, pdec)
-            ra_arcsec = saz_diff_d
-            dec_arcsec = sel_diff_d
+        saz_diff_d, sel_diff_d = delta_radec2mot_axis(fra, fdec, pra, pdec)
 
-        return ((ra_arcsec, dec_arcsec), sep_arcsec)
+        return ((ra_arcsec, dec_arcsec), (saz_diff_d, sel_diff_d), sep_arcsec)
 
     async def offset_telescope(
         self,
