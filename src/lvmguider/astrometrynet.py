@@ -313,7 +313,7 @@ class AstrometryNet:
 
 
 def astrometrynet_quick(
-    index_paths: list[str],
+    index_paths: dict[int, str],
     regions: pandas.DataFrame | Table | numpy.ndarray,
     ra: float,
     dec: float,
@@ -321,13 +321,13 @@ def astrometrynet_quick(
     pixel_scale_factor_hi: float = 1.1,
     pixel_scale_factor_lo: float = 0.9,
     output_root: str | None = None,
-    scales: int | list[int] | None = None,
+    scales: dict[int, list[int]] | None = None,
     radius: float = 0.5,
     width: float | None = None,
     height: float | None = None,
-    series: list[int] | None = None,
     plot: bool = False,
-    verbose: bool = False,
+    cpulimit: int = 30,
+    raise_on_unsolved: bool = False,
     **kwargs,
 ):
     """Quickly process a set of detections using astrometry.net.
@@ -335,7 +335,9 @@ def astrometrynet_quick(
     Parameters
     ----------
     index_paths
-        The paths to the index files to use.
+        The paths to the index files to use. A dictionary of series number
+        to path on disk, e.g.,
+        ``{5200: "/data/astrometrynet/5200", 4100: "/data/astrometrynet/5100"}``.
     regions
         A pandas data frame of source detections with at least three columns:
         ``x``, ``y``, and ``flux``. ``flux`` can be set to all ones if the
@@ -357,19 +359,20 @@ def astrometrynet_quick(
         and a root after which input and output files will be named. If `None`,
         the xyls file is saved to a temporary file.
     scales
-        Index files scales to use. Otherwise uses all index files.
+        Index scales to use. Otherwise uses all index files. The format
+        is a dictionary of series number to a list of scales, e.g.,
+        ``{5200: [4, 5], 4100: [10, 11]}``.
     radius
         The radius, in degrees, around ``ra`` and ``dec`` to search.
     width
         The width of the image in pixels.
     height
         The height of the image in pixels.
-    series
-        The index series. If not provided and needed, will try to determine from
-        ``index_path``.
     plot
         Whether to have astrometry.net generate plots.
-    verbose
+    cpulimit
+        Maximum time to wait for a solution, in seconds.
+    raise_on_unsolved
         Raise an error if the field is not solved.
     kwargs
         Other options to pass to `.AstrometryNet`.
@@ -379,6 +382,10 @@ def astrometrynet_quick(
     wcs
         An astropy WCS with the solved field, or `None` if the field could
         not be solved.
+    stdout
+        The stdout generated, as a string.
+    stderr
+        The stderr generated, as a string.
 
     """
 
@@ -402,39 +409,23 @@ def astrometrynet_quick(
 
     backend_config = os.path.join(dirname, f"{outfile}.cfg")
     with open(backend_config, "w") as ff:
-        ff.write(
-            """inparallel
-cpulimit 30
-"""
-        )
+        ff.write("inparallel\n")
+        ff.write(f"cpulimit {cpulimit}\n")
 
-        for index_path in index_paths:
-            ff.write(f"add_path {index_path}\n")
+        for index_path in index_paths.values():
+            ff.write(f"add_path {os.path.abspath(index_path)}\n")
 
-        for ii, index_path in enumerate(index_paths):
+        for series, index_path in index_paths.items():
             index_path = os.path.abspath(index_path)
-            index_files = glob("index-*.fit*", root_dir=index_path)
-
-            if scales is None:
-                ff.write("autoindex\n")
-                break
+            this_scales = scales.get(series, None) if scales is not None else None
+            if this_scales is None:
+                scale_files = glob(f"index-*", root_dir=index_path)
+                for scale_file in scale_files:
+                    ff.write(f"index {scale_file}\n")
             else:
-                if series is None:
-                    match = re.match(r"index\-([0-9]+)\-", str(index_files[0]))
-                    if match:
-                        this_series = int(int(match.group(1)) / 100) * 100
-                    else:
-                        raise ValueError("Index series cannot be determined.")
-                else:
-                    this_series = series[ii]
-
-                if isinstance(scales, int):
-                    scales = [scales]
-                for scale in scales:
-                    series_scale = this_series + scale
-                    scale_files = glob(
-                        f"index-{series_scale}-*.fits", root_dir=index_path
-                    )
+                for this_scale in this_scales:
+                    series_scale = series + this_scale
+                    scale_files = glob(f"index-{series_scale}*", root_dir=index_path)
                     for scale_file in scale_files:
                         ff.write(f"index {scale_file}\n")
 
@@ -479,11 +470,11 @@ cpulimit 30
         wcs_output.unlink()
         return wcs
     else:
-        if verbose:
+        if raise_on_unsolved:
             if os.path.exists(stdout):
-                stdout = open(stderr).read()
-                stderr = open(stderr).read()
-                raise RuntimeError(stdout + "\n" + stderr)
+                stdout_s = open(stdout).read()
+                stderr_s = open(stderr).read()
+                raise RuntimeError(stdout_s + "\n" + stderr_s)
             else:
                 raise RuntimeError("Unexpected error. No stderr was generated.")
 
