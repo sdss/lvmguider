@@ -372,7 +372,8 @@ def delta_radec2mot_axis(ra_ref, dec_ref, ra_new, dec_new):
     saz_diff_d = ref_saz_d - new_saz_d
     sel_diff_d = ref_sel_d - new_sel_d
 
-    saz_diff_d *= -3600.0
-    sel_diff_d *= -3600.0
+    # To arcsec
+    saz_diff_arcsec = saz_diff_d * -3600.0
+    sel_diff_arcsec = sel_diff_d * -3600.0
 
-    return saz_diff_d, sel_diff_d
+    return saz_diff_arcsec, sel_diff_arcsec
