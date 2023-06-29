@@ -57,35 +57,22 @@ def rot_shift_locs(
     # Get best-fit rotation and shift, based on NonLinLSQ_Fit.py
 
     if rot_shift is None:  # Use Best-Fit values from Suff_AGC.docx
-        cam_idx = [
-            "skyw-w",
-            "skyw-e",
-            "sci-w",
-            "sci-e",
-            "spec-e",
-            "skye-w",
-            "skye-e",
-            "sci-c",
-        ].index(camera)
-
         # Best-fit rotations and shifts
-        bF = numpy.array(
-            (
-                [
-                    [-89.85, -76.53, 430.64],
-                    [90.16, 3512.90, 433.74],
-                    [-89.84, -28.26, 415.33],
-                    [89.98, 3512.74, 447.25],
-                    [89.60, 3193.11, 504.26],
-                    [-90.69, -79.54, 436.38],
-                    [89.71, 3476.00, 457.13],
-                    [-89.995, 1707.4, 426.62],
-                ]
-            )
-        )  # Last one is Sci on-axis for 21 Feb 23 - see Doc
+        # Last one is Sci on-axis for 21 Feb 23 - see Doc
+        met_data = {
+            "skyw-w": [-89.85, -76.53, 430.64],
+            "skyw-e": [90.16, 3512.90, 433.74],
+            "sci-w": [-89.84, -28.26, 415.33],
+            "sci-e": [89.98, 3512.74, 447.25],
+            "spec-e": [89.60, 3193.11, 504.26],
+            "skye-w": [-90.69, -79.54, 436.38],
+            "skye-e": [89.71, 3476.00, 457.13],
+            "sci-c": [-89.995, 1707.4, 426.62],
+        }
 
         # Pull out correct best-fit rotation and shift
-        th, Sx, Sz = (numpy.radians(bF[cam_idx, 0]), bF[cam_idx, 1], bF[cam_idx, 2])
+        bF = met_data[camera]
+        th, Sx, Sz = (numpy.radians(bF[0]), bF[1], bF[2])
 
     else:
         # Use supplied values
