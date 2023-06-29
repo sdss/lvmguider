@@ -117,6 +117,8 @@ def solve_locs(
     ra: float,
     dec: float,
     full_frame=True,
+    index_paths: dict[int, str] | None = None,
+    scales: dict[int, list[int]] | None = None,
     output_root: str | None = None,
     verbose=False,
 ):
@@ -135,6 +137,14 @@ def solve_locs(
     full_frame
         Whether this is a full "master frame" field, requiring a different set of
         index files.
+    index_paths
+        The paths to the index files to use. A dictionary of series number
+        to path on disk, e.g.,
+        ``{5200: "/data/astrometrynet/5200", 4100: "/data/astrometrynet/5100"}``.
+    scales
+        Index scales to use. Otherwise uses all index files. The format
+        is a dictionary of series number to a list of scales, e.g.,
+        ``{5200: [4, 5], 4100: [10, 11]}``.
     output_root
         The path where to write the astrometry.net files. If `None`, uses temporary
         files.
@@ -162,8 +172,16 @@ def solve_locs(
     else:
         midX, midZ = XZ_FRAME  # Middle of AG camera Frame
 
-    wcs = astrometrynet_quick(
-        ["/data/astrometrynet/5200", "/data/astrometrynet/4100"],
+    index_paths = index_paths or {
+        5200: "/data/astrometrynet/5200",
+        4100: "/data/astrometrynet/4100",
+    }
+
+    locs = locs.copy()
+    locs = locs.rename(columns={"x_master": "x", "y_master": "y"})
+
+    wcs, *_ = astrometrynet_quick(
+        index_paths,
         locs,
         ra=ra,
         dec=dec,
@@ -173,7 +191,8 @@ def solve_locs(
         pixel_scale_factor_lo=lower_bound,
         width=midX * 2,
         height=midZ * 2,
-        verbose=True,
+        scales=scales,
+        raise_on_unsolved=True,
         plot=True,
         output_root=output_root,
     )
@@ -207,7 +226,12 @@ def solve_locs(
     return wcs, solveInfo
 
 
-def solve_from_files(files: list[str], telescope: str):
+def solve_from_files(
+    files: list[str],
+    telescope: str,
+    reextract_sources: bool = False,
+    solve_locs_kwargs: dict = {},
+):
     """Determines the telescope pointing from a set of AG frames.
 
     Parameters
@@ -217,11 +241,19 @@ def solve_from_files(files: list[str], telescope: str):
         these are a pair of east/west camera frames, except for ``spec``.
     telescope
         The telescope to which these exposures are associated.
+    reextract_sources
+        Runs the source extraction algorithm again. If `False`, extraction is only
+        done if a ``SOURCES`` extensions is not found in the files.
+    solve_locs_kwargs
+        A dictionary of kwargs to pass to `.solve_locs`.
 
     Returns
     -------
     wcs
         The wcs of the astrometric solution or `None` if no solution was found.
+    locs
+        The locations used to solve with astrometry.net. This is basically the
+        extracted sources with two new ``x_master`` and ``y_master`` columns.
 
     """
 
@@ -233,40 +265,47 @@ def solve_from_files(files: list[str], telescope: str):
     dec = 0.0
     for file in files:
         header = fits.getheader(file)
-        camname = header["CAMNAME"][0].lower()
+        camname = header["CAMNAME"].lower()
         ra = header["RA"]
         dec = header["DEC"]
 
-        try:
-            sources = pandas.DataFrame(fits.getdata(file, "SOURCES"))
-        except KeyError:
-            warnings.warn("SOURCES ext not found. Extracting sources", UserWarning)
-            sources = extract_marginal(fits.getdata(file))
+        if reextract_sources is False:
+            try:
+                sources = pandas.DataFrame(fits.getdata(file, "SOURCES"))
+            except KeyError:
+                warnings.warn("SOURCES ext not found. Extracting sources", UserWarning)
+                sources = extract_marginal(fits.getdata(file))
+        else:
+            data = fits.getdata(file)
+            sources = extract_marginal(data)
+            sources["camera"] = camname
 
         xy = sources[["x", "y"]].values
 
-        camera = f"{telescope}-{camname}"
+        camera = f"{telescope}-{camname[0]}"
         file_locs, _ = rot_shift_locs(camera, xy)
-        sources.loc[:, ["x", "y"]] = file_locs
+        sources.loc[:, ["x_master", "y_master"]] = file_locs
         mf_sources.append(sources)
 
     locs = pandas.concat(mf_sources)
 
-    # Generate root path for astrometry files.
-    proc_path = get_proc_path(files[0])
-    dirname = proc_path.parent
-    proc_base = proc_path.name.replace(".fits", "")
-    output_root = str(dirname / "astrometry" / proc_base)
+    if "output_root" not in solve_locs_kwargs:
+        # Generate root path for astrometry files.
+        proc_path = get_proc_path(files[0])
+        dirname = proc_path.parent
+        proc_base = proc_path.name.replace(".fits", "")
+        output_root = str(dirname / "astrometry" / proc_base)
+        solve_locs_kwargs["output_root"] = output_root
 
     wcs, _ = solve_locs(
-        locs[["x", "y", "flux"]],
+        locs[["x_master", "y_master", "flux"]],
         ra=ra,
         dec=dec,
         full_frame=True,
-        output_root=output_root,
+        **solve_locs_kwargs,
     )
 
-    return wcs
+    return wcs, locs
 
 
 def radec2azel(raD, decD, lstD):

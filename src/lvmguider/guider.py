@@ -229,7 +229,9 @@ class Guider:
         telescope = self.telescope
 
         pixel = pixel or XZ_FULL_FRAME
-        wcs: WCS | None = await run_in_executor(solve_from_files, filenames, telescope)
+
+        wcs: WCS
+        wcs, _ = await run_in_executor(solve_from_files, filenames, telescope)
 
         if wcs is None:
             raise ValueError(f"Cannot determine pointing for telescope {telescope}.")
