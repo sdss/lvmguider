@@ -261,9 +261,18 @@ def solve_from_files(
                 sources = pandas.DataFrame(fits.getdata(file, "SOURCES"))
             except KeyError:
                 warnings.warn("SOURCES ext not found. Extracting sources", UserWarning)
-                sources = extract_marginal(fits.getdata(file))
+                return solve_from_files(
+                    files,
+                    telescope,
+                    reextract_sources=True,
+                    solve_locs_kwargs=solve_locs_kwargs,
+                )
         else:
-            data = fits.getdata(file)
+            hdul = fits.open(file)
+            if "PROC" in hdul:
+                data = hdul["PROC"].data
+            else:
+                data = hdul[0].data
             sources = extract_marginal(data)
             sources["camera"] = camname
 
