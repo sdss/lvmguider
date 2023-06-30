@@ -129,6 +129,8 @@ class AstrometryNet:
             "scale-units": scale_units,
             "dir": dir,
             "overwrite": True,
+            "no-tweak": True,
+            "tweak-order": 0,
         }
         self._options.update(self._format_options(kwargs))
 
@@ -151,7 +153,7 @@ class AstrometryNet:
         if options is None:
             options = self._options
 
-        flags = ["no-plots", "sort-ascending", "overwrite"]
+        flags = ["no-plots", "sort-ascending", "overwrite", "no-tweak"]
 
         cmd = [self.solve_field_cmd]
 
@@ -418,7 +420,7 @@ def astrometrynet_quick(
             index_path = os.path.abspath(index_path)
             this_scales = scales.get(series, None) if scales is not None else None
             if this_scales is None:
-                scale_files = glob(f"index-*", root_dir=index_path)
+                scale_files = glob("index-*", root_dir=index_path)
                 for scale_file in scale_files:
                     ff.write(f"index {scale_file}\n")
             else:
