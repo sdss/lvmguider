@@ -19,7 +19,12 @@ from simple_pid import PID
 from lvmguider.maskbits import GuiderStatus
 
 from .tools import get_proc_path, run_in_executor
-from .transformations import XZ_FULL_FRAME, delta_radec2mot_axis, solve_from_files
+from .transformations import (
+    XZ_FULL_FRAME,
+    delta_radec2mot_axis,
+    solve_from_files,
+    wcs_from_single_cameras,
+)
 
 
 if TYPE_CHECKING:
@@ -79,6 +84,7 @@ class Guider:
         exposure_time: float = 5.0,
         apply_correction: bool = True,
         use_motor_offsets: bool = True,
+        use_individual_images: bool = False,
     ):
         """Performs one guide iteration.
 
@@ -111,6 +117,7 @@ class Guider:
             ra_p, dec_p, wcs = await self.determine_pointing(
                 filenames,
                 pixel=self.pixel,
+                use_individual_images=use_individual_images,
             )
         except Exception as err:
             raise RuntimeError(f"Failed determining telescope pointing: {err}")
@@ -141,11 +148,11 @@ class Guider:
                 corr[1] = self.pid_dec(corr[1])
                 corr = numpy.round(corr, 3)
 
-                # if numpy.any(numpy.abs(corr) > 500):
-                #     raise ValueError(
-                #         "Correction is too big. Maybe an issue with the "
-                #         "astrometric solution?"
-                #     )
+                if numpy.any(numpy.abs(corr) > 500):
+                    raise ValueError(
+                        "Correction is too big. Maybe an issue with the "
+                        "astrometric solution?"
+                    )
 
                 self.command.actor.status &= ~GuiderStatus.PROCESSING
                 self.command.actor.status |= GuiderStatus.CORRECTING
@@ -208,6 +215,7 @@ class Guider:
         self,
         filenames: list[str],
         pixel: tuple[float, float] | None = None,
+        use_individual_images: bool = False,
     ) -> tuple[float, float, WCS]:
         """Returns the pointing of a telescope based on AG frames.
 
@@ -219,6 +227,10 @@ class Guider:
         pixel
             The ``(x,y)`` pixel of the master frame to use to determine the pointing.
             Default to the central pixel.
+        use_individual_images
+            Determine the coordinates of the central pixel of the master frame
+            using a WCS generated from the individual frames, instead of trying
+            to solve the master frame with astrometry.net.
 
         Returns
         -------
@@ -231,10 +243,20 @@ class Guider:
 
         pixel = pixel or XZ_FULL_FRAME
 
-        solution: AstrometrySolution
-        solution = await run_in_executor(solve_from_files, filenames, telescope)
+        if not use_individual_images:
+            solution: AstrometrySolution
+            solution = await run_in_executor(solve_from_files, filenames, telescope)
+            wcs = solution.wcs
+        else:
+            wcs, solutions = await run_in_executor(
+                wcs_from_single_cameras,
+                filenames,
+                telescope=telescope,
+            )
 
-        wcs = solution.wcs
+            for camname in solutions:
+                if solutions[camname].solved is False:
+                    self.command.warning(f"Camera {camname} did not solve.")
 
         if wcs is None:
             raise ValueError(f"Cannot determine pointing for telescope {telescope}.")

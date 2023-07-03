@@ -103,6 +103,12 @@ async def expose(
     default=True,
     help="Whether apply the measured corrections.",
 )
+@click.option(
+    "--use-individual-images",
+    is_flag=True,
+    default=True,
+    help="Whether to use individual images to generate the WCS.",
+)
 async def start(
     command: GuiderCommand,
     fieldra: float,
@@ -110,6 +116,7 @@ async def start(
     exposure_time: float = 5.0,
     reference_pixel: tuple[float, float] | None = None,
     apply_corrections: bool = True,
+    use_individual_images: bool = False,
 ):
     """Starts the guide loop."""
 
@@ -128,6 +135,7 @@ async def start(
                 guider.guide_one(
                     exposure_time,
                     apply_correction=apply_corrections,
+                    use_individual_images=use_individual_images,
                 )
             )
             await actor.guide_task
