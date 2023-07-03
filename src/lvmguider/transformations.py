@@ -6,16 +6,19 @@
 # @Filename: transformations.py
 # @License: BSD 3-clause (http://www.opensource.org/licenses/BSD-3-Clause)
 
+import pathlib
 import warnings
 from datetime import datetime
 
 import numpy
 import pandas
-from astropy.coordinates import EarthLocation
+from astropy.coordinates import EarthLocation, SkyCoord
 from astropy.io import fits
 from astropy.time import Time
+from astropy.wcs import WCS
+from astropy.wcs.utils import fit_wcs_from_points, pixel_to_skycoord
 
-from lvmguider.astrometrynet import astrometrynet_quick
+from lvmguider.astrometrynet import AstrometrySolution, astrometrynet_quick
 from lvmguider.extraction import extract_marginal
 from lvmguider.tools import get_proc_path
 
@@ -53,8 +56,9 @@ def rot_shift_locs(
 
     """
 
-    # Get best-fit rotation and shift, based on NonLinLSQ_Fit.py
+    camera = camera.lower()
 
+    # Get best-fit rotation and shift, based on NonLinLSQ_Fit.py
     if rot_shift is None:  # Use Best-Fit values from Suff_AGC.docx
         # Best-fit rotations and shifts
         # Last one is Sci on-axis for 21 Feb 23 - see Doc
@@ -167,7 +171,8 @@ def solve_locs(
     }
 
     locs = locs.copy()
-    locs = locs.rename(columns={"x_master": "x", "y_master": "y"})
+    if full_frame:
+        locs = locs.rename(columns={"x_master": "x", "y_master": "y"})
 
     solution = astrometrynet_quick(
         index_paths,
@@ -393,3 +398,191 @@ def delta_radec2mot_axis(ra_ref, dec_ref, ra_new, dec_new):
     sel_diff_arcsec = sel_diff_d * -3600.0
 
     return saz_diff_arcsec, sel_diff_arcsec
+
+
+def wcs_from_single_cameras(
+    files: list[str | pathlib.Path],
+    telescope: str | None = None,
+    method: str = "astropy",
+    reextract_sources: bool = False,
+    astrometrynet_params: dict = {},
+):
+    if len(files) == 0:
+        raise ValueError("No files provided.")
+
+    solutions: dict[str, AstrometrySolution] = {}
+
+    for file in files:
+        file = pathlib.Path(file).absolute()
+        header = fits.getheader(file)
+        camname = header["CAMNAME"].lower()
+        ra = header["RA"]
+        dec = header["DEC"]
+        telescope = telescope or header["TELESCOP"].lower()
+
+        if reextract_sources is False:
+            try:
+                sources = pandas.DataFrame(fits.getdata(file, "SOURCES"))
+            except KeyError:
+                warnings.warn("SOURCES ext not found. Extracting sources", UserWarning)
+                return wcs_from_single_cameras(
+                    files,
+                    telescope=telescope,
+                    reextract_sources=True,
+                    astrometrynet_params=astrometrynet_params,
+                )
+        else:
+            hdul = fits.open(file)
+            if "PROC" in hdul:
+                data = hdul["PROC"].data
+            else:
+                data = hdul[0].data
+            sources = extract_marginal(data)
+            sources["camera"] = camname
+
+        if "output_root" not in astrometrynet_params:
+            # Generate root path for astrometry files.
+            basename = file.name.replace(".fits", "")
+            output_root = str(file.parent / "astrometry" / basename)
+            astrometrynet_params["output_root"] = output_root
+
+        xy = sources[["x", "y"]].values
+
+        camera = f"{telescope}-{camname[0]}"
+        file_locs, _ = rot_shift_locs(camera, xy)
+        sources.loc[:, ["x_master", "y_master"]] = file_locs
+
+        camera_solution = solve_locs(
+            sources,
+            ra,
+            dec,
+            full_frame=False,
+            **astrometrynet_params,
+        )
+
+        solutions[camname] = camera_solution
+
+    if len(solutions) == 0:
+        raise ValueError("No solutions found.")
+
+    if method == "astropy":
+        all_stars = pandas.concat(
+            [ss.stars for ss in solutions.values() if ss.stars is not None]
+        )
+        if len(all_stars) == 0:
+            raise ValueError("No solved fields found.")
+
+        skycoords = SkyCoord(
+            ra=all_stars.index_ra,
+            dec=all_stars.index_dec,
+            unit="deg",
+            frame="icrs",
+        )
+        wcs = fit_wcs_from_points((all_stars.x_master, all_stars.y_master), skycoords)
+
+    elif method == "tom":
+        if len(solutions) != 2:
+            raise ValueError("Tom's method requires two cameras.")
+
+        west_wcs = solutions["west"].wcs
+        east_wcs = solutions["east"].wcs
+
+        assert west_wcs and east_wcs, "Found unsolved fields."
+
+        west_sky = west_wcs.pixel_to_world(*XZ_FRAME)
+
+        # RA, Dec of central pixel of West AG Camera
+        CRVAL = numpy.array([west_sky.ra.deg, west_sky.dec.deg])  # type:ignore
+        # Pixel location in MF of central px of W camera
+        CRPIX = rot_shift_locs(f"{telescope}-w", numpy.array([XZ_FRAME]))[0][0]
+
+        deg_per_pix = 1.0089 / 3600.0  # Pixel scale in degrees / pixel
+        CDELT = numpy.array([-1.0 * deg_per_pix, deg_per_pix])  # CDELT entity for WCS
+
+        # Derive positon angle of field
+        # West point in AG frame
+        west_PA = master_frame_to_ag(f"{telescope}-w", numpy.array([[700.0, 1000.0]]))
+        # and East point
+        east_PA = master_frame_to_ag(f"{telescope}-e", numpy.array([[4300.0, 1000.0]]))
+
+        # Get sky coords of these pixels
+        wPA_sky = pixel_to_skycoord(west_PA[0][0], west_PA[0][1], west_wcs)
+        ePA_sky = pixel_to_skycoord(east_PA[0][0], east_PA[0][1], east_wcs)
+
+        # This is the angle we need
+        west_pa = wPA_sky.position_angle(ePA_sky).degree  # type: ignore
+        PA = numpy.radians((west_pa + 90.0) % 360)
+
+        # Rotation matrix
+        PC = numpy.array(
+            [
+                [numpy.cos(PA), -numpy.sin(PA)],
+                [numpy.sin(PA), numpy.cos(PA)],
+            ]
+        )
+
+        # Assemble WCS
+        wcs = WCS(naxis=2)  # Create new WCS entity
+        wcs.wcs.ctype = ["RA---TAN", "DEC--TAN"]  # Set CTYPE
+        wcs.wcs.crpix = CRPIX  # Reference pixel indices
+        wcs.wcs.crval = CRVAL  # Reference pixel RA/Dec
+        wcs.wcs.cdelt = CDELT  # Pixel scale in deg/px
+        wcs.wcs.pc = PC  # Rotation matrix
+
+    else:
+        raise ValueError("Invalid method.")
+
+    return wcs, solutions
+
+
+def master_frame_to_ag(camera: str, locs: numpy.ndarray):
+    """Transforms the star locations from the master frame
+    to the internal pixel locations in the AG frame.
+
+    Adapted from Tom Herbst.
+
+    Parameters
+    ----------
+    camera:
+        Which AG camera: ``skyw-e``, ``skyw-w``, ``sci-c``, ``sci-e``, ``sci-w``,
+        ``skye-e``, ``skye-w``, or ``spec-e``.
+    locs
+        Numpy 2D array of (x, y) star locations.
+    Returns
+    -------
+    ag_loc
+        Array of corresponding star locations in the AG frame.
+
+    """
+
+    camera = camera.lower()
+
+    met_data = {
+        "skyw-w": [-89.85, -76.53, 430.64],
+        "skyw-e": [90.16, 3512.90, 433.74],
+        "sci-w": [-89.84, -28.26, 415.33],
+        "sci-e": [89.98, 3512.74, 447.25],
+        "spec-e": [89.60, 3193.11, 504.26],
+        "skye-w": [-90.69, -79.54, 436.38],
+        "skye-e": [89.71, 3476.00, 457.13],
+        "sci-c": [-89.995, 1707.4, 426.62],
+    }
+
+    # Pull out correct best-fit rotation and shift
+    bF = met_data[camera]
+    th, Sx, Sz = (numpy.radians(bF[0]), bF[1], bF[2])
+
+    # Rotation matrix
+    M = numpy.array(([numpy.cos(th), -numpy.sin(th)], [numpy.sin(th), numpy.cos(th)]))
+
+    # 2xnPts rotation offset
+    rOff = numpy.tile(numpy.array([[800.0, 550.0]]).transpose(), (1, locs.shape[0]))
+
+    # Make 2xnPts Sx,Sz offset matrix
+    off = numpy.tile(numpy.array([[Sx, Sz]]).transpose(), (1, locs.shape[0]))
+
+    # Transform MF --> AG. See Single_Sensor_Solve doc
+    rsLoc = numpy.dot(M, (locs.T - rOff - off)) + rOff
+
+    # Return calculated positions (need to transpose for standard layout)
+    return rsLoc.T
