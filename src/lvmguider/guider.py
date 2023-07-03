@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from astropy.wcs import WCS
 
     from lvmguider.actor import GuiderCommand
+    from lvmguider.astrometrynet import AstrometrySolution
 
 
 class Guider:
@@ -230,8 +231,10 @@ class Guider:
 
         pixel = pixel or XZ_FULL_FRAME
 
-        wcs: WCS
-        wcs, _ = await run_in_executor(solve_from_files, filenames, telescope)
+        solution: AstrometrySolution
+        solution = await run_in_executor(solve_from_files, filenames, telescope)
+
+        wcs = solution.wcs
 
         if wcs is None:
             raise ValueError(f"Cannot determine pointing for telescope {telescope}.")

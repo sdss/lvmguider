@@ -194,7 +194,7 @@ def reprocess_proc_image(
     xyls.rename(columns={"x_master": "x", "y_master": "y"}, inplace=True)
 
     try:
-        new_wcs, _ = solve_locs(
+        solution = solve_locs(
             xyls,
             ra=ra,
             dec=dec,
@@ -203,8 +203,10 @@ def reprocess_proc_image(
             scales=scales,
             output_root=output_root if generate_astrometrynet_outputs else None,
         )
+        new_wcs = solution.wcs
     except RuntimeError:
         print(f"[WARNING]: Failed solving {filename}.")
+        solution = None
         new_wcs = None
 
     with fits.open(str(proc_new), "update") as hdul:
@@ -227,7 +229,7 @@ def reprocess_proc_image(
         for camname in ["east", "west"]:
             sources_cam = new_sources.loc[new_sources.camera == camname]
 
-            wcs, *_ = astrometrynet_quick(
+            solution = astrometrynet_quick(
                 {5200: "/data/astrometrynet/5200"},
                 sources_cam,
                 ra=ra,
@@ -241,19 +243,17 @@ def reprocess_proc_image(
                 output_root=(output_root + f"_{camname}") if output_root else None,
             )
 
-            if wcs is None:
-                print(f"[WARNING]: Failed solving {filename} ({camname}).")
-
             with fits.open(str(proc_new), "update") as hdul:
                 new_hdu = fits.ImageHDU(name=camname.upper())
-                if wcs:
-                    new_hdu.header += wcs.to_header(relax=True)
+                if solution.wcs:
+                    new_hdu.header += solution.wcs.to_header(relax=True)
                     new_hdu.header["SOLVED"] = True
                 else:
+                    print(f"[WARNING]: Failed solving {filename} ({camname}).")
                     new_hdu.header["SOLVED"] = False
                 hdul.append(new_hdu)
 
-    return new_wcs
+    return solution
 
 
 def reprocess_files(
@@ -264,6 +264,7 @@ def reprocess_files(
     generate_astrometrynet_outputs: bool = False,
     index_paths: dict[int, str] | None = None,
     scales: dict[int, list[int]] | None = None,
+    **kwargs,
 ):
     """Reprocesses raw files.
 
@@ -285,7 +286,7 @@ def reprocess_files(
         else None
     )
 
-    wcs, new_sources = solve_from_files(
+    solution, new_sources = solve_from_files(
         filenames,
         telescope,
         reextract_sources=True,
@@ -293,14 +294,15 @@ def reprocess_files(
             "index_paths": index_paths,
             "output_root": output_root,
             "scales": scales,
+            **kwargs,
         },
     )
-    assert wcs
+    assert solution.wcs
 
     new_sources_t = Table.from_pandas(new_sources)
     hdul = fits.HDUList(
         [
-            fits.PrimaryHDU(header=wcs.to_header(relax=True)),
+            fits.PrimaryHDU(header=solution.wcs.to_header(relax=True)),
             fits.BinTableHDU(data=new_sources_t, name="SOURCES"),
         ]
     )
@@ -313,7 +315,7 @@ def reprocess_files(
         for camname in ["east", "west"]:
             sources_cam = new_sources.loc[new_sources.camera == camname]
 
-            wcs, *_ = astrometrynet_quick(
+            cam_solution = astrometrynet_quick(
                 {5200: "/data/astrometrynet/5200"},
                 sources_cam,
                 ra=ra,
@@ -326,19 +328,18 @@ def reprocess_files(
                 plot=False,
                 raise_on_unsolved=True,
                 output_root=(output_root + f"_{camname}") if output_root else None,
+                **kwargs,
             )
 
-            if wcs is None:
-                print(f"[WARNING]: Failed solving {camname}.")
-
             new_hdu = fits.ImageHDU(name=camname.upper())
-            if wcs:
-                new_hdu.header += wcs.to_header(relax=True)
+            if cam_solution.wcs:
+                new_hdu.header += cam_solution.wcs.to_header(relax=True)
                 new_hdu.header["SOLVED"] = True
             else:
+                print(f"[WARNING]: Failed solving {camname}.")
                 new_hdu.header["SOLVED"] = False
             hdul.append(new_hdu)
 
     hdul.writeto(str(proc_output_path), overwrite=True)
 
-    return wcs
+    return solution

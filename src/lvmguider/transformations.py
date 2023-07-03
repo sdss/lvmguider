@@ -14,7 +14,6 @@ import pandas
 from astropy.coordinates import EarthLocation
 from astropy.io import fits
 from astropy.time import Time
-from astropy.wcs.utils import pixel_to_skycoord
 
 from lvmguider.astrometrynet import astrometrynet_quick
 from lvmguider.extraction import extract_marginal
@@ -108,6 +107,7 @@ def solve_locs(
     scales: dict[int, list[int]] | None = None,
     output_root: str | None = None,
     verbose=False,
+    **astrometrynet_kwargs,
 ):
     """Use astrometry.net to solve field, given a series of star locations.
 
@@ -137,6 +137,8 @@ def solve_locs(
         files.
     verbose
         Output additional information.
+    astrometrynet_kwargs
+        Arguments to pass directly to `.astrometrynet_quick`.
 
     Returns
     -------
@@ -167,7 +169,7 @@ def solve_locs(
     locs = locs.copy()
     locs = locs.rename(columns={"x_master": "x", "y_master": "y"})
 
-    wcs, *_ = astrometrynet_quick(
+    solution = astrometrynet_quick(
         index_paths,
         locs,
         ra=ra,
@@ -182,35 +184,14 @@ def solve_locs(
         raise_on_unsolved=True,
         plot=True,
         output_root=output_root,
+        **astrometrynet_kwargs,
     )
 
     if verbose:
         print("")
-        print("Solution has match ? ", wcs is not None)
+        print("Solution has match ? ", solution.solved)
 
-    if wcs is None:
-        return (None, None)
-
-    # Calculate center and rotation of field
-
-    tM = wcs.wcs.cd  # Transformation matrix
-    angSlv = numpy.degrees(numpy.arctan2(tM[0, 0], tM[1, 0]))  # Angle from scaling
-
-    raSlv = pixel_to_skycoord(midX, midZ, wcs).ra
-    deSlv = pixel_to_skycoord(midX, midZ, wcs).dec
-
-    pxScl = numpy.abs(tM[0, 0] * 3600)
-
-    solveInfo = [[raSlv, deSlv], angSlv, pxScl]  # Solve information
-
-    if verbose:
-        print("Central pixel         :", midX, midZ)
-        print("RA central pixel      :", raSlv)
-        print("Dec central pixel     :", deSlv)
-        print("Field rotation (deg)  :", angSlv)
-        print("Pixel scale           :", pxScl)
-
-    return wcs, solveInfo
+    return solution
 
 
 def solve_from_files(
@@ -293,7 +274,7 @@ def solve_from_files(
         output_root = str(dirname / "astrometry" / proc_base)
         solve_locs_kwargs["output_root"] = output_root
 
-    wcs, _ = solve_locs(
+    solution = solve_locs(
         locs[["x_master", "y_master", "flux"]],
         ra=ra,
         dec=dec,
@@ -301,7 +282,7 @@ def solve_from_files(
         **solve_locs_kwargs,
     )
 
-    return wcs, locs
+    return solution, locs
 
 
 def radec2azel(raD, decD, lstD):

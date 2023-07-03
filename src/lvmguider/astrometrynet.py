@@ -15,6 +15,7 @@ import subprocess
 import tempfile
 import time
 import warnings
+from dataclasses import dataclass
 from glob import glob
 
 from typing import NamedTuple, Optional, TypeVar
@@ -315,7 +316,7 @@ class AstrometryNet:
 
 def astrometrynet_quick(
     index_paths: dict[int, str],
-    regions: pandas.DataFrame | Table | numpy.ndarray,
+    regions: pandas.DataFrame,
     ra: float,
     dec: float,
     pixel_scale: float,
@@ -330,7 +331,7 @@ def astrometrynet_quick(
     cpulimit: int = 30,
     raise_on_unsolved: bool = False,
     **kwargs,
-):
+) -> AstrometrySolution:
     """Quickly process a set of detections using astrometry.net.
 
     Parameters
@@ -380,21 +381,15 @@ def astrometrynet_quick(
 
     Returns
     -------
-    wcs
-        An astropy WCS with the solved field, or `None` if the field could
-        not be solved.
-    stdout
-        The stdout generated, as a string.
-    stderr
-        The stderr generated, as a string.
+    solution
+        An `.AstrometrySolution` object with the astrometric solution.
 
     """
 
-    if not isinstance(regions, Table):
-        regions = pandas.DataFrame(regions)
-        xyls = Table.from_pandas(regions)
-    else:
-        xyls = regions
+    if "flux" not in regions:
+        regions.loc[:, "flux"] = 1
+
+    xyls = Table.from_pandas(regions)
 
     if output_root:
         output_root = os.path.abspath(output_root)
@@ -404,6 +399,8 @@ def astrometrynet_quick(
 
     dirname = os.path.dirname(output_root)
     outfile = os.path.basename(output_root)
+
+    corr_file = os.path.join(dirname, outfile + ".corr")
 
     if not os.path.exists(dirname):
         os.makedirs(dirname, exist_ok=True)
@@ -440,6 +437,7 @@ def astrometrynet_quick(
         scale_units="arcsecperpix",
         sort_column="flux",
         radius=radius,
+        corr=corr_file,
     )
     opts.update(kwargs)
 
@@ -464,19 +462,87 @@ def astrometrynet_quick(
         dec=dec,
     )
 
-    if wcs_output.exists():
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            wcs = WCS(open(wcs_output).read(), relax=True)
-        wcs_output.unlink()
-        return wcs, open(stdout).read(), open(stderr).read()
-    else:
+    stdout_s = open(stdout).read() if os.path.exists(stdout) else ""
+    stderr_s = open(stderr).read() if os.path.exists(stderr) else ""
+
+    solution = AstrometrySolution(wcs=None, xyls=xyls.to_pandas(), stdout="", stderr="")
+
+    if not wcs_output.exists():
         if raise_on_unsolved:
-            if os.path.exists(stdout):
-                stdout_s = open(stdout).read()
-                stderr_s = open(stderr).read()
+            if stdout_s != "":
                 raise RuntimeError(stdout_s + "\n" + stderr_s)
             else:
                 raise RuntimeError("Unexpected error. No stderr was generated.")
+        else:
+            return solution
 
-    return (None, "", "")
+    warnings.simplefilter("ignore")
+    wcs = WCS(open(wcs_output).read(), relax=True)
+
+    solution.wcs = wcs
+    solution.stdout = open(stdout).read()
+    solution.stderr = open(stderr).read()
+
+    if os.path.exists(corr_file):
+        stars = Table.read(corr_file).to_pandas()
+        solution.stars = stars
+
+    return solution
+
+
+@dataclass
+class AstrometrySolution:
+    """An astrometric solution."""
+
+    wcs: WCS | None
+    xyls: pandas.DataFrame
+    stdout: str
+    stderr: str
+    stars: pandas.DataFrame | None = None
+
+    def __repr__(self) -> str:
+        return f"<AstrometrySolution (solved={self.solved})>"
+
+    @property
+    def solved(self):
+        """Whether a solution was found."""
+
+        return self.wcs is not None
+
+    @property
+    def transformation_matrix(self):
+        """Returns the transformation matrix."""
+
+        if not self.wcs:
+            raise RuntimeError("No solution found.")
+
+        return self.wcs.wcs.cd
+
+    @property
+    def rotation(self):
+        """Returns the rotation angle."""
+
+        if not self.wcs:
+            raise RuntimeError("No solution found.")
+
+        tm = self.transformation_matrix
+        return numpy.degrees(numpy.arctan2(tm[0, 0], tm[1, 0]))
+
+    @property
+    def pixel_scale(self):
+        """Returns the pixel scale."""
+
+        if not self.wcs:
+            raise RuntimeError("No solution found.")
+
+        tm = self.transformation_matrix
+
+        return numpy.abs(tm[0, 0] * 3600)
+
+    def pixel_to_world(self, x: float, y: float):
+        """Returns the sky coordinate for a pixel position."""
+
+        if not self.wcs:
+            raise RuntimeError("No solution found.")
+
+        return self.wcs.pixel_to_world(x, y)
