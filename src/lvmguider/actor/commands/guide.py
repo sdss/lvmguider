@@ -101,18 +101,21 @@ async def expose(
     "--apply-corrections/--no-apply-corrections",
     is_flag=True,
     default=True,
+    show_default=True,
     help="Whether apply the measured corrections.",
 )
 @click.option(
     "--use-motor-offsets/--no-use-motor-offsets",
     is_flag=True,
     default=True,
+    show_default=True,
     help="Whether to apply corrections as motor offsets.",
 )
 @click.option(
-    "--use-individual-images",
+    "--use-individual-images/--no-use-individual-images",
     is_flag=True,
-    default=False,
+    default=True,
+    show_default=True,
     help="Whether to use individual images to generate the WCS.",
 )
 @click.option(
