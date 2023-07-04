@@ -61,6 +61,9 @@ class Cameras:
     ) -> tuple[list[str], list[pandas.DataFrame] | None]:
         """Exposes the cameras and returns the filenames."""
 
+        command.actor.status |= GuiderStatus.EXPOSING
+        command.actor.status &= ~GuiderStatus.IDLE
+
         # Update the status of the telescope.
         await command.send_command(self.pwi, "status", internal=True)
         await command.send_command(self.foc, "status", internal=True)
@@ -69,20 +72,15 @@ class Cameras:
 
         next_seqno = self.get_next_seqno()
 
-        command.actor.status |= GuiderStatus.EXPOSING
-        command.actor.status &= ~GuiderStatus.IDLE
-
         command.debug(f"Taking agcam exposure {self.telescope}-{next_seqno}.")
         cmd = await command.send_command(
             self.agcam,
             f"expose -n {next_seqno} --{flavour} {exposure_time}",
         )
 
-        command.actor.status &= ~GuiderStatus.EXPOSING
-        command.actor.status |= GuiderStatus.IDLE
-
         if cmd.status.did_fail:
             command.actor.status |= GuiderStatus.FAILED
+            command.actor.status |= GuiderStatus.IDLE
             raise RuntimeError("Failed while exposing cameras.")
         else:
             self.last_seqno = next_seqno
@@ -178,6 +176,9 @@ class Cameras:
                 "fwhm": numpy.round(fwhm, 3) if fwhm else fwhm,
             }
         )
+
+        command.actor.status &= ~GuiderStatus.EXPOSING
+        command.actor.status |= GuiderStatus.IDLE
 
         return (list(filenames), list(sources) if extract_sources else None)
 
