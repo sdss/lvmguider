@@ -8,6 +8,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from typing import TYPE_CHECKING, Any
 
 import numpy
@@ -122,94 +124,62 @@ class Guider:
         except Exception as err:
             raise RuntimeError(f"Failed determining telescope pointing: {err}")
 
+        # Offset is field centre - current pointing.
+        offset_radec, offset_motax, sep = self.calculate_telescope_offset((ra_p, dec_p))
+
         self.command.info(
             measured_pointing={
                 "ra": ra_p,
                 "dec": dec_p,
+                "offset": list(offset_radec),
+                "separation": sep,
             }
         )
 
-        # Offset is field centre - current pointing.
-        offset, offset_motax, sep = self.calculate_telescope_offset((ra_p, dec_p))
-
         # Calculate the correction.
-        offset = numpy.array(offset)
+        corr_radec = numpy.array(offset_radec)  # In RA/Dec
+        corr_radec[0] = self.pid_ra(corr_radec[0])
+        corr_radec[1] = self.pid_dec(corr_radec[1])
 
-        offset_motax = numpy.array(offset_motax)
-        offset_motax[0] = self.pid_ra(offset_motax[0])
-        offset_motax[1] = self.pid_dec(offset_motax[1])
+        corr_motax = numpy.array(offset_motax)  # In motor axes
+        corr_motax[0] = self.pid_ra(corr_motax[0])
+        corr_motax[1] = self.pid_dec(corr_motax[1])
 
-        corr = numpy.array([0.0, 0.0])
-
+        applied_radec = applied_motax = numpy.array([0.0, 0.0])
         try:
             if apply_correction:
-                corr = offset.copy()
-                corr[0] = self.pid_ra(corr[0])
-                corr[1] = self.pid_dec(corr[1])
-                corr = numpy.round(corr, 3)
-
-                if numpy.any(numpy.abs(corr) > 3600):
-                    raise ValueError(
-                        "Correction is too big. Maybe an issue with the "
-                        "astrometric solution?"
-                    )
-
                 self.command.actor.status &= ~GuiderStatus.PROCESSING
                 self.command.actor.status |= GuiderStatus.CORRECTING
 
-                if use_motor_offsets:
-                    await self.offset_telescope(
-                        *offset_motax,
-                        use_motor_axes=use_motor_offsets,
-                    )
-                    corr = offset_motax.copy()
-                else:
-                    await self.offset_telescope(*corr)
-
-        except Exception:
-            corr = numpy.array([0.0, 0.0])
-            raise
+                applied_radec, applied_motax = await self.offset_telescope(
+                    *offset_motax,
+                    use_motor_axes=use_motor_offsets,
+                    max_correction=3600,
+                )
 
         finally:
             self.command.actor.status &= ~GuiderStatus.CORRECTING
 
             self.command.info(
-                pointing_correction={
-                    "separation": sep,
-                    "offset_measured": list(offset),
-                    "offset_applied": list(corr),
+                correction_applied={
+                    "radec_applied": list(numpy.round(applied_radec, 3)),
+                    "motax_applied": list(numpy.round(applied_motax, 3)),
                 }
             )
 
-            # Create new proc- image with astrometric solution and
-            # measured and applied corrections.
-            proc_path = get_proc_path(filenames[0])
-
-            astro_hdu = fits.ImageHDU(name="ASTROMETRY")
-            astro_hdu.header["RAFIELD"] = (self.field_centre[0], "[deg] Field RA")
-            astro_hdu.header["DECFIELD"] = (self.field_centre[1], "[deg] Field Dec")
-            astro_hdu.header["RAMEAS"] = (ra_p, "[deg] Measured RA position")
-            astro_hdu.header["DECMEAS"] = (dec_p, "[deg] Measured Dec position")
-            astro_hdu.header["OFFRAMEA"] = (offset[0], "[arcsec] RA measured offset")
-            astro_hdu.header["OFFDEMEA"] = (offset[1], "[arcsec] Dec measured offset")
-            astro_hdu.header["OFFRACOR"] = (corr[0], "[arcsec] RA applied correction")
-            astro_hdu.header["OFFDECOR"] = (corr[1], "[arcsec] Dec applied correction")
-            astro_hdu.header["RAKP"] = (self.pid_ra.Kp, "RA PID K term")
-            astro_hdu.header["RAKI"] = (self.pid_ra.Ki, "RA PID I term")
-            astro_hdu.header["RAKD"] = (self.pid_ra.Kd, "RA PID D term")
-            astro_hdu.header["DECKP"] = (self.pid_dec.Kp, "Dec PID K term")
-            astro_hdu.header["DECKI"] = (self.pid_dec.Ki, "Dec PID I term")
-            astro_hdu.header["DECKD"] = (self.pid_dec.Kd, "Dec PID D term")
-            astro_hdu.header += wcs.to_header()
-
-            proc_hdu = fits.HDUList([fits.PrimaryHDU(), astro_hdu])
-            proc_hdu.append(
-                fits.BinTableHDU(
-                    data=Table.from_pandas(pandas.concat(sources)),
-                    name="SOURCES",
+            asyncio.create_task(
+                self.write_proc_file(
+                    filenames=filenames,
+                    wcs=wcs,
+                    ra_p=ra_p,
+                    dec_p=dec_p,
+                    offset_radec=tuple(offset_radec),
+                    corr_radec=tuple(corr_radec),
+                    corr_motax=tuple(corr_motax),
+                    sources=list(sources),
+                    is_acquisition=True,
                 )
             )
-            proc_hdu.writeto(str(proc_path))
 
     async def determine_pointing(
         self,
@@ -316,32 +286,139 @@ class Guider:
 
     async def offset_telescope(
         self,
-        ra_off: float,
-        dec_off: float,
+        off0: float,
+        off1: float,
         use_motor_axes: bool = False,
+        max_correction: float | None = None,
     ):
         """Sends a correction offset to the telescope.
 
         Parameters
         ----------
-        ra_off
-            The RA offset, in arcsec.
-        dec_off
-            The Dec offset, in arcsec.
+        off0
+            Offset in the first axis, in arcsec.
+        off1
+            Offset in the second axis, in arcsec.
+        use_motor_axes
+            Whether to apply the corrections as motor axes offsets.
+        max_correction
+            Maximum allowed correction. If any of the axes corrections is larger
+            than this value an exception will be raised.
+
+        Returns
+        -------
+        applied_radec
+            The applied correction in RA and Dec in arcsec. If the correction
+            is actually applied as motor offsets, this value is estimated from
+            them.
+        applied_motax
+            The applied correction in motor axes in arcsec. Zero if the correction
+            is applied as RA/Dec.
 
         """
+
+        if numpy.any(numpy.abs([off0, off1]) > max_correction):
+            raise ValueError("Requested correction is too big. Not applying it.")
 
         telescope = self.command.actor.telescope
         pwi = f"lvm.{telescope}.pwi"
 
+        applied_radec = numpy.array([0.0, 0.0])
+        applied_motax = numpy.array([0.0, 0.0])
+
         if use_motor_axes is False:
-            cmd_str = f"offset --ra_add_arcsec {ra_off} --dec_add_arcsec {dec_off}"
+            cmd_str = f"offset --ra_add_arcsec {off0} --dec_add_arcsec {off1}"
+            applied_radec = numpy.array([off0, off1])
         else:
-            cmd_str = f"offset --axis0_add_arcsec {ra_off} --axis1_add_arcsec {dec_off}"
+            cmd_str = f"offset --axis0_add_arcsec {off0} --axis1_add_arcsec {off1}"
+            applied_motax = numpy.array([off0, off1])
+            # TODO: calculate applied_radec here. Maybe Tom has the
+            # delta_mot_axis2radec equivalent, if not it should not be hard
+            # to derive.
 
         cmd = await self.command.send_command(pwi, cmd_str)
 
         if cmd.status.did_fail:
             raise RuntimeError(f"Failed offsetting telescope {telescope}.")
 
-        return True
+        return applied_radec, applied_motax
+
+    async def write_proc_file(
+        self,
+        filenames: list[str],
+        wcs: WCS,
+        ra_p: float,
+        dec_p: float,
+        offset_radec: tuple[float, float],
+        corr_radec: tuple[float, float],
+        corr_motax: tuple[float, float],
+        sources: list[pandas.DataFrame],
+        is_acquisition=True,
+    ):
+        """Writes a ``proc-`` image with the astrometric info and applied corrections.
+
+        Parameters
+        ----------
+        filenames
+            A list of the paths of the individual AG frames used for the solution.
+        wcs
+            The master frame WCS. If ``is_acquisition=False``, this is the WCS of
+            the master frame in the reference image.
+        ra_p
+            RA of the pointing
+        dec_p
+            Dec of the pointing.
+        offset_radec
+            Measured offset, in arcsec, in the RA/Dec direction.
+        offset_motax
+            Measured offset, in arcsec, in the motor axes direction.
+        corr_radec
+            Correction applied, in arcsec, in the RA/Dec direction.
+        corr_motax
+            Correction applied, in arcsec, in the motor axes direction.
+        sources
+            A list of the extracted sources in each AG frame.
+        is_acquisition
+            `True` if this was an acquisition step. `False` if guiding.
+
+        """
+
+        proc_path = get_proc_path(filenames[0])
+
+        astro_hdu = fits.ImageHDU(name="ASTROMETRY")
+        astro_hdr = astro_hdu.header
+
+        astro_hdr["ACQUISIT"] = (is_acquisition, "Acquisition or guiding?")
+
+        for fn, file_ in enumerate(filenames):
+            astro_hdr[f"FILE{fn}"] = (str(file_), f"AG frame {fn}")
+
+        astro_hdr["RAFIELD"] = (self.field_centre[0], "[deg] Field RA")
+        astro_hdr["DECFIELD"] = (self.field_centre[1], "[deg] Field Dec")
+        astro_hdr["RAMEAS"] = (ra_p, "[deg] Measured RA position")
+        astro_hdr["DECMEAS"] = (dec_p, "[deg] Measured Dec position")
+        astro_hdr["OFFRAMEA"] = (offset_radec[0], "[arcsec] RA measured offset")
+        astro_hdr["OFFDEMEA"] = (offset_radec[1], "[arcsec] Dec measured offset")
+        astro_hdr["RACORR"] = (corr_radec[0], "[arcsec] RA applied correction")
+        astro_hdr["DECORR"] = (corr_radec[1], "[arcsec] Dec applied correction")
+        astro_hdr["AX0CORR"] = (corr_motax[0], "[arcsec] Motor axis 0 applied offset")
+        astro_hdr["AX1CORR"] = (corr_motax[1], "[arcsec] Motor axis 1 applied offset")
+        astro_hdr["RAKP"] = (self.pid_ra.Kp, "RA PID K term")
+        astro_hdr["RAKI"] = (self.pid_ra.Ki, "RA PID I term")
+        astro_hdr["RAKD"] = (self.pid_ra.Kd, "RA PID D term")
+        astro_hdr["DECKP"] = (self.pid_dec.Kp, "Dec PID K term")
+        astro_hdr["DECKI"] = (self.pid_dec.Ki, "Dec PID I term")
+        astro_hdr["DECKD"] = (self.pid_dec.Kd, "Dec PID D term")
+        astro_hdr += wcs.to_header()
+
+        proc_hdu = fits.HDUList([fits.PrimaryHDU(), astro_hdu])
+        proc_hdu.append(
+            fits.BinTableHDU(
+                data=Table.from_pandas(pandas.concat(sources)),
+                name="SOURCES",
+            )
+        )
+        proc_hdu.writeto(str(proc_path))
+
+        self.command.info(proc_path=str(proc_path))
+        return proc_path
