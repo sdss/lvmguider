@@ -28,7 +28,7 @@ XZ_FULL_FRAME = (2500.0, 1000.0)
 XZ_AG_FRAME = (800.0, 550.0)
 
 
-def rot_shift_locs(
+def ag_to_master_frame(
     camera: str,
     in_locs: numpy.ndarray,
     rot_shift: tuple | None = None,
@@ -83,7 +83,7 @@ def rot_shift_locs(
 
     if verbose:
         print("")
-        print("rot_shift_locs: rot_shift for ", camera, numpy.degrees(th), Sx, Sz)
+        print("ag_to_master_frame: rot_shift for ", camera, numpy.degrees(th), Sx, Sz)
         print("")
 
     # Rotation matrix
@@ -272,7 +272,7 @@ def solve_from_files(
         xy = sources[["x", "y"]].values
 
         camera = f"{telescope}-{camname[0]}"
-        file_locs, _ = rot_shift_locs(camera, xy)
+        file_locs, _ = ag_to_master_frame(camera, xy)
         sources.loc[:, ["x_master", "y_master"]] = file_locs
         mf_sources.append(sources)
 
@@ -488,10 +488,8 @@ def wcs_from_single_cameras(
             solve_locs_kwargs_cam["output_root"] = output_root
 
         camera = f"{telescope}-{camname[0]}"
-        mf_locs, _ = rot_shift_locs(
-            camera,
-            sources.loc[:, ["x", "y"]].to_numpy(),
-        )
+        xy = sources.loc[:, ["x", "y"]].to_numpy()
+        mf_locs, _ = ag_to_master_frame(camera, xy)
         sources.loc[:, ["x_master", "y_master"]] = mf_locs
 
         camera_solution = solve_locs(
@@ -523,7 +521,7 @@ def wcs_from_single_cameras(
     # Build a master frame WCS from the individual WCS solutions. We implement two
     # methods. Astropy uses the fit_wcs_from_points routine, where we use the
     # coordinates of the stars identified by astrometry.net and their corresponding
-    # xy pixels on the master frame (as determined above with rot_shift_locs).
+    # xy pixels on the master frame (as determined above with ag_to_master_frame).
     # Tom's method manually builds the WCS using the individual WCS solutions.
     if method == "astropy":
         all_stars = pandas.concat(
@@ -554,7 +552,7 @@ def wcs_from_single_cameras(
         # RA, Dec of central pixel of West AG Camera
         CRVAL = numpy.array([west_sky.ra.deg, west_sky.dec.deg])  # type:ignore
         # Pixel location in MF of central px of W camera
-        CRPIX = rot_shift_locs(f"{telescope}-w", numpy.array([XZ_AG_FRAME]))[0][0]
+        CRPIX = ag_to_master_frame(f"{telescope}-w", numpy.array([XZ_AG_FRAME]))[0][0]
 
         deg_per_pix = 1.0089 / 3600.0  # Pixel scale in degrees / pixel
         CDELT = numpy.array([-1.0 * deg_per_pix, deg_per_pix])  # CDELT entity for WCS

@@ -152,7 +152,7 @@ def reprocess_proc_image(
     """Reprocesses a proc- file."""
 
     from lvmguider.astrometrynet import astrometrynet_quick
-    from lvmguider.transformations import rot_shift_locs, solve_locs
+    from lvmguider.transformations import ag_to_master_frame, solve_locs
 
     proc_orig = pathlib.Path(filename).absolute()
     output_path = pathlib.Path(output_path).absolute()
@@ -183,7 +183,7 @@ def reprocess_proc_image(
         xy = sources_cam[["x", "y"]].values
 
         camera = f"{telescope}-{camname[0]}"
-        file_locs, _ = rot_shift_locs(camera, xy)
+        file_locs, _ = ag_to_master_frame(camera, xy)
         sources_cam.loc[:, ["x_master", "y_master"]] = file_locs
         new_sources_cam.append(sources_cam)
 
