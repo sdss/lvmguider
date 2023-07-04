@@ -11,6 +11,8 @@ pid:
     Ki: 0.0
     Kd: 0.0
 
+max_correction: 3600
+
 actor:
   name: lvm.skye.guider
   host: 10.8.38.21
