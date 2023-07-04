@@ -65,8 +65,7 @@ sphinx-jsonschema = ">=1.16.11"
 myst-parser = ">=0.15.2"
 nox = ">=2021.6.12"
 sphinx-autobuild = ">=2021.3.14"
-pyds9 = "^1.8.1"
-pandas-stubs = "^2.0.2.230605"
+pandas-stubs = ">=2.0.2.230605"
 
 [tool.black]
 line-length = 88
