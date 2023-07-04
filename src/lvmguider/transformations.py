@@ -759,8 +759,8 @@ def calculate_guide_offset(
     offset_ra_d, offset_dec_d = PC @ numpy.array([offset_x, offset_y])
 
     # To arcsec.
-    offset_ra_arcsec = offset_ra_d * 3600
-    offset_dec_arcsec = offset_dec_d * 3600
+    offset_ra_arcsec = numpy.mean(offset_ra_d * 3600)
+    offset_dec_arcsec = numpy.mean(offset_dec_d * 3600)
 
     # Calculate separation. This is somewhat approximate but good enough
     # for small angles.
