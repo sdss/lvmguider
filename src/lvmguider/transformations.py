@@ -487,24 +487,21 @@ def wcs_from_single_cameras(
             output_root = str(file.parent / "astrometry" / basename)
             solve_locs_kwargs_cam["output_root"] = output_root
 
+        camera = f"{telescope}-{camname[0]}"
+        mf_locs, _ = rot_shift_locs(
+            camera,
+            sources.loc[:, ["x", "y"]].to_numpy(),
+        )
+        sources.loc[:, ["x_master", "y_master"]] = mf_locs
+
         camera_solution = solve_locs(
-            sources[["x", "y", "flux"]],
+            sources,
             ra,
             dec,
             full_frame=False,
             raise_on_unsolved=False,
             **solve_locs_kwargs_cam,
         )
-
-        # Calculate master frame coordinates for the pixels of the stars
-        # identified by astrometry.net.
-        if camera_solution.solved and camera_solution.stars is not None:
-            camera = f"{telescope}-{camname[0]}"
-            file_locs, _ = rot_shift_locs(
-                camera,
-                camera_solution.stars.loc[:, ["field_x", "field_y"]].to_numpy(),
-            )
-            camera_solution.stars.loc[:, ["x_master", "y_master"]] = file_locs
 
         solutions[camname] = camera_solution
 
