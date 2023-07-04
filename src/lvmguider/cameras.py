@@ -221,12 +221,7 @@ class Cameras:
         return self.last_seqno + 1
 
     def is_shifted(self, filename: str | numpy.ndarray):
-        """Determines if an image is "shifted".
-
-        Performs a linear fit along the collapsed y direction of the image.
-        In shifted images this results in a very high slope.
-
-        """
+        """Determines if an image is "shifted"."""
 
         data: numpy.ndarray
         if isinstance(filename, (str, pathlib.Path)):
@@ -234,11 +229,12 @@ class Cameras:
         else:
             data = filename
 
-        ydata = data.mean(axis=1)
-        m, _ = numpy.polyfit(numpy.arange(len(ydata)), ydata, 1)
-
-        if abs(m) > 10:
+        # If more than 10% of the pixels have values >32,000 this is probably
+        # a shifted image.
+        npix = data.size
+        if (data > 32000).sum() / npix > 0.1:
             return True
+
         return False
 
     def _get_dark_frame(self, filename: str, cam_name: str):
