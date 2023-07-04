@@ -471,6 +471,23 @@ def wcs_from_single_cameras(
     if len(solutions) == 0:
         raise ValueError("No solutions found.")
 
+    # Check for repeat images, in which East and West are almost identical. In
+    # this case the coordinates of their central pixels will also be very close,
+    # instead of being about a degree apart.
+    wcs_east = solutions["east"].wcs
+    wcs_west = solutions["west"].wcs
+    if telescope != "spec" and wcs_east is not None and wcs_west is not None:
+        east_cen = wcs_east.pixel_to_world(*XZ_AG_FRAME)
+        west_cen = wcs_west.pixel_to_world(*XZ_AG_FRAME)
+        ew_separation = east_cen.separation(west_cen).arcsec
+        if ew_separation < 3000:
+            raise ValueError("Found potential double image.")
+
+    # Build a master frame WCS from the individual WCS solutions. We implement two
+    # methods. Astropy uses the fit_wcs_from_points routine, where we use the
+    # coordinates of the stars identified by astrometry.net and their corresponding
+    # xy pixels on the master frame (as determined above with rot_shift_locs).
+    # Tom's method manually builds the WCS using the individual WCS solutions.
     if method == "astropy":
         all_stars = pandas.concat(
             [ss.stars for ss in solutions.values() if ss.stars is not None]
