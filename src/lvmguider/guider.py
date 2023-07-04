@@ -148,7 +148,7 @@ class Guider:
                 corr[1] = self.pid_dec(corr[1])
                 corr = numpy.round(corr, 3)
 
-                if numpy.any(numpy.abs(corr) > 500):
+                if numpy.any(numpy.abs(corr) > 3600):
                     raise ValueError(
                         "Correction is too big. Maybe an issue with the "
                         "astrometric solution?"
@@ -245,7 +245,7 @@ class Guider:
 
         if not use_individual_images:
             solution: AstrometrySolution
-            solution = await run_in_executor(solve_from_files, filenames, telescope)
+            solution, _ = await run_in_executor(solve_from_files, filenames, telescope)
             wcs = solution.wcs
         else:
             wcs, solutions = await run_in_executor(

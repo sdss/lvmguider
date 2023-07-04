@@ -104,10 +104,21 @@ async def expose(
     help="Whether apply the measured corrections.",
 )
 @click.option(
-    "--use-individual-images",
+    "--use-motor-offsets/--no-use-motor-offsets",
     is_flag=True,
     default=True,
+    help="Whether to apply corrections as motor offsets.",
+)
+@click.option(
+    "--use-individual-images",
+    is_flag=True,
+    default=False,
     help="Whether to use individual images to generate the WCS.",
+)
+@click.option(
+    "--one",
+    is_flag=True,
+    help="Do one single iteration and exit.",
 )
 async def start(
     command: GuiderCommand,
@@ -116,7 +127,9 @@ async def start(
     exposure_time: float = 5.0,
     reference_pixel: tuple[float, float] | None = None,
     apply_corrections: bool = True,
+    use_motor_offsets: bool = True,
     use_individual_images: bool = False,
+    one: bool = False,
 ):
     """Starts the guide loop."""
 
@@ -136,6 +149,7 @@ async def start(
                     exposure_time,
                     apply_correction=apply_corrections,
                     use_individual_images=use_individual_images,
+                    use_motor_offsets=use_motor_offsets,
                 )
             )
             await actor.guide_task
@@ -144,6 +158,9 @@ async def start(
         finally:
             if is_stopping(command):
                 break
+
+        if one:
+            break
 
     actor.status = GuiderStatus.IDLE
 

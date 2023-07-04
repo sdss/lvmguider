@@ -25,7 +25,7 @@ from lvmguider.tools import get_proc_path
 
 # Middle of an AG frame or full frame
 XZ_FULL_FRAME = (2500.0, 1000.0)
-XZ_FRAME = (800.0, 550.0)
+XZ_AG_FRAME = (800.0, 550.0)
 
 
 def rot_shift_locs(
@@ -162,13 +162,15 @@ def solve_locs(
 
     if full_frame:
         midX, midZ = XZ_FULL_FRAME  # Middle of Master Frame
+        index_paths_default = {
+            5200: "/data/astrometrynet/5200",
+            4100: "/data/astrometrynet/4100",
+        }
     else:
-        midX, midZ = XZ_FRAME  # Middle of AG camera Frame
+        midX, midZ = XZ_AG_FRAME  # Middle of AG camera Frame
+        index_paths_default = {5200: "/data/astrometrynet/5200"}
 
-    index_paths = index_paths or {
-        5200: "/data/astrometrynet/5200",
-        4100: "/data/astrometrynet/4100",
-    }
+    index_paths = index_paths or index_paths_default
 
     locs = locs.copy()
     if full_frame:
@@ -446,19 +448,23 @@ def wcs_from_single_cameras(
             output_root = str(file.parent / "astrometry" / basename)
             astrometrynet_params["output_root"] = output_root
 
-        xy = sources[["x", "y"]].values
-
-        camera = f"{telescope}-{camname[0]}"
-        file_locs, _ = rot_shift_locs(camera, xy)
-        sources.loc[:, ["x_master", "y_master"]] = file_locs
-
         camera_solution = solve_locs(
-            sources,
+            sources[["x", "y", "flux"]],
             ra,
             dec,
             full_frame=False,
             **astrometrynet_params,
         )
+
+        # Calculate master frame coordinates for the pixels of the stars
+        # identified by astrometry.net.
+        if camera_solution.solved and camera_solution.stars is not None:
+            camera = f"{telescope}-{camname[0]}"
+            file_locs, _ = rot_shift_locs(
+                camera,
+                camera_solution.stars.loc[:, ["field_x", "field_y"]].to_numpy(),
+            )
+            camera_solution.stars.loc[:, ["x_master", "y_master"]] = file_locs
 
         solutions[camname] = camera_solution
 
@@ -489,17 +495,17 @@ def wcs_from_single_cameras(
 
         assert west_wcs and east_wcs, "Found unsolved fields."
 
-        west_sky = west_wcs.pixel_to_world(*XZ_FRAME)
+        west_sky = west_wcs.pixel_to_world(*XZ_AG_FRAME)
 
         # RA, Dec of central pixel of West AG Camera
         CRVAL = numpy.array([west_sky.ra.deg, west_sky.dec.deg])  # type:ignore
         # Pixel location in MF of central px of W camera
-        CRPIX = rot_shift_locs(f"{telescope}-w", numpy.array([XZ_FRAME]))[0][0]
+        CRPIX = rot_shift_locs(f"{telescope}-w", numpy.array([XZ_AG_FRAME]))[0][0]
 
         deg_per_pix = 1.0089 / 3600.0  # Pixel scale in degrees / pixel
         CDELT = numpy.array([-1.0 * deg_per_pix, deg_per_pix])  # CDELT entity for WCS
 
-        # Derive positon angle of field
+        # Derive position angle of field
         # West point in AG frame
         west_PA = master_frame_to_ag(f"{telescope}-w", numpy.array([[700.0, 1000.0]]))
         # and East point
