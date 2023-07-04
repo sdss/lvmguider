@@ -257,7 +257,7 @@ class Guider:
             ra_p = ra_ref - offset_radec[0] / 3600 * cos_dec
             dec_p = dec_ref - offset_radec[1] / 3600.0
 
-            if sep > guide_tolerance:
+            if sep > guide_tolerance and apply_correction is True:
                 self.set_reference_frames()
                 raise ValueError(
                     "Guide measured offset exceeds guide tolerance. "
