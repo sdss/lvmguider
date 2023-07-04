@@ -644,3 +644,38 @@ def master_frame_to_ag(camera: str, locs: numpy.ndarray):
 
     # Return calculated positions (need to transpose for standard layout)
     return rsLoc.T
+
+
+def calculate_guide_offset(
+    sources: pandas.DataFrame,
+    telescope: str,
+    reference_sources: pandas.DataFrame,
+    reference_wcs: WCS,
+) -> tuple[tuple[float, float], float]:
+    """Determines the guide offset by matching sources to reference images.
+
+    Parameters
+    ----------
+    sources
+        A list of sources extracted from the AG frames. Must contain a column
+        ``camera`` with the camera associated with each source.
+    telescope
+        The telescope associated with these images.
+    reference_sources
+        As ``sources``, a list of extracted detections from the reference frames.
+    reference_wcs
+        The WCS of the master frame corresponding to the reference images.
+
+    Returns
+    -------
+    offset
+        A tuple of RA and Dec offsets, in arcsec. This is the offset to
+        go from the reference pointing to the current pointing.
+    separation
+        The absolute separation between the reference frame and the
+        new set of sources, in arcsec.
+
+    """
+
+    # TODO: fill out this.
+    return (0.0, 0.0), 0.0

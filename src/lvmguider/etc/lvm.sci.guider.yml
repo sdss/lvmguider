@@ -12,6 +12,7 @@ pid:
     Kd: 0.0
 
 max_correction: 3600
+guide_tolerance: 3
 
 actor:
   name: lvm.sci.guider

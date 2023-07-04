@@ -58,7 +58,7 @@ class Cameras:
         flavour: str = "object",
         extract_sources: bool = False,
         nretries: int = 3,
-    ) -> tuple[list[str], list[pandas.DataFrame] | None]:
+    ) -> tuple[list[str], int, list[pandas.DataFrame] | None]:
         """Exposes the cameras and returns the filenames."""
 
         command.actor.status |= GuiderStatus.EXPOSING
@@ -180,7 +180,7 @@ class Cameras:
         command.actor.status &= ~GuiderStatus.EXPOSING
         command.actor.status |= GuiderStatus.IDLE
 
-        return (list(filenames), list(sources) if extract_sources else None)
+        return (list(filenames), next_seqno, list(sources) if extract_sources else None)
 
     async def extract_sources(self, filename: str):
         """Extracts sources from a file."""
