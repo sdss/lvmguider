@@ -110,7 +110,8 @@ def solve_locs(
     index_paths: dict[int, str] | None = None,
     scales: dict[int, list[int]] | None = None,
     output_root: str | None = None,
-    verbose=False,
+    verbose: bool = False,
+    raise_on_unsolved: bool = True,
     **astrometrynet_kwargs,
 ):
     """Use astrometry.net to solve field, given a series of star locations.
@@ -141,6 +142,8 @@ def solve_locs(
         files.
     verbose
         Output additional information.
+    raise_on_unsolved
+        Whether to raise an error if the field was not solved.
     astrometrynet_kwargs
         Arguments to pass directly to `.astrometrynet_quick`.
 
@@ -188,7 +191,7 @@ def solve_locs(
         width=midX * 2,
         height=midZ * 2,
         scales=scales,
-        raise_on_unsolved=True,
+        raise_on_unsolved=raise_on_unsolved,
         plot=True,
         output_root=output_root,
         **astrometrynet_kwargs,
@@ -205,7 +208,7 @@ def solve_from_files(
     files: list[str],
     telescope: str,
     reextract_sources: bool = False,
-    solve_locs_kwargs: dict = {},
+    solve_locs_kwargs: dict | None = None,
 ):
     """Determines the telescope pointing from a set of AG frames.
 
@@ -234,6 +237,8 @@ def solve_from_files(
 
     if len(files) == 0:
         raise ValueError("No files provided.")
+
+    solve_locs_kwargs = solve_locs_kwargs if solve_locs_kwargs is not None else {}
 
     mf_sources: list[pandas.DataFrame] = []
     ra = 0.0
@@ -407,11 +412,44 @@ def wcs_from_single_cameras(
     telescope: str | None = None,
     method: str = "astropy",
     reextract_sources: bool = False,
-    astrometrynet_params: dict = {},
-):
+    solve_locs_kwargs: dict | None = None,
+) -> tuple[WCS, dict[str, AstrometrySolution]]:
+    """Determines the telescope pointing using individual AG frames.
+
+    The main difference between this function and `.solve_from_files` is
+    that here we solve each AG frame independently with astrometry.net and
+    then use those solutions to generate a master frame WCS.
+
+    Parameters
+    ----------
+    files
+        The AG FITS files to use determine the telescope pointing. Normally
+        these are a pair of east/west camera frames, except for ``spec``.
+    telescope
+        The telescope to which these exposures are associated. If `None`, it
+        is determine from the header.
+    method
+        Either ``'astropy'`` or ``'tom'``. The method used to generate the master
+        WCS from the independent solutions.
+    reextract_sources
+        Runs the source extraction algorithm again. If `False`, extraction is only
+        done if a ``SOURCES`` extensions is not found in the files.
+    solve_locs_kwargs
+        A dictionary of kwargs to pass to `.solve_locs`.
+
+    Returns
+    -------
+    wcs
+        The wcs of the master frame astrometric solution.
+    solutions
+        A dictionary of the astrometric solutions for each camera.
+
+    """
+
     if len(files) == 0:
         raise ValueError("No files provided.")
 
+    solve_locs_kwargs = solve_locs_kwargs if solve_locs_kwargs is not None else {}
     solutions: dict[str, AstrometrySolution] = {}
 
     for file in files:
@@ -431,7 +469,7 @@ def wcs_from_single_cameras(
                     files,
                     telescope=telescope,
                     reextract_sources=True,
-                    astrometrynet_params=astrometrynet_params,
+                    solve_locs_kwargs=solve_locs_kwargs,
                 )
         else:
             hdul = fits.open(file)
@@ -442,18 +480,20 @@ def wcs_from_single_cameras(
             sources = extract_marginal(data)
             sources["camera"] = camname
 
-        if "output_root" not in astrometrynet_params:
+        solve_locs_kwargs_cam = solve_locs_kwargs.copy()
+        if "output_root" not in solve_locs_kwargs_cam:
             # Generate root path for astrometry files.
             basename = file.name.replace(".fits", "")
             output_root = str(file.parent / "astrometry" / basename)
-            astrometrynet_params["output_root"] = output_root
+            solve_locs_kwargs_cam["output_root"] = output_root
 
         camera_solution = solve_locs(
             sources[["x", "y", "flux"]],
             ra,
             dec,
             full_frame=False,
-            **astrometrynet_params,
+            raise_on_unsolved=False,
+            **solve_locs_kwargs_cam,
         )
 
         # Calculate master frame coordinates for the pixels of the stars
