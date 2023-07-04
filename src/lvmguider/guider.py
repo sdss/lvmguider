@@ -251,10 +251,11 @@ class Guider:
             ra_ref = ref_pointing.ra.deg
             dec_ref = ref_pointing.dec.deg
 
-            # Current pointing.
+            # Current pointing. Note that the offset is to go from current position
+            # to reference position.
             cos_dec = numpy.cos(numpy.radians(dec_ref))
-            ra_p = ra_ref + offset_radec[0] / 3600 * cos_dec
-            dec_p = dec_ref + offset_radec[1] / 3600.0
+            ra_p = ra_ref - offset_radec[0] / 3600 * cos_dec
+            dec_p = dec_ref - offset_radec[1] / 3600.0
 
             if sep > guide_tolerance:
                 self.set_reference_frames()
@@ -516,7 +517,7 @@ class Guider:
         if self.reference_sources is None or self.reference_wcs is None:
             raise CriticalGuiderError("Missing reference frame data. Cannot guide.")
 
-        offset, sep = await run_in_executor(
+        offset, sep_arcsec, _ = await run_in_executor(
             calculate_guide_offset,
             pandas.concat(sources),
             self.reference_sources,
@@ -524,9 +525,9 @@ class Guider:
         )
 
         offset = cast(tuple[float, float], offset)
-        sep = cast(float, sep)
+        sep_arcsec = cast(float, sep_arcsec)
 
-        return offset, sep
+        return offset, sep_arcsec
 
     async def write_proc_file(
         self,
