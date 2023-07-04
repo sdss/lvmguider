@@ -282,7 +282,7 @@ def solve_from_files(
         # Generate root path for astrometry files.
         proc_path = get_proc_path(files[0])
         dirname = proc_path.parent
-        proc_base = proc_path.name.replace(".fits", "")
+        proc_base = proc_path.name.replace(".fits.gz", "").replace(".fits", "")
         output_root = str(dirname / "astrometry" / proc_base)
         solve_locs_kwargs["output_root"] = output_root
 
@@ -483,7 +483,7 @@ def wcs_from_single_cameras(
         solve_locs_kwargs_cam = solve_locs_kwargs.copy()
         if "output_root" not in solve_locs_kwargs_cam:
             # Generate root path for astrometry files.
-            basename = file.name.replace(".fits", "")
+            basename = file.name.replace(".fits.gz", "").replace(".fits", "")
             output_root = str(file.parent / "astrometry" / basename)
             solve_locs_kwargs_cam["output_root"] = output_root
 

@@ -188,7 +188,7 @@ def reprocess_proc_image(
         new_sources_cam.append(sources_cam)
 
     new_sources = pandas.concat(new_sources_cam)
-    output_root = str(proc_new).replace(".fits", "")
+    output_root = str(proc_new).replace(".fits.gz", "").replace(".fits", "")
 
     xyls = new_sources.loc[:, ["x_master", "y_master", "flux"]]
     xyls.rename(columns={"x_master": "x", "y_master": "y"}, inplace=True)
@@ -281,7 +281,7 @@ def reprocess_files(
     parent.mkdir(parents=True, exist_ok=True)
 
     output_root = (
-        str(proc_output_path).replace(".fits", "")
+        str(proc_output_path).replace(".fits.gz", "").replace(".fits", "")
         if generate_astrometrynet_outputs
         else None
     )
