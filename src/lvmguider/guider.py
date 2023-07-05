@@ -17,6 +17,7 @@ import numpy
 import pandas
 from astropy.io import fits
 from astropy.table import Table
+from astropy.wcs import WCS
 from simple_pid import PID
 
 from sdsstools.time import get_sjd
@@ -34,8 +35,6 @@ from .transformations import (
 
 
 if TYPE_CHECKING:
-    from astropy.wcs import WCS
-
     from lvmguider.actor import GuiderCommand
     from lvmguider.astrometrynet import AstrometrySolution
 
@@ -152,7 +151,7 @@ class Guider:
         guide_tolerance: float | None = None,
         apply_correction: bool = True,
         use_motor_offsets: bool = True,
-        use_individual_images: bool = False,
+        use_individual_images: bool = True,
     ):
         """Performs one guide iteration.
 
@@ -213,7 +212,7 @@ class Guider:
         self.command.actor.status |= GuiderStatus.PROCESSING
         self.command.actor.status &= ~GuiderStatus.IDLE
 
-        guide_tolerance = guide_tolerance or self.config["guide_tolerance"]
+        guide_tolerance = guide_tolerance or self.config.get("guide_tolerance", 5)
 
         if mode == "auto":
             is_acquisition = not self.use_reference_frames
@@ -247,7 +246,8 @@ class Guider:
             assert self.reference_wcs is not None
 
             # Pointing from the reference frame.
-            ref_pointing = self.reference_wcs.pixel_to_world(*self.pixel)
+            pixel = self.pixel or XZ_FULL_FRAME
+            ref_pointing = self.reference_wcs.pixel_to_world(*pixel)
             ra_ref = ref_pointing.ra.deg
             dec_ref = ref_pointing.dec.deg
 
@@ -267,11 +267,6 @@ class Guider:
             # Calculate offset in motor axes.
             saz_diff_d, sel_diff_d = delta_radec2mot_axis(ra_ref, dec_ref, ra_p, dec_p)
             offset_motax = (saz_diff_d, sel_diff_d)
-
-            # Should we start guiding?
-            if mode == "auto" and sep < guide_tolerance:
-                self.command.warning("Guide tolerance reached. Starting to guide.")
-                self.set_reference_frames(frameno, mf_wcs=self.reference_wcs)
 
         self.command.info(
             measured_pointing={
@@ -315,6 +310,15 @@ class Guider:
                     "motax_applied": list(numpy.round(applied_motax, 3)),
                 }
             )
+
+            # Should we start guiding?
+            if (
+                mode == "auto"
+                and not self.use_reference_frames
+                and sep < guide_tolerance
+            ):
+                self.command.warning("Guide tolerance reached. Starting to guide.")
+                self.set_reference_frames(frameno, mf_wcs=wcs)
 
             asyncio.create_task(
                 self.write_proc_file(
@@ -520,6 +524,7 @@ class Guider:
         offset, sep_arcsec, _ = await run_in_executor(
             calculate_guide_offset,
             pandas.concat(sources),
+            self.telescope,
             self.reference_sources,
             self.reference_wcs,
         )
@@ -598,7 +603,7 @@ class Guider:
         astro_hdr["DECKD"] = (self.pid_dec.Kd, "Dec PID D term")
 
         if wcs is not None:
-            astro_hdr += wcs.to_header()
+            astro_hdr += wcs.copy().to_header()
 
         proc_hdu = fits.HDUList([fits.PrimaryHDU(), astro_hdu])
         proc_hdu.append(

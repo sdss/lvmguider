@@ -750,11 +750,11 @@ def calculate_guide_offset(
         raise ValueError("No matches found.")
 
     # Determine offsets in xy.
-    offset_x = matches.xref_mf - matches.x_mf
-    offset_y = matches.yref_mf - matches.y_mf
+    offset_x = matches.x_mf - matches.xref_mf
+    offset_y = matches.y_mf - matches.yref_mf
 
     # Rotate to align with RA/Dec
-    PC = reference_wcs.wcs.pc
+    PC = reference_wcs.wcs.pc if reference_wcs.wcs.has_pc() else reference_wcs.wcs.cd
     offset_ra_d, offset_dec_d = PC @ numpy.array([offset_x, offset_y])
 
     # To arcsec.
