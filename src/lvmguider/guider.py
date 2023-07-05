@@ -154,7 +154,7 @@ class Guider:
                 applied_radec, applied_motax = await self.offset_telescope(
                     *offset_motax,
                     use_motor_axes=use_motor_offsets,
-                    max_correction=self.config["max_correction"],
+                    max_correction=self.config.get("max_correction", 3600),
                 )
 
         finally:
