@@ -221,7 +221,7 @@ def fit_gaussian_to_marginal(
 
 def extract_marginal(
     data: NDArray,
-    threshold: float = 5.0,
+    threshold: float = 3.0,
     box_size: int = 51,
     sigma_0: float | None = None,
     max_detections: int | None = None,

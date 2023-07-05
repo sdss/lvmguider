@@ -488,13 +488,8 @@ def wcs_from_single_cameras(
             output_root = str(file.parent / "astrometry" / basename)
             solve_locs_kwargs_cam["output_root"] = output_root
 
-        camera = f"{telescope}-{camname[0]}"
-        xy = sources.loc[:, ["x", "y"]].to_numpy()
-        mf_locs, _ = ag_to_master_frame(camera, xy)
-        sources.loc[:, ["x_master", "y_master"]] = mf_locs
-
         camera_solution = solve_locs(
-            sources,
+            sources.loc[:, ["x", "y", "flux"]],
             ra,
             dec,
             full_frame=False,
@@ -502,16 +497,23 @@ def wcs_from_single_cameras(
             **solve_locs_kwargs_cam,
         )
 
+        if camera_solution.solved and camera_solution.stars is not None:
+            camera = f"{telescope}-{camname[0]}"
+            xy = camera_solution.stars.loc[:, ["field_x", "field_y"]].to_numpy()
+            mf_locs, _ = ag_to_master_frame(camera, xy)
+            camera_solution.stars.loc[:, ["x_master", "y_master"]] = mf_locs
+
         solutions[camname] = camera_solution
 
-    if len(solutions) == 0:
+    nsolved = len([sol for sol in solutions.values() if sol.solved])
+    if nsolved == 0:
         raise ValueError("No solutions found.")
 
     # Check for repeat images, in which East and West are almost identical. In
     # this case the coordinates of their central pixels will also be very close,
     # instead of being about a degree apart.
-    wcs_east = solutions["east"].wcs
-    wcs_west = solutions["west"].wcs
+    wcs_east = solutions["east"].wcs if "east" in solutions else None
+    wcs_west = solutions["west"].wcs if "west" in solutions else None
     if telescope != "spec" and wcs_east is not None and wcs_west is not None:
         east_cen = wcs_east.pixel_to_world(*XZ_AG_FRAME)
         west_cen = wcs_west.pixel_to_world(*XZ_AG_FRAME)
@@ -543,12 +545,9 @@ def wcs_from_single_cameras(
         if len(solutions) != 2:
             raise ValueError("Tom's method requires two cameras.")
 
-        west_wcs = solutions["west"].wcs
-        east_wcs = solutions["east"].wcs
+        assert wcs_west is not None and wcs_east is not None, "Found unsolved fields."
 
-        assert west_wcs and east_wcs, "Found unsolved fields."
-
-        west_sky = west_wcs.pixel_to_world(*XZ_AG_FRAME)
+        west_sky = wcs_west.pixel_to_world(*XZ_AG_FRAME)
 
         # RA, Dec of central pixel of West AG Camera
         CRVAL = numpy.array([west_sky.ra.deg, west_sky.dec.deg])  # type:ignore
@@ -565,8 +564,8 @@ def wcs_from_single_cameras(
         east_PA = master_frame_to_ag(f"{telescope}-e", numpy.array([[4300.0, 1000.0]]))
 
         # Get sky coords of these pixels
-        wPA_sky = pixel_to_skycoord(west_PA[0][0], west_PA[0][1], west_wcs)
-        ePA_sky = pixel_to_skycoord(east_PA[0][0], east_PA[0][1], east_wcs)
+        wPA_sky = pixel_to_skycoord(west_PA[0][0], west_PA[0][1], wcs_west)
+        ePA_sky = pixel_to_skycoord(east_PA[0][0], east_PA[0][1], wcs_east)
 
         # This is the angle we need
         west_pa = wPA_sky.position_angle(ePA_sky).degree  # type: ignore
