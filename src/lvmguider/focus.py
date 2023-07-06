@@ -113,7 +113,7 @@ class Focuser:
         source_list = []
         for focus_position in focus_grid:
             await self.goto_focus_position(focus_position)
-            _, sources = await self.cameras.expose(
+            _, _, sources = await self.cameras.expose(
                 self.command,
                 exposure_time=self.exposure_time,
                 extract_sources=True,

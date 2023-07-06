@@ -17,6 +17,7 @@ from astropy.io import fits
 from astropy.time import Time
 from astropy.wcs import WCS
 from astropy.wcs.utils import fit_wcs_from_points, pixel_to_skycoord
+from scipy.spatial import KDTree
 
 from lvmguider.astrometrynet import AstrometrySolution, astrometrynet_quick
 from lvmguider.extraction import extract_marginal
@@ -643,3 +644,129 @@ def master_frame_to_ag(camera: str, locs: numpy.ndarray):
 
     # Return calculated positions (need to transpose for standard layout)
     return rsLoc.T
+
+
+def calculate_guide_offset(
+    sources: pandas.DataFrame,
+    telescope: str,
+    reference_sources: pandas.DataFrame,
+    reference_wcs: WCS,
+    max_separation: float = 5,
+) -> tuple[tuple[float, float], float, pandas.DataFrame]:
+    """Determines the guide offset by matching sources to reference images.
+
+    Parameters
+    ----------
+    sources
+        A list of sources extracted from the AG frames. Must contain a column
+        ``camera`` with the camera associated with each source.
+    telescope
+        The telescope associated with these images.
+    reference_sources
+        As ``sources``, a list of extracted detections from the reference frames.
+    reference_wcs
+        The WCS of the master frame corresponding to the reference images.
+    max_separation
+        Maximum separation between reference and test sources, in pixels.
+
+    Returns
+    -------
+    offset
+        A tuple of RA and Dec offsets, in arcsec. This is the offset to
+        go from current pointing to the reference pointing.
+    separation
+        The absolute separation between the reference frame and the
+        new set of sources, in arcsec.
+    matches
+        A Pandas data frame with the matches between test and reference sources.
+
+    """
+
+    sources["camera"] = sources["camera"].astype(str)
+    reference_sources["camera"] = reference_sources["camera"].astype(str)
+
+    matches: pandas.DataFrame | None = None
+
+    cameras = sources["camera"].unique()
+    for camera in cameras:
+        cam_ref_sources = reference_sources.loc[reference_sources["camera"] == camera]
+        cam_sources = sources.loc[sources["camera"] == camera]
+
+        if len(cam_ref_sources) == 0 or len(cam_sources) == 0:
+            continue
+
+        # Create a KDTree with the reference pixels.
+        tree = KDTree(cam_ref_sources.loc[:, ["x", "y"]].to_numpy())
+
+        # Find nearest neighbours
+        dd, ii = tree.query(cam_sources.loc[:, ["x", "y"]].to_numpy())
+
+        # Select valid matches.
+        valid = dd < max_separation
+
+        # Get the valid xy in the test and reference source lists.
+        cam_matches = cam_sources.loc[valid, ["x", "y"]]
+        cam_ref_matches = cam_ref_sources.iloc[ii[valid]]
+        cam_ref_matches = cam_ref_matches.loc[:, ["x", "y"]]
+
+        # Calculate MF coordinates for test and references pixels.
+        camname = f"{telescope}-{camera[0]}"
+        cam_matches_mf, _ = ag_to_master_frame(camname, cam_matches.to_numpy())
+        cam_ref_matches_mf, _ = ag_to_master_frame(camname, cam_ref_matches.to_numpy())
+
+        # Build a DF with the MF coordinates. Add the camera name and concatenate
+        # to build a main DF with all the matches for both cameras.
+
+        matches_array = numpy.hstack(
+            (
+                cam_matches,
+                cam_ref_matches,
+                cam_matches_mf,
+                cam_ref_matches_mf,
+            )
+        )
+
+        matches_df = pandas.DataFrame(
+            matches_array,
+            columns=[
+                "x",
+                "y",
+                "xref",
+                "yref",
+                "x_mf",
+                "y_mf",
+                "xref_mf",
+                "yref_mf",
+            ],
+        )
+        matches_df["camera"] = camname
+
+        if matches is None:
+            matches = matches_df
+        else:
+            matches = pandas.concat([matches, matches_df])
+
+    if matches is None:
+        raise ValueError("No matches found.")
+
+    # Determine offsets in xy.
+    offset_x = matches.x_mf - matches.xref_mf
+    offset_y = matches.y_mf - matches.yref_mf
+
+    # Rotate to align with RA/Dec
+    PC = reference_wcs.wcs.pc if reference_wcs.wcs.has_pc() else reference_wcs.wcs.cd
+    offset_ra_d, offset_dec_d = PC @ numpy.array([offset_x, offset_y])
+
+    # To arcsec.
+    offset_ra_arcsec = numpy.mean(offset_ra_d * 3600)
+    offset_dec_arcsec = numpy.mean(offset_dec_d * 3600)
+
+    # Calculate separation. This is somewhat approximate but good enough
+    # for small angles.
+    pixel_scale = numpy.mean(
+        [scale.to("arcsec").value for scale in reference_wcs.proj_plane_pixel_scales()]
+    )
+    sep_pix = numpy.median(numpy.sqrt(offset_x**2 + offset_y**2))
+    sep_arcsec = float(pixel_scale * sep_pix)
+
+    return (offset_ra_arcsec, offset_dec_arcsec), sep_arcsec, matches

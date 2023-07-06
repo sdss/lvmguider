@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 import click
 
 from lvmguider.actor import lvmguider_parser
-from lvmguider.guider import Guider
+from lvmguider.guider import CriticalGuiderError, Guider
 from lvmguider.maskbits import GuiderStatus
 
 
@@ -98,6 +98,23 @@ async def expose(
     help="The pixel of the master frame to use as pointing reference.",
 )
 @click.option(
+    "--mode",
+    type=str,
+    default="auto",
+    help="The guiding mode: auto, acquire, guide.",
+)
+@click.option(
+    "--reference-frame",
+    type=int,
+    help="The sequence number of the AG frames to use for guiding. "
+    "Implies --mode guide.",
+)
+@click.option(
+    "--guide-tolerance",
+    type=float,
+    help="The acquisition tolerance, in arcsec, after which guiding will be started.",
+)
+@click.option(
     "--apply-corrections/--no-apply-corrections",
     is_flag=True,
     default=True,
@@ -116,7 +133,7 @@ async def expose(
     is_flag=True,
     default=True,
     show_default=True,
-    help="Whether to use individual images to generate the WCS.",
+    help="Whether to use individual images to generate the WCS during acquisition.",
 )
 @click.option(
     "--one",
@@ -129,6 +146,9 @@ async def start(
     fielddec: float,
     exposure_time: float = 5.0,
     reference_pixel: tuple[float, float] | None = None,
+    mode: str = "auto",
+    reference_frame: int | None = None,
+    guide_tolerance: float | None = None,
     apply_corrections: bool = True,
     use_motor_offsets: bool = True,
     use_individual_images: bool = False,
@@ -138,10 +158,20 @@ async def start(
 
     actor = command.actor
 
+    guider = Guider(command, (fieldra, fielddec), pixel=reference_pixel)
+
+    if reference_frame is not None:
+        mode = "guide"
+        guider.set_reference_frames(reference_frame)
+
+    if mode not in ["auto", "guide", "acquire"]:
+        return command.fail("Invalid mode. Use mode auto, guide, or acquire.")
+
+    if mode == "guide" and reference_frame is None:
+        return command.fail("--mode guide requires using --reference-frame.")
+
     if actor.status & GuiderStatus.NON_IDLE:
         return command.finish("Guider is not idle. Stop the guide loop.")
-
-    guider = Guider(command, (fieldra, fielddec), pixel=reference_pixel)
 
     while True:
         actor.status = GuiderStatus.GUIDING
@@ -150,12 +180,16 @@ async def start(
             actor.guide_task = asyncio.create_task(
                 guider.guide_one(
                     exposure_time,
+                    mode=mode,
+                    guide_tolerance=guide_tolerance,
                     apply_correction=apply_corrections,
                     use_individual_images=use_individual_images,
                     use_motor_offsets=use_motor_offsets,
                 )
             )
             await actor.guide_task
+        except CriticalGuiderError as err:
+            return command.fail(f"Stopping the guide loop due to critical error: {err}")
         except Exception as err:
             command.warning(f"Failed guiding with error: {err}")
         finally:
