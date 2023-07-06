@@ -254,8 +254,8 @@ class Guider:
             # Current pointing. Note that the offset is to go from current position
             # to reference position.
             cos_dec = numpy.cos(numpy.radians(dec_ref))
-            ra_p = ra_ref - offset_radec[0] / 3600 * cos_dec
-            dec_p = dec_ref - offset_radec[1] / 3600.0
+            ra_p = numpy.round(ra_ref - offset_radec[0] / 3600 * cos_dec, 6)
+            dec_p = numpy.round(dec_ref - offset_radec[1] / 3600.0, 6)
 
             if sep > guide_tolerance and apply_correction is True:
                 self.set_reference_frames()
@@ -529,6 +529,11 @@ class Guider:
             self.reference_wcs,
         )
 
+        # Rounding.
+        offset = tuple(numpy.round(offset, 3))
+        sep_arcsec = float(numpy.round(sep_arcsec, 3))
+
+        # Typing.
         offset = cast(tuple[float, float], offset)
         sep_arcsec = cast(float, sep_arcsec)
 
