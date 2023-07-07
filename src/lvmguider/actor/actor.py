@@ -10,11 +10,16 @@ from __future__ import annotations
 
 import asyncio
 
+from typing import TYPE_CHECKING
+
 from clu.actor import AMQPActor
 
 from lvmguider.cameras import Cameras
 from lvmguider.maskbits import GuiderStatus
 
+
+if TYPE_CHECKING:
+    from lvmguider.guider import Guider
 
 __all__ = ["LVMGuiderActor"]
 
@@ -32,4 +37,6 @@ class LVMGuiderActor(AMQPActor):
         self.cameras = Cameras(self.telescope)
 
         self.status = GuiderStatus.IDLE
+
+        self.guider: Guider | None = None
         self.guide_task: asyncio.Task | None = None

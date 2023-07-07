@@ -144,6 +144,14 @@ class Guider:
         self.reference_sources = pandas.concat(sources)
         self.use_reference_frames = True
 
+    def set_pixel(self, pixel_x: float | None = None, pixel_z: float | None = None):
+        """Sets the master frame pixel coordinates ``(x, z)`` on which to guide."""
+
+        if pixel_x is None or pixel_z is None:
+            self.pixel = None
+        else:
+            self.pixel = (pixel_x, pixel_z)
+
     async def guide_one(
         self,
         exposure_time: float = 5.0,

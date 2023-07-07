@@ -200,6 +200,7 @@ async def start(
             break
 
     actor.status = GuiderStatus.IDLE
+    command.actor.guider = None
 
     return command.finish("The guide loop has finished.")
 
@@ -218,6 +219,7 @@ async def stop(command: GuiderCommand, now=False):
             command.actor.guide_task.cancel()
             with suppress(asyncio.CancelledError):
                 await command.actor.guide_task
+        command.actor.guider = None
         return command.finish("Guider was forcibly stopped.")
 
     if command.actor.status & GuiderStatus.STOPPING:
@@ -225,3 +227,22 @@ async def stop(command: GuiderCommand, now=False):
 
     command.actor.status |= GuiderStatus.STOPPING
     return command.finish("Stopping the guide loop.")
+
+
+@guide.command()
+@click.argument("PIXEL-X", type=float)
+@click.argument("PIXEL-Z", type=float)
+async def set_pixel(command: GuiderCommand, pixel_x: float, pixel_z: float):
+    """Sets the master frame pixel coordinates on which to guide.
+
+    This command can be issued during active guiding to change the pointing
+    of the telescope.
+
+    """
+
+    if not command.actor.guider:
+        return command.fail("Guider is not active.")
+
+    command.actor.guider.set_pixel(pixel_x, pixel_z)
+
+    return command.finish(f"Guide pixel is now ({pixel_x:.2f}, {pixel_z:.2f}).")
