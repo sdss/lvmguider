@@ -194,7 +194,14 @@ class Cameras:
         else:
             data = hdus[0].data
 
-        return await run_in_executor(extract_marginal, data, box_size=31)
+        return await run_in_executor(
+            extract_marginal,
+            data,
+            box_size=31,
+            threshold=3.0,
+            max_detections=50,
+            sextractor_quick_options={"minarea": 5},
+        )
 
     def get_next_seqno(self):
         """Determines the next exposure sequence number."""
