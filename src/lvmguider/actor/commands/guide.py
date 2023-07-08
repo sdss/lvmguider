@@ -157,6 +157,7 @@ async def start(
     """Starts the guide loop."""
 
     actor = command.actor
+    initial_exposure_time = exposure_time
 
     guider = Guider(command, (fieldra, fielddec), pixel=reference_pixel)
 
@@ -195,6 +196,11 @@ async def start(
             return command.fail(f"Stopping the guide loop due to critical error: {err}")
         except Exception as err:
             command.warning(f"Failed guiding with error: {err}")
+            if "No solutions found" in str(err):
+                if exposure_time < initial_exposure_time * 4:
+                    exposure_time = numpy.clip(exposure_time * 1.5, a_min=1, a_max=18)
+                    exposure_time = numpy.round(exposure_time, 1)
+                    command.warning(f"Exposure time increased to {exposure_time:.1f} s")
         finally:
             if is_stopping(command):
                 break
