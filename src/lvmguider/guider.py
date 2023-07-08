@@ -71,7 +71,7 @@ class Guider:
         self.cameras = command.actor.cameras
 
         self.field_centre = field_centre
-        self.pixel = pixel
+        self.pixel = pixel or XZ_FULL_FRAME
 
         self.config = command.actor.config
 
@@ -148,9 +148,11 @@ class Guider:
         """Sets the master frame pixel coordinates ``(x, z)`` on which to guide."""
 
         if pixel_x is None or pixel_z is None:
-            self.pixel = None
+            self.pixel = XZ_FULL_FRAME
         else:
             self.pixel = (pixel_x, pixel_z)
+
+        return self.pixel
 
     async def guide_one(
         self,
