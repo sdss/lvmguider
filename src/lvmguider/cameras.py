@@ -203,6 +203,16 @@ class Cameras:
             sextractor_quick_options={"minarea": 5},
         )
 
+    def reset_seqno(self):
+        """Resets the seqno.
+
+        This forces a full check of the files next time that
+        `.get_next_seqno` is called.
+
+        """
+
+        self.last_seqno = -1
+
     def get_next_seqno(self):
         """Determines the next exposure sequence number."""
 

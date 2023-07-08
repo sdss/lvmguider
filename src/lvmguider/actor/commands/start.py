@@ -129,6 +129,9 @@ async def start(
     else:
         actor.status = GuiderStatus.GUIDING
 
+    # Force the cameras to check the last image.
+    command.actor.cameras.reset_seqno()
+
     while True:
         try:
             actor.guide_task = asyncio.create_task(

@@ -51,6 +51,9 @@ async def expose(
 ):
     """Exposes the cameras without guiding."""
 
+    # Force the cameras to check the last image.
+    command.actor.cameras.reset_seqno()
+
     if flavour not in ["object", "dark", "bias"]:
         return command.fail("Invalid flavour.")
 

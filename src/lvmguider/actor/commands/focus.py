@@ -60,6 +60,9 @@ async def focus(
 ):
     """Performs a focus sweep."""
 
+    # Force the cameras to check the last image.
+    command.actor.cameras.reset_seqno()
+
     focuser = Focuser(
         command,
         guess=guess,
