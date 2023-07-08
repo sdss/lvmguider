@@ -246,6 +246,10 @@ class Cameras:
         if (data > 32000).sum() / npix > 0.1:
             return True
 
+        # Another case of a bad image.
+        if data.sum() == 0:
+            return True
+
         return False
 
     def _get_dark_frame(self, filename: str, cam_name: str):
