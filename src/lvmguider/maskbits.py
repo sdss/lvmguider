@@ -18,15 +18,18 @@ class GuiderStatus(Flag):
     """Maskbits with the guider status."""
 
     IDLE = 1 << 0
-    GUIDING = 1 << 1
-    EXPOSING = 1 << 2
-    PROCESSING = 1 << 3
-    CORRECTING = 1 << 4
-    STOPPING = 1 << 5
-    FAILED = 1 << 6
-    WAITING = 1 << 7
+    ACQUIRING = 1 << 1
+    GUIDING = 1 << 2
+    EXPOSING = 1 << 3
+    PROCESSING = 1 << 4
+    CORRECTING = 1 << 5
+    STOPPING = 1 << 6
+    FAILED = 1 << 7
+    WAITING = 1 << 8
 
-    NON_IDLE = GUIDING | EXPOSING | PROCESSING | CORRECTING | STOPPING | WAITING
+    NON_IDLE = (
+        ACQUIRING | GUIDING | EXPOSING | PROCESSING | CORRECTING | STOPPING | WAITING
+    )
 
     def get_names(self):
         """Returns a list of active bit names."""

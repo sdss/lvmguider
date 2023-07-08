@@ -61,8 +61,8 @@ class Cameras:
     ) -> tuple[list[str], int, list[pandas.DataFrame] | None]:
         """Exposes the cameras and returns the filenames."""
 
+        command.actor._status &= ~GuiderStatus.IDLE
         command.actor.status |= GuiderStatus.EXPOSING
-        command.actor.status &= ~GuiderStatus.IDLE
 
         # Update the status of the telescope.
         await command.send_command(self.pwi, "status", internal=True)
@@ -79,7 +79,8 @@ class Cameras:
         )
 
         if cmd.status.did_fail:
-            command.actor.status |= GuiderStatus.FAILED
+            command.actor._status &= ~GuiderStatus.EXPOSING
+            command.actor._status |= GuiderStatus.FAILED
             command.actor.status |= GuiderStatus.IDLE
             raise RuntimeError("Failed while exposing cameras.")
         else:
@@ -178,7 +179,9 @@ class Cameras:
         )
 
         command.actor.status &= ~GuiderStatus.EXPOSING
-        command.actor.status |= GuiderStatus.IDLE
+
+        if not command.actor.status & GuiderStatus.NON_IDLE:
+            command.actor.status |= GuiderStatus.IDLE
 
         return (list(filenames), next_seqno, list(sources) if extract_sources else None)
 

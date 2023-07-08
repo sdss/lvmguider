@@ -267,6 +267,8 @@ class Guider:
 
             if sep > guide_tolerance and apply_correction is True:
                 self.set_reference_frames()
+                self.command.actor._status &= ~GuiderStatus.GUIDING
+                self.command.actor.status |= GuiderStatus.ACQUIRING
                 raise ValueError(
                     "Guide measured offset exceeds guide tolerance. "
                     "Skipping correction and reverting to acquisition."
@@ -327,6 +329,8 @@ class Guider:
             ):
                 self.command.warning("Guide tolerance reached. Starting to guide.")
                 self.set_reference_frames(frameno, mf_wcs=wcs)
+                self.command.actor._status &= ~GuiderStatus.ACQUIRING
+                self.command.actor.status |= GuiderStatus.GUIDING
 
             asyncio.create_task(
                 self.write_proc_file(

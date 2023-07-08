@@ -173,9 +173,12 @@ async def start(
     if actor.status & GuiderStatus.NON_IDLE:
         return command.finish("Guider is not idle. Stop the guide loop.")
 
-    while True:
+    if mode == "auto" or mode == "acquire":
+        actor.status = GuiderStatus.ACQUIRING
+    else:
         actor.status = GuiderStatus.GUIDING
 
+    while True:
         try:
             actor.guide_task = asyncio.create_task(
                 guider.guide_one(

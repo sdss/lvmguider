@@ -36,7 +36,28 @@ class LVMGuiderActor(AMQPActor):
         self.telescope: str = self.config.get("telescope", self.name.split(".")[1])
         self.cameras = Cameras(self.telescope)
 
-        self.status = GuiderStatus.IDLE
+        self._status = GuiderStatus.IDLE
 
         self.guider: Guider | None = None
         self.guide_task: asyncio.Task | None = None
+
+    @property
+    def status(self):
+        """Returns the guider status."""
+
+        return self._status
+
+    @status.setter
+    def status(self, new_value: GuiderStatus):
+        """Sets a new status and reports it to the users."""
+
+        if new_value.value != self._status.value:
+            self._status = new_value
+            self.write(
+                "d",
+                {
+                    "status": f"0x{self._status.value}",
+                    "status_labels": ",".join(self._status.get_names()),
+                },
+                internal=True,
+            )
