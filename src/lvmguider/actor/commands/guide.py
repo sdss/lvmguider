@@ -160,6 +160,7 @@ async def start(
     initial_exposure_time = exposure_time
 
     guider = Guider(command, (fieldra, fielddec), pixel=reference_pixel)
+    command.actor.guider = guider
 
     if reference_frame is not None:
         mode = "guide"
