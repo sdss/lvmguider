@@ -3,13 +3,12 @@
 #
 # @Author: José Sánchez-Gallego (gallegoj@uw.edu)
 # @Date: 2023-06-18
-# @Filename: guide.py
+# @Filename: start.py
 # @License: BSD 3-clause (http://www.opensource.org/licenses/BSD-3-Clause)
 
 from __future__ import annotations
 
 import asyncio
-from contextlib import suppress
 
 from typing import TYPE_CHECKING
 
@@ -25,65 +24,14 @@ if TYPE_CHECKING:
     from lvmguider.actor import GuiderCommand
 
 
-__all__ = ["guide"]
+__all__ = ["start"]
 
 
 def is_stopping(command: GuiderCommand):
     return command.actor.status & GuiderStatus.STOPPING
 
 
-@lvmguider_parser.group()
-def guide():
-    """Manages the guide loop."""
-
-
-@guide.command()
-@click.option(
-    "-t",
-    "--exposure-time",
-    type=float,
-    default=5,
-    help="Exposure time.",
-)
-@click.option(
-    "-t",
-    "--flavour",
-    type=str,
-    default="object",
-    help="The type of exposure to take.",
-)
-@click.option(
-    "--loop",
-    is_flag=True,
-    help="Loop exposures until guide stop is called.",
-)
-async def expose(
-    command: GuiderCommand,
-    exposure_time: float = 5.0,
-    flavour="object",
-    loop=False,
-):
-    """Exposes the cameras without guiding."""
-
-    if flavour not in ["object", "dark", "bias"]:
-        return command.fail("Invalid flavour.")
-
-    while True:
-        await command.actor.cameras.expose(
-            command,
-            exposure_time=exposure_time,
-            flavour=flavour,
-            extract_sources=True,
-        )
-        if loop is False or (command.actor.status & GuiderStatus.STOPPING):
-            break
-
-    command.actor.status = GuiderStatus.IDLE
-
-    return command.finish()
-
-
-@guide.command()
+@lvmguider_parser.command()
 @click.argument("FIELDRA", type=float)
 @click.argument("FIELDDEC", type=float)
 @click.option(
@@ -214,46 +162,3 @@ async def start(
     command.actor.guider = None
 
     return command.finish("The guide loop has finished.")
-
-
-@guide.command()
-@click.option("--now", is_flag=True, help="Aggressively stops the loop.")
-async def stop(command: GuiderCommand, now=False):
-    """Stops the guide loop."""
-
-    status = command.actor.status
-    if status & GuiderStatus.IDLE:
-        return command.finish("Guider is not active.")
-
-    if now:
-        if command.actor.guide_task and not command.actor.guide_task.done():
-            command.actor.guide_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await command.actor.guide_task
-        command.actor.guider = None
-        return command.finish("Guider was forcibly stopped.")
-
-    if command.actor.status & GuiderStatus.STOPPING:
-        return command.fail("Guider loop is already stopping.")
-
-    command.actor.status |= GuiderStatus.STOPPING
-    return command.finish("Stopping the guide loop.")
-
-
-@guide.command()
-@click.argument("PIXEL-X", type=float)
-@click.argument("PIXEL-Z", type=float)
-async def set_pixel(command: GuiderCommand, pixel_x: float, pixel_z: float):
-    """Sets the master frame pixel coordinates on which to guide.
-
-    This command can be issued during active guiding to change the pointing
-    of the telescope.
-
-    """
-
-    if not command.actor.guider:
-        return command.fail("Guider is not active.")
-
-    command.actor.guider.set_pixel(pixel_x, pixel_z)
-
-    return command.finish(f"Guide pixel is now ({pixel_x:.2f}, {pixel_z:.2f}).")

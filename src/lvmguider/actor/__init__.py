@@ -14,5 +14,8 @@ from .actor import LVMGuiderActor
 
 GuiderCommand = Command["LVMGuiderActor"]
 
-from .commands.focus import *
-from .commands.guide import *
+from .commands.expose import expose
+from .commands.focus import focus
+from .commands.set_pixel import set_pixel
+from .commands.start import start
+from .commands.stop import stop
