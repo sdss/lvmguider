@@ -14,6 +14,7 @@ from contextlib import suppress
 from typing import TYPE_CHECKING
 
 import click
+import numpy
 
 from lvmguider.actor import lvmguider_parser
 from lvmguider.guider import CriticalGuiderError, Guider
