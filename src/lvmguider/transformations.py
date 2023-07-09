@@ -175,6 +175,7 @@ def solve_locs(
         index_paths_default = {5200: "/data/astrometrynet/5200"}
 
     index_paths = index_paths or index_paths_default
+    scales = scales or {5200: [4, 5, 6]}
 
     locs = locs.copy()
     if full_frame:
