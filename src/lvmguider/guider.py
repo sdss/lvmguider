@@ -285,7 +285,8 @@ class Guider:
                 "frameno": frameno,
                 "ra": ra_p,
                 "dec": dec_p,
-                "offset": list(offset_radec),
+                "radec_offset": list(offset_radec),
+                "motax_offset": list(offset_motax),
                 "separation": sep,
                 "mode": "guide" if self.use_reference_frames else "acquisition",
             }
