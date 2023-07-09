@@ -194,7 +194,6 @@ def solve_locs(
         height=midZ * 2,
         scales=scales,
         raise_on_unsolved=raise_on_unsolved,
-        plot=True,
         output_root=output_root,
         **astrometrynet_kwargs,
     )
