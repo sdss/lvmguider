@@ -424,6 +424,8 @@ def astrometrynet_quick(
                 for this_scale in this_scales:
                     series_scale = series + this_scale
                     scale_files = glob(f"index-{series_scale}*", root_dir=index_path)
+                    if len(scale_files) == 0:
+                        warnings.warn(f"No indices found for scale {series_scale}.")
                     for scale_file in scale_files:
                         ff.write(f"index {scale_file}\n")
 
