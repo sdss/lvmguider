@@ -3,7 +3,7 @@
 #
 # @Author: José Sánchez-Gallego (gallegoj@uw.edu)
 # @Date: 2023-06-18
-# @Filename: start.py
+# @Filename: guide.py
 # @License: BSD 3-clause (http://www.opensource.org/licenses/BSD-3-Clause)
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from lvmguider.actor import GuiderCommand
 
 
-__all__ = ["start"]
+__all__ = ["guide"]
 
 
 def is_stopping(command: GuiderCommand):
@@ -89,7 +89,7 @@ def is_stopping(command: GuiderCommand):
     is_flag=True,
     help="Do one single iteration and exit.",
 )
-async def start(
+async def guide(
     command: GuiderCommand,
     fieldra: float,
     fielddec: float,
