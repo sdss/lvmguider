@@ -12,6 +12,7 @@ import asyncio
 import os
 import pathlib
 import re
+import warnings
 
 from typing import TYPE_CHECKING
 
@@ -64,9 +65,16 @@ class Cameras:
         command.actor._status &= ~GuiderStatus.IDLE
         command.actor.status |= GuiderStatus.EXPOSING
 
-        # Update the status of the telescope.
+        # Update the status of the telescope and get the focuser position.
         await command.send_command(self.pwi, "status", internal=True)
-        await command.send_command(self.foc, "status", internal=True)
+
+        try:
+            focus_cmd = await command.send_command(self.foc, "status", internal=True)
+            focus_position = focus_cmd.replies.get("Position")
+        except Exception as err:
+            warnings.warn(f"Failed getting {self.telescope} focuser position: {err}")
+            focus_position = -999
+
         if self.telescope != "spec":
             await command.send_command(self.pwi, "status", internal=True)
 
@@ -174,6 +182,7 @@ class Cameras:
                 "filenames": list(filenames),
                 "flavour": flavour,
                 "n_sources": len(all_sources),
+                "focus_position": round(focus_position, 1),
                 "fwhm": numpy.round(fwhm, 3) if fwhm else fwhm,
             }
         )
