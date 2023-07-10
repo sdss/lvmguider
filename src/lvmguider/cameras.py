@@ -241,7 +241,7 @@ class Cameras:
 
         return self.last_seqno + 1
 
-    def is_shifted(self, filename: str | numpy.ndarray):
+    def is_shifted(self, filename: str | pathlib.Path | numpy.ndarray):
         """Determines if an image is "shifted"."""
 
         data: numpy.ndarray
