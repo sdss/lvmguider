@@ -26,9 +26,17 @@ class GuiderStatus(Flag):
     STOPPING = 1 << 6
     FAILED = 1 << 7
     WAITING = 1 << 8
+    DRIFTING = 1 << 9
 
     NON_IDLE = (
-        ACQUIRING | GUIDING | EXPOSING | PROCESSING | CORRECTING | STOPPING | WAITING
+        ACQUIRING
+        | GUIDING
+        | EXPOSING
+        | PROCESSING
+        | CORRECTING
+        | STOPPING
+        | WAITING
+        | DRIFTING
     )
 
     def get_names(self):

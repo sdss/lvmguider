@@ -75,6 +75,8 @@ class Guider:
 
         self.config = command.actor.config
 
+        self._mode: str = "auto"
+
         # Use negative values because we apply the correction in the
         # same direction as the measured offset between pointing and
         # reference position.
@@ -148,9 +150,14 @@ class Guider:
         """Sets the master frame pixel coordinates ``(x, z)`` on which to guide."""
 
         if pixel_x is None or pixel_z is None:
-            self.pixel = XZ_FULL_FRAME
+            new_pixel = XZ_FULL_FRAME
         else:
-            self.pixel = (pixel_x, pixel_z)
+            new_pixel = (pixel_x, pixel_z)
+
+        if self.pixel != new_pixel and self._mode == "auto":
+            # In auto mode, if we change the current pixel, we start drifting
+            # towards a new target position.
+            self.command.actor.status |= GuiderStatus.DRIFTING
 
         return self.pixel
 
@@ -198,6 +205,9 @@ class Guider:
             will be performed until the measured offset is smaller than
             ``guide_tolerance``. The other two modes force continuous acquisition
             or guiding.
+        guide_tolerance
+            The separation between field RA/Dec and measured pointing at which
+            to consider than acquisition has been completed and guiding begins.
         apply_corrections
             Whether to apply the measured corrections. If `False`, only measures.
         use_motor_offsets
@@ -233,6 +243,8 @@ class Guider:
         else:
             raise CriticalGuiderError(f"Invalid mode {mode}.")
 
+        self._mode = mode
+
         if is_acquisition:
             try:
                 ra_p, dec_p, wcs = await self.determine_pointing(
@@ -267,10 +279,11 @@ class Guider:
             ra_p = numpy.round(ra_ref - offset_radec[0] / 3600 * cos_dec, 6)
             dec_p = numpy.round(dec_ref - offset_radec[1] / 3600.0, 6)
 
-            if sep > guide_tolerance and apply_correction is True:
+            if sep > guide_tolerance and apply_correction is True and mode == "auto":
                 self.set_reference_frames()
                 self.command.actor._status &= ~GuiderStatus.GUIDING
-                self.command.actor.status |= GuiderStatus.ACQUIRING
+                self.command.actor._status |= GuiderStatus.ACQUIRING
+                self.command.actor.status |= GuiderStatus.DRIFTING
                 raise ValueError(
                     "Guide measured offset exceeds guide tolerance. "
                     "Skipping correction and reverting to acquisition."
@@ -333,6 +346,7 @@ class Guider:
                 self.command.warning("Guide tolerance reached. Starting to guide.")
                 self.set_reference_frames(frameno, mf_wcs=wcs)
                 self.command.actor._status &= ~GuiderStatus.ACQUIRING
+                self.command.actor._status &= ~GuiderStatus.DRIFTING
                 self.command.actor.status |= GuiderStatus.GUIDING
 
             asyncio.create_task(

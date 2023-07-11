@@ -129,6 +129,10 @@ async def guide(
     else:
         actor.status = GuiderStatus.GUIDING
 
+    # If we are in auto mode, we consider we are drifting until we switch to guiding.
+    if mode == "auto":
+        actor.status |= GuiderStatus.DRIFTING
+
     # Force the cameras to check the last image.
     command.actor.cameras.reset_seqno()
 
