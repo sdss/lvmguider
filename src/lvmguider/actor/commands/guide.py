@@ -32,8 +32,8 @@ def is_stopping(command: GuiderCommand):
 
 
 @lvmguider_parser.command()
-@click.argument("FIELDRA", type=float)
-@click.argument("FIELDDEC", type=float)
+@click.argument("RA", type=float)
+@click.argument("DEC", type=float)
 @click.option(
     "--exposure-time",
     "-t",
@@ -91,8 +91,8 @@ def is_stopping(command: GuiderCommand):
 )
 async def guide(
     command: GuiderCommand,
-    fieldra: float,
-    fielddec: float,
+    ra: float,
+    dec: float,
     exposure_time: float = 5.0,
     reference_pixel: tuple[float, float] | None = None,
     mode: str = "auto",
@@ -108,7 +108,7 @@ async def guide(
     actor = command.actor
     initial_exposure_time = exposure_time
 
-    guider = Guider(command, (fieldra, fielddec), pixel=reference_pixel)
+    guider = Guider(command, (ra, dec), pixel=reference_pixel)
     command.actor.guider = guider
 
     if reference_frame is not None:
