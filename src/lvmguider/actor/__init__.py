@@ -18,4 +18,5 @@ from .commands.expose import expose
 from .commands.focus import focus
 from .commands.guide import guide
 from .commands.set_pixel import set_pixel
+from .commands.status import status
 from .commands.stop import stop
