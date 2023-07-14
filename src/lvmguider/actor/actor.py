@@ -56,7 +56,7 @@ class LVMGuiderActor(AMQPActor):
             self.write(
                 "d",
                 {
-                    "status": f"0x{self._status.value}",
+                    "status": f"0x{self._status.value:x}",
                     "status_labels": ",".join(self._status.get_names()),
                 },
                 internal=True,
