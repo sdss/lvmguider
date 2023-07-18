@@ -298,8 +298,8 @@ class Guider:
                 "frameno": frameno,
                 "ra": ra_p,
                 "dec": dec_p,
-                "radec_offset": list(offset_radec),
-                "motax_offset": list(offset_motax),
+                "radec_offset": list(numpy.round(offset_radec, 3)),
+                "motax_offset": list(numpy.round(offset_motax, 3)),
                 "separation": sep,
                 "mode": "guide" if self.use_reference_frames else "acquisition",
             }
