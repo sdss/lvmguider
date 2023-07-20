@@ -29,6 +29,7 @@ from .transformations import (
     XZ_FULL_FRAME,
     calculate_guide_offset,
     delta_radec2mot_axis,
+    solve_camera,
     solve_from_files,
     wcs_from_single_cameras,
 )
@@ -634,11 +635,18 @@ class Guider:
         astro_hdu = fits.ImageHDU(name="ASTROMETRY")
         astro_hdr = astro_hdu.header
 
-        astro_hdr["NAXIS"] = 2
         astro_hdr["ACQUISIT"] = (is_acquisition, "Acquisition or guiding?")
 
         for fn, file_ in enumerate(filenames):
             astro_hdr[f"FILE{fn}"] = (str(file_), f"AG frame {fn}")
+
+        ref_frames = list(self.reference_frames.values())
+        for fn in range(2):
+            if len(ref_frames) >= fn + 1:
+                file_ = str(ref_frames[fn])
+            else:
+                file_ = ""
+            astro_hdr[f"REFFILE{fn}"] = (file_, f"AG reference frame {fn}")
 
         astro_hdr["RAFIELD"] = (self.field_centre[0], "[deg] Field RA")
         astro_hdr["DECFIELD"] = (self.field_centre[1], "[deg] Field Dec")
