@@ -417,6 +417,19 @@ class Guider:
                 wcs = camera_solutions[camname].wcs
                 if camera_solutions[camname].solved is False:
                     self.command.warning(f"Camera {camname} did not solve.")
+                elif wcs is not None:
+                    file = filenames[fn]
+
+                    # Update proc header with astrometry.net WCS.
+                    with fits.open(str(file), mode="update") as hdul:
+                        if "PROC" in hdul:
+                            proc = hdul["PROC"]
+                        else:
+                            proc = fits.ImageHDU(name="PROC")
+                            hdul.append(proc)
+
+                        proc.header.update(wcs.to_header())
+                        proc.header["WCSMODE"] = "astrometrynet"
 
         if wcs is None:
             raise ValueError(f"Cannot determine pointing for telescope {telescope}.")
