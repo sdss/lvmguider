@@ -668,6 +668,18 @@ class Guider:
         if wcs is not None:
             astro_hdr += wcs.copy().to_header()
 
+        if not is_acquisition:
+            # Update WCS from the reference one using measured offsets.
+            try:
+                cos_dec = numpy.cos(numpy.radians(astro_hdr["CRVAL2"]))
+                crval1 = astro_hdr["CRVAL1"] - offset_radec[0] / 3600 * cos_dec
+                crval2 = astro_hdr["CRVAL2"] - offset_radec[1] / 3600
+
+                astro_hdr["CRVAL1"] = crval1
+                astro_hdr["CRVAL2"] = crval2
+            except Exception as err:
+                self.command.warning(f"Failed updating master frame WCS: {err}")
+
         astro_hdr["NAXIS"] = 2
         astro_hdr["NAXIS1"] = 5000
         astro_hdr["NAXIS2"] = 2500
