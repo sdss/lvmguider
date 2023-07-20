@@ -400,14 +400,22 @@ class Guider:
             solution, _ = await run_in_executor(solve_from_files, filenames, telescope)
             wcs = solution.wcs
         else:
-            wcs, solutions = await run_in_executor(
-                wcs_from_single_cameras,
-                filenames,
-                telescope=telescope,
+            solutions: list[dict[str, AstrometrySolution]] = await asyncio.gather(
+                *[run_in_executor(solve_camera, file, telescope) for file in filenames]
             )
 
-            for camname in solutions:
-                if solutions[camname].solved is False:
+            # Convert to dictionary of camera name to astrometric solution.
+            camera_solutions = {k: v for d in solutions for k, v in d.items()}
+
+            wcs = await run_in_executor(
+                wcs_from_single_cameras,
+                camera_solutions,
+                telescope,
+            )
+
+            for fn, camname in enumerate(camera_solutions):
+                wcs = camera_solutions[camname].wcs
+                if camera_solutions[camname].solved is False:
                     self.command.warning(f"Camera {camname} did not solve.")
 
         if wcs is None:
