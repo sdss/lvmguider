@@ -639,6 +639,10 @@ class Guider:
         if wcs is not None:
             astro_hdr += wcs.copy().to_header()
 
+        astro_hdr["NAXIS"] = 2
+        astro_hdr["NAXIS1"] = 5000
+        astro_hdr["NAXIS2"] = 2500
+
         proc_hdu = fits.HDUList([fits.PrimaryHDU(), astro_hdu])
         proc_hdu.append(
             fits.BinTableHDU(
