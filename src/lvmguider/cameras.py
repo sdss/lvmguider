@@ -139,6 +139,7 @@ class Cameras:
 
                 proc_header = hdul[0].header.copy()
                 proc_header["DARKFILE"] = dark_file
+                proc_header["WCSMODE"] = ("pwi", "Origin of the astrometric solution")
                 hdul.append(
                     fits.ImageHDU(
                         data=data_sub,
