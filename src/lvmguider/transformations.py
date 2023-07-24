@@ -778,10 +778,6 @@ def calculate_guide_offset(
 
     # Calculate separation. This is somewhat approximate but good enough
     # for small angles.
-    pixel_scale = numpy.mean(
-        [scale.to("arcsec").value for scale in reference_wcs.proj_plane_pixel_scales()]
-    )
-    sep_pix = numpy.median(numpy.sqrt(offset_x**2 + offset_y**2))
-    sep_arcsec = float(pixel_scale * sep_pix)
+    sep_arcsec = numpy.sqrt(offset_ra_arcsec**2 + offset_dec_arcsec**2)
 
     return (offset_ra_arcsec, offset_dec_arcsec), sep_arcsec, matches
