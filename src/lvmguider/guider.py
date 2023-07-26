@@ -159,6 +159,8 @@ class Guider:
             # In auto mode, if we change the current pixel, we start drifting
             # towards a new target position.
             self.command.actor.status |= GuiderStatus.DRIFTING
+            self.pixel = new_pixel
+            self.set_reference_frames()
 
         return self.pixel
 
@@ -236,7 +238,10 @@ class Guider:
         guide_tolerance = guide_tolerance or self.config.get("guide_tolerance", 5)
 
         if mode == "auto":
-            is_acquisition = not self.use_reference_frames
+            is_acquisition = bool(
+                not self.use_reference_frames
+                or self.command.actor.status & GuiderStatus.DRIFTING
+            )
         elif mode == "guide":
             is_acquisition = False
         elif mode == "acquire":
@@ -280,7 +285,10 @@ class Guider:
             ra_p = numpy.round(ra_ref - offset_radec[0] / 3600 * cos_dec, 6)
             dec_p = numpy.round(dec_ref - offset_radec[1] / 3600.0, 6)
 
-            if sep > guide_tolerance and apply_correction is True and mode == "auto":
+            if self.command.actor.status & GuiderStatus.DRIFTING:
+                raise ValueError("Guider is drifting. Reverting to acquisition.")
+
+            if (sep > guide_tolerance) and apply_correction is True and mode == "auto":
                 self.set_reference_frames()
                 self.command.actor._status &= ~GuiderStatus.GUIDING
                 self.command.actor._status |= GuiderStatus.ACQUIRING
