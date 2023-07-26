@@ -159,6 +159,7 @@ class Guider:
             # towards a new target position.
             self.command.actor.status |= GuiderStatus.DRIFTING
             self.pixel = new_pixel
+            self.set_reference_frames()
 
         return self.pixel
 
