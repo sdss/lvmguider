@@ -29,6 +29,7 @@ from .transformations import (
     XZ_FULL_FRAME,
     calculate_guide_offset,
     delta_radec2mot_axis,
+    solve_camera,
     solve_from_files,
     wcs_from_single_cameras,
 )
@@ -365,8 +366,8 @@ class Guider:
                     ra_p=ra_p,
                     dec_p=dec_p,
                     offset_radec=tuple(offset_radec),
-                    corr_radec=tuple(corr_radec),
-                    corr_motax=tuple(corr_motax),
+                    corr_radec=tuple(numpy.round(applied_radec, 3)),
+                    corr_motax=tuple(numpy.round(applied_motax, 3)),
                     sources=list(sources),
                     is_acquisition=is_acquisition,
                 )
@@ -409,15 +410,36 @@ class Guider:
             solution, _ = await run_in_executor(solve_from_files, filenames, telescope)
             wcs = solution.wcs
         else:
-            wcs, solutions = await run_in_executor(
-                wcs_from_single_cameras,
-                filenames,
-                telescope=telescope,
+            solutions: list[dict[str, AstrometrySolution]] = await asyncio.gather(
+                *[run_in_executor(solve_camera, file, telescope) for file in filenames]
             )
 
-            for camname in solutions:
-                if solutions[camname].solved is False:
+            # Convert to dictionary of camera name to astrometric solution.
+            camera_solutions = {k: v for d in solutions for k, v in d.items()}
+
+            wcs = await run_in_executor(
+                wcs_from_single_cameras,
+                camera_solutions,
+                telescope,
+            )
+
+            for fn, camname in enumerate(camera_solutions):
+                wcs = camera_solutions[camname].wcs
+                if camera_solutions[camname].solved is False:
                     self.command.warning(f"Camera {camname} did not solve.")
+                elif wcs is not None:
+                    file = filenames[fn]
+
+                    # Update proc header with astrometry.net WCS.
+                    with fits.open(str(file), mode="update") as hdul:
+                        if "PROC" in hdul:
+                            proc = hdul["PROC"]
+                        else:
+                            proc = fits.ImageHDU(name="PROC")
+                            hdul.append(proc)
+
+                        proc.header.update(wcs.to_header())
+                        proc.header["WCSMODE"] = "astrometrynet"
 
         if wcs is None:
             raise ValueError(f"Cannot determine pointing for telescope {telescope}.")
@@ -622,11 +644,18 @@ class Guider:
         astro_hdu = fits.ImageHDU(name="ASTROMETRY")
         astro_hdr = astro_hdu.header
 
-        astro_hdr["NAXIS"] = 2
         astro_hdr["ACQUISIT"] = (is_acquisition, "Acquisition or guiding?")
 
         for fn, file_ in enumerate(filenames):
             astro_hdr[f"FILE{fn}"] = (str(file_), f"AG frame {fn}")
+
+        ref_frames = list(self.reference_frames.values())
+        for fn in range(2):
+            if len(ref_frames) >= fn + 1:
+                file_ = str(ref_frames[fn])
+            else:
+                file_ = ""
+            astro_hdr[f"REFFILE{fn}"] = (file_, f"AG reference frame {fn}")
 
         astro_hdr["RAFIELD"] = (self.field_centre[0], "[deg] Field RA")
         astro_hdr["DECFIELD"] = (self.field_centre[1], "[deg] Field Dec")
@@ -647,6 +676,18 @@ class Guider:
 
         if wcs is not None:
             astro_hdr += wcs.copy().to_header()
+
+        if not is_acquisition:
+            # Update WCS from the reference one using measured offsets.
+            try:
+                cos_dec = numpy.cos(numpy.radians(astro_hdr["CRVAL2"]))
+                crval1 = astro_hdr["CRVAL1"] - offset_radec[0] / 3600 * cos_dec
+                crval2 = astro_hdr["CRVAL2"] - offset_radec[1] / 3600
+
+                astro_hdr["CRVAL1"] = crval1
+                astro_hdr["CRVAL2"] = crval2
+            except Exception as err:
+                self.command.warning(f"Failed updating master frame WCS: {err}")
 
         proc_hdu = fits.HDUList([fits.PrimaryHDU(), astro_hdu])
         proc_hdu.append(
