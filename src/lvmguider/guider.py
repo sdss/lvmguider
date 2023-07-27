@@ -366,8 +366,8 @@ class Guider:
                     ra_p=ra_p,
                     dec_p=dec_p,
                     offset_radec=tuple(offset_radec),
-                    corr_radec=tuple(corr_radec),
-                    corr_motax=tuple(corr_motax),
+                    corr_radec=tuple(numpy.round(applied_radec, 3)),
+                    corr_motax=tuple(numpy.round(applied_motax, 3)),
                     sources=list(sources),
                     is_acquisition=is_acquisition,
                 )
@@ -688,10 +688,6 @@ class Guider:
                 astro_hdr["CRVAL2"] = crval2
             except Exception as err:
                 self.command.warning(f"Failed updating master frame WCS: {err}")
-
-        astro_hdr["NAXIS"] = 2
-        astro_hdr["NAXIS1"] = 5000
-        astro_hdr["NAXIS2"] = 2500
 
         proc_hdu = fits.HDUList([fits.PrimaryHDU(), astro_hdu])
         proc_hdu.append(
