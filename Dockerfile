@@ -1,7 +1,7 @@
 FROM python:3.11-slim-bookworm
 
 MAINTAINER Jose Sanchez-Gallego, gallegoj@uw.edu
-LABEL org.opencontainers.image.source https://github.com/albireox/lvmguider
+LABEL org.opencontainers.image.source https://github.com/sdss/lvmguider
 
 WORKDIR /opt
 
