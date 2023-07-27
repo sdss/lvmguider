@@ -48,7 +48,7 @@ class Cameras:
         self.foc = f"lvm.{telescope}.foc"
 
         self.sjd = get_sjd("LCO")
-        self.last_seqno = -1
+        self.last_seqno: int = -1
 
         self.dark_file: dict[str, str] = {}
 
