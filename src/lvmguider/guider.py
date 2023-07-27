@@ -235,7 +235,8 @@ class Guider:
         self.command.actor.status |= GuiderStatus.PROCESSING
         self.command.actor.status &= ~GuiderStatus.IDLE
 
-        guide_tolerance = guide_tolerance or self.config.get("guide_tolerance", 5)
+        default_guide_tolerance: float = self.config.get("guide_tolerance", 5)
+        guide_tolerance = guide_tolerance or default_guide_tolerance
 
         if mode == "auto":
             is_acquisition = bool(
