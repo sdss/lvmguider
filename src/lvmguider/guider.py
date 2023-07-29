@@ -424,10 +424,10 @@ class Guider:
             )
 
             for fn, camname in enumerate(camera_solutions):
-                wcs = camera_solutions[camname].wcs
+                wcs_camera = camera_solutions[camname].wcs
                 if camera_solutions[camname].solved is False:
                     self.command.warning(f"Camera {camname} did not solve.")
-                elif wcs is not None:
+                elif wcs_camera is not None:
                     file = filenames[fn]
 
                     # Update proc header with astrometry.net WCS.
@@ -438,7 +438,7 @@ class Guider:
                             proc = fits.ImageHDU(name="PROC")
                             hdul.append(proc)
 
-                        proc.header.update(wcs.to_header())
+                        proc.header.update(wcs_camera.to_header())
                         proc.header["WCSMODE"] = "astrometrynet"
 
         if wcs is None:
