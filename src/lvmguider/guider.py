@@ -286,19 +286,6 @@ class Guider:
             ra_p = numpy.round(ra_ref - offset_radec[0] / 3600 * cos_dec, 6)
             dec_p = numpy.round(dec_ref - offset_radec[1] / 3600.0, 6)
 
-            if self.command.actor.status & GuiderStatus.DRIFTING:
-                raise ValueError("Guider is drifting. Reverting to acquisition.")
-
-            if (sep > guide_tolerance) and apply_correction is True and mode == "auto":
-                self.set_reference_frames()
-                self.command.actor._status &= ~GuiderStatus.GUIDING
-                self.command.actor._status |= GuiderStatus.ACQUIRING
-                self.command.actor.status |= GuiderStatus.DRIFTING
-                raise ValueError(
-                    "Guide measured offset exceeds guide tolerance. "
-                    "Skipping correction and reverting to acquisition."
-                )
-
             # Calculate offset in motor axes.
             saz_diff_d, sel_diff_d = delta_radec2mot_axis(ra_ref, dec_ref, ra_p, dec_p)
             offset_motax = (saz_diff_d, sel_diff_d)
@@ -314,6 +301,20 @@ class Guider:
                 "mode": "guide" if self.use_reference_frames else "acquisition",
             }
         )
+
+        if not is_acquisition:
+            if self.command.actor.status & GuiderStatus.DRIFTING:
+                raise ValueError("Guider is drifting. Reverting to acquisition.")
+
+            if (sep > guide_tolerance) and mode == "auto":
+                self.set_reference_frames()
+                self.command.actor._status &= ~GuiderStatus.GUIDING
+                self.command.actor._status |= GuiderStatus.ACQUIRING
+                self.command.actor.status |= GuiderStatus.DRIFTING
+                raise ValueError(
+                    "Guide measured offset exceeds guide tolerance. "
+                    "Skipping correction and reverting to acquisition."
+                )
 
         # Calculate the correction.
         corr_radec = numpy.array(offset_radec)  # In RA/Dec
