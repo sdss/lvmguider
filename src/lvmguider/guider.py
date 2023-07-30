@@ -354,7 +354,7 @@ class Guider:
                 and not self.use_reference_frames
                 and sep < guide_tolerance
             ):
-                self.command.warning("Guide tolerance reached. Starting to guide.")
+                self.command.info("Guide tolerance reached. Starting to guide.")
                 self.set_reference_frames(frameno, mf_wcs=wcs)
                 self.command.actor._status &= ~GuiderStatus.ACQUIRING
                 self.command.actor._status &= ~GuiderStatus.DRIFTING
