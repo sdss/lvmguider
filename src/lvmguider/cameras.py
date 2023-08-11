@@ -90,6 +90,7 @@ class Cameras:
             command.actor._status &= ~GuiderStatus.EXPOSING
             command.actor._status |= GuiderStatus.FAILED
             command.actor.status |= GuiderStatus.IDLE
+            self.last_seqno = -1
             raise RuntimeError("Failed while exposing cameras.")
         else:
             self.last_seqno = next_seqno
