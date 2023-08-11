@@ -97,6 +97,7 @@ class Guider:
         self.reference_frames: dict[str, pathlib.Path] = {}
         self.reference_sources: pandas.DataFrame | None = None
         self.reference_wcs: WCS | None = None
+        self.reference_offset: tuple[float, float] = (0.0, 0.0)
 
     def set_reference_frames(
         self,
@@ -368,6 +369,7 @@ class Guider:
             ):
                 self.command.info("Guide tolerance reached. Starting to guide.")
                 self.set_reference_frames(frameno, mf_wcs=wcs)
+                self.reference_offset = offset_radec
                 self.command.actor._status &= ~GuiderStatus.ACQUIRING
                 self.command.actor._status &= ~GuiderStatus.DRIFTING
                 self.command.actor.status |= GuiderStatus.GUIDING
@@ -603,6 +605,7 @@ class Guider:
             self.telescope,
             self.reference_sources,
             self.reference_wcs,
+            reference_offset=self.reference_offset,
         )
 
         # Rounding.
