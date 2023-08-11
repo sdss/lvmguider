@@ -150,8 +150,10 @@ async def guide(
             )
             await actor.guide_task
         except CriticalGuiderError as err:
+            command.actor.status |= GuiderStatus.FAILED
             return command.fail(f"Stopping the guide loop due to critical error: {err}")
         except Exception as err:
+            command.actor.status |= GuiderStatus.FAILED
             command.warning(f"Failed guiding with error: {err}")
             if "No solutions found" in str(err) and exposure_time < MAX_EXPTIME:
                 exposure_time = numpy.clip(exposure_time * 1.5, 1, MAX_EXPTIME)

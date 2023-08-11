@@ -374,6 +374,9 @@ class Guider:
                 )
             )
 
+            # Guide step was successful, remove any FAILED flags.
+            self.command.actor.status &= ~GuiderStatus.FAILED
+
     async def determine_pointing(
         self,
         filenames: list[str],

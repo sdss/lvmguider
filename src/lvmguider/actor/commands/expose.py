@@ -58,12 +58,16 @@ async def expose(
         return command.fail("Invalid flavour.")
 
     while True:
-        await command.actor.cameras.expose(
-            command,
-            exposure_time=exposure_time,
-            flavour=flavour,
-            extract_sources=True,
-        )
+        try:
+            await command.actor.cameras.expose(
+                command,
+                exposure_time=exposure_time,
+                flavour=flavour,
+                extract_sources=True,
+            )
+        except Exception as err:
+            return command.fail(error=err)
+
         if loop is False or (command.actor.status & GuiderStatus.STOPPING):
             break
 

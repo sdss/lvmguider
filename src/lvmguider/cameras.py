@@ -188,6 +188,7 @@ class Cameras:
             }
         )
 
+        command.actor._status &= ~GuiderStatus.FAILED
         command.actor.status &= ~GuiderStatus.EXPOSING
 
         if not command.actor.status & GuiderStatus.NON_IDLE:
