@@ -36,20 +36,15 @@ jobs:
           pip install --upgrade wheel pip setuptools
           pip install .
 
-      - name: Lint with flake8
+      - name: Lint with ruff
         run: |
-          pip install flake8
-          flake8 src/lvmguider --count --show-source --statistics
+          pip install ruff
+          ruff check .
 
       - name: Lint with black
         run: |
           pip install black
           black --check src/lvmguider
-
-      - name: Lint with isort
-        run: |
-          pip install isort
-          isort -c src/lvmguider
 
       - name: Test with pytest
         run: |
