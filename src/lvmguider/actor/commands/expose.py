@@ -32,7 +32,7 @@ __all__ = ["expose"]
     help="Exposure time.",
 )
 @click.option(
-    "-t",
+    "-f",
     "--flavour",
     type=str,
     default="object",
