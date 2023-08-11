@@ -164,6 +164,14 @@ class Guider:
 
         return self.pixel
 
+    def reset_acquisition(self):
+        """Reset the flags for acquisition mode."""
+
+        self.set_reference_frames()
+        self.command.actor._status &= ~GuiderStatus.GUIDING
+        self.command.actor._status |= GuiderStatus.ACQUIRING
+        self.command.actor.status |= GuiderStatus.DRIFTING
+
     async def guide_one(
         self,
         exposure_time: float = 5.0,
@@ -271,6 +279,13 @@ class Guider:
             wcs = self.reference_wcs
             offset_radec, sep = await self.calculate_guide_offset(sources)
 
+            if numpy.any(numpy.isnan(offset_radec)) or numpy.isnan(sep):
+                self.reset_acquisition()
+                raise ValueError(
+                    "Invalid values found in guide measurement. "
+                    "Reverting to acquisition."
+                )
+
             # Fro typing. This is safe, calculate_guide_offset also checks.
             assert self.reference_wcs is not None
 
@@ -307,10 +322,7 @@ class Guider:
                 raise ValueError("Guider is drifting. Reverting to acquisition.")
 
             if (sep > guide_tolerance) and mode == "auto":
-                self.set_reference_frames()
-                self.command.actor._status &= ~GuiderStatus.GUIDING
-                self.command.actor._status |= GuiderStatus.ACQUIRING
-                self.command.actor.status |= GuiderStatus.DRIFTING
+                self.reset_acquisition()
                 raise ValueError(
                     "Guide measured offset exceeds guide tolerance. "
                     "Skipping correction and reverting to acquisition."
