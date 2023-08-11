@@ -79,7 +79,7 @@ select = ["E", "F", "I"]
 "__init__.py" = ["F401", "F403", "E402"]
 
 [tool.ruff.isort]
-known-first-party = ["ifoo"]
+known-first-party = ["lvmguider"]
 lines-after-imports = 2
 section-order = ["future", "standard-library", "typing", "third-party", "sdss", "first-party", "local-folder"]
 
