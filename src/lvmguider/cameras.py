@@ -96,13 +96,12 @@ class Cameras:
 
         filenames: set[str] = set()
         for reply in cmd.replies:
-            for cam_name in ["east", "west"]:
-                if cam_name in reply.message:
-                    if reply.message[cam_name].get("state", None) == "written":
-                        filename = reply.message[cam_name]["filename"]
-                        filenames.add(filename)
-                        if flavour == "dark":
-                            self._write_dark_info(cam_name, filename)
+            if "filename" in reply.message:
+                filename = reply.message["filename"]["filename"]
+                cam_name = reply.message["filename"]["camera"]
+                filenames.add(filename)
+                if flavour == "dark":
+                    self._write_dark_info(cam_name, filename)
 
         if len(filenames) == 0:
             raise ValueError("Exposure did not produce any images.")
@@ -123,9 +122,9 @@ class Cameras:
         # Create a new extension with the dark-subtracted image.
         for fn in filenames:
             with fits.open(fn, mode="update") as hdul:
-                data = hdul[0].data.astype(numpy.float32)
-                exptime = hdul[0].header["EXPTIME"]
-                camname = hdul[0].header["CAMNAME"].lower()
+                data = hdul["RAW"].data.astype(numpy.float32)
+                exptime = hdul["RAW"].header["EXPTIME"]
+                camname = hdul["RAW"].header["CAMNAME"].lower()
 
                 dark_file = self._get_dark_frame(fn, camname)
                 if dark_file is None:
@@ -133,18 +132,19 @@ class Cameras:
                     continue
 
                 dark_data = fits.getdata(dark_file).astype(numpy.float32)
-                dark_exptime = fits.getheader(dark_file)["EXPTIME"]
+                dark_exptime = fits.getheader(dark_file, "RAW")["EXPTIME"]
 
                 data_sub = data - (dark_data / dark_exptime) * exptime
 
-                proc_header = hdul[0].header.copy()
+                proc_header = hdul["RAW"].header.copy()
                 proc_header["DARKFILE"] = dark_file
                 proc_header["WCSMODE"] = ("pwi", "Origin of the astrometric solution")
                 hdul.append(
-                    fits.ImageHDU(
+                    fits.CompImageHDU(
                         data=data_sub,
                         header=proc_header,
                         name="PROC",
+                        compression_type="RICE_1",
                     )
                 )
 
@@ -160,7 +160,7 @@ class Cameras:
             else:
                 for ifn, fn in enumerate(filenames):
                     with fits.open(fn, mode="update") as hdul:
-                        camname = hdul[0].header["CAMNAME"].lower()
+                        camname = hdul["RAW"].header["CAMNAME"].lower()
                         isources = sources[ifn]
                         isources["camera"] = camname
                         hdul.append(
@@ -202,7 +202,7 @@ class Cameras:
         if "PROC" in hdus:
             data = hdus["PROC"].data
         else:
-            data = hdus[0].data
+            data = hdus["RAW"].data
 
         return await run_in_executor(
             extract_marginal,

@@ -127,7 +127,7 @@ class Guider:
         sources: list[pandas.DataFrame] = []
         for file_ in files:
             try:
-                header = fits.getheader(file_)
+                header = fits.getheader(file_, "RAW")
                 file_sources = Table.read(file_, "SOURCES").to_pandas()
             except Exception as err:
                 raise ValueError(f"Failed retrieving sources from file {file_}: {err}")

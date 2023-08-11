@@ -247,7 +247,7 @@ def solve_from_files(
     ra = 0.0
     dec = 0.0
     for file in files:
-        header = fits.getheader(file)
+        header = fits.getheader(file, "RAW")
         camname = header["CAMNAME"].lower()
         ra = header["RA"]
         dec = header["DEC"]
@@ -268,7 +268,7 @@ def solve_from_files(
             if "PROC" in hdul:
                 data = hdul["PROC"].data
             else:
-                data = hdul[0].data
+                data = hdul["RAW"].data
             sources = extract_marginal(data)
             sources["camera"] = camname
 
@@ -441,7 +441,7 @@ def solve_camera(
     solve_locs_kwargs = solve_locs_kwargs if solve_locs_kwargs is not None else {}
 
     file = pathlib.Path(file).absolute()
-    header = fits.getheader(file)
+    header = fits.getheader(file, "RAW")
     camname: str = header["CAMNAME"].lower()
     ra: float = header["RA"]
     dec: float = header["DEC"]
@@ -463,7 +463,7 @@ def solve_camera(
         if "PROC" in hdul:
             data = hdul["PROC"].data
         else:
-            data = hdul[0].data
+            data = hdul["RAW"].data
         sources = extract_marginal(data)
         sources["camera"] = camname
 
