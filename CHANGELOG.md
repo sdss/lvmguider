@@ -1,6 +1,6 @@
 # Changelog
 
-## Next version
+## 0.2.0 - August 14, 2023
 
 ### ✨ Improved
 
@@ -11,6 +11,19 @@
     - Add reference frames to `proc-` file.
     - Update `proc-` file WCS during guiding using reference WCS and offsets.
     - Fix offsets in header.
+* Take into account the offset of the reference image when guiding.
+* Handle compressed AG images.
+
+### 🔧 Fixed
+
+* Fix a cosine of the declination in the calculation of the offsets during guiding, which caused guiding to drift away and revert to acquisition.
+* Fix cases in which the measured position would not be reported.
+* Fix repeated `-t`` flag in `expose`` command.
+* Fix some cases in which the sequence number for the next AG exposure would be off or would use a sequence number for which exposures already existed.
+
+### ⚙️ Engineering
+
+* Lint using `ruff`.
 
 
 ## 0.1.0 - July 26, 2023
