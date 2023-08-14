@@ -97,7 +97,6 @@ class Guider:
         self.reference_frames: dict[str, pathlib.Path] = {}
         self.reference_sources: pandas.DataFrame | None = None
         self.reference_wcs: WCS | None = None
-        self.reference_offset: tuple[float, float] = (0.0, 0.0)
 
     def set_reference_frames(
         self,
@@ -299,11 +298,14 @@ class Guider:
             # Current pointing. Note that the offset is to go from current position
             # to reference position.
             cos_dec = numpy.cos(numpy.radians(dec_ref))
-            ra_p = numpy.round(ra_ref - offset_radec[0] / 3600 * cos_dec, 6)
+            ra_p = numpy.round(ra_ref - offset_radec[0] / 3600 / cos_dec, 6)
             dec_p = numpy.round(dec_ref - offset_radec[1] / 3600.0, 6)
 
+            # Where we really want to point.
+            fra, fdec = self.field_centre
+
             # Calculate offset in motor axes.
-            saz_diff_d, sel_diff_d = delta_radec2mot_axis(ra_ref, dec_ref, ra_p, dec_p)
+            saz_diff_d, sel_diff_d = delta_radec2mot_axis(fra, fdec, ra_p, dec_p)
             offset_motax = (saz_diff_d, sel_diff_d)
 
         self.command.info(
@@ -331,12 +333,15 @@ class Guider:
 
         # Calculate the correction.
         corr_radec = numpy.array(offset_radec)  # In RA/Dec
-        corr_radec[0] = self.pid_ra(corr_radec[0])
-        corr_radec[1] = self.pid_dec(corr_radec[1])
-
         corr_motax = numpy.array(offset_motax)  # In motor axes
-        corr_motax[0] = self.pid_ra(corr_motax[0])
-        corr_motax[1] = self.pid_dec(corr_motax[1])
+
+        # Apply PID
+        if use_motor_offsets:
+            corr_motax[0] = self.pid_ra(corr_motax[0])
+            corr_motax[1] = self.pid_dec(corr_motax[1])
+        else:
+            corr_radec[0] = self.pid_ra(corr_radec[0])
+            corr_radec[1] = self.pid_dec(corr_radec[1])
 
         applied_radec = applied_motax = numpy.array([0.0, 0.0])
         try:
@@ -345,7 +350,7 @@ class Guider:
                 self.command.actor.status |= GuiderStatus.CORRECTING
 
                 applied_radec, applied_motax = await self.offset_telescope(
-                    *offset_motax,
+                    *corr_motax,
                     use_motor_axes=use_motor_offsets,
                     max_correction=self.config.get("max_correction", 3600),
                 )
@@ -369,7 +374,6 @@ class Guider:
             ):
                 self.command.info("Guide tolerance reached. Starting to guide.")
                 self.set_reference_frames(frameno, mf_wcs=wcs)
-                self.reference_offset = offset_radec
                 self.command.actor._status &= ~GuiderStatus.ACQUIRING
                 self.command.actor._status &= ~GuiderStatus.DRIFTING
                 self.command.actor.status |= GuiderStatus.GUIDING
@@ -605,7 +609,6 @@ class Guider:
             self.telescope,
             self.reference_sources,
             self.reference_wcs,
-            reference_offset=self.reference_offset,
         )
 
         # Rounding.

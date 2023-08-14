@@ -667,7 +667,6 @@ def calculate_guide_offset(
     reference_sources: pandas.DataFrame,
     reference_wcs: WCS,
     max_separation: float = 5,
-    reference_offset: tuple[float, float] = (0.0, 0.0),
 ) -> tuple[tuple[float, float], float, pandas.DataFrame]:
     """Determines the guide offset by matching sources to reference images.
 
@@ -684,10 +683,6 @@ def calculate_guide_offset(
         The WCS of the master frame corresponding to the reference images.
     max_separation
         Maximum separation between reference and test sources, in pixels.
-    reference_offset
-        The measured RA/Dec offset in the reference image between pointing and
-        measured position. This offset will be used to determine the actual position
-        where we should be guiding on. In arcsec.
 
     Returns
     -------
@@ -781,10 +776,6 @@ def calculate_guide_offset(
     # To arcsec.
     offset_ra_arcsec = numpy.mean(offset_ra_d * 3600)
     offset_dec_arcsec = numpy.mean(offset_dec_d * 3600)
-
-    # Apply reference image offsets.
-    offset_ra_arcsec += reference_offset[0]
-    offset_dec_arcsec += reference_offset[1]
 
     # Calculate separation. This is somewhat approximate but good enough
     # for small angles.
