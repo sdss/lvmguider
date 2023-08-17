@@ -12,7 +12,6 @@ import asyncio
 import os
 import pathlib
 import re
-import warnings
 
 from typing import TYPE_CHECKING
 
@@ -65,18 +64,7 @@ class Cameras:
         command.actor._status &= ~GuiderStatus.IDLE
         command.actor.status |= GuiderStatus.EXPOSING
 
-        # Update the status of the telescope and get the focuser position.
-        await command.send_command(self.pwi, "status", internal=True)
-
-        try:
-            focus_cmd = await command.send_command(self.foc, "status", internal=True)
-            focus_position = focus_cmd.replies.get("Position")
-        except Exception as err:
-            warnings.warn(f"Failed getting {self.telescope} focuser position: {err}")
-            focus_position = -999
-
-        if self.telescope != "spec":
-            await command.send_command(self.pwi, "status", internal=True)
+        focus_position = await self._get_focus_position(command)
 
         next_seqno = self.get_next_seqno()
 
@@ -289,6 +277,27 @@ class Cameras:
             return True
 
         return False
+
+    async def _get_focus_position(self, command: GuiderCommand):
+        """Retrieves the focuser position,"""
+
+        try:
+            focus_position = command.actor.models[self.foc]["Position"].value
+            assert focus_position is not None
+        except Exception:
+            command.warning("Focus position not found in model. Querying the actor.")
+        else:
+            return focus_position
+
+        try:
+            focus_cmd = await command.send_command(self.foc, "status", internal=True)
+            focus_position = focus_cmd.replies.get("Position")
+            assert focus_position is not None
+        except Exception as err:
+            command.warning(f"Failed getting {self.telescope} focuser position: {err}")
+            return -999
+
+        return focus_position
 
     def _get_dark_frame(self, filename: str, cam_name: str):
         """Gets the path to the dark frame."""

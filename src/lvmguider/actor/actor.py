@@ -41,6 +41,9 @@ class LVMGuiderActor(AMQPActor):
         self.guider: Guider | None = None
         self.guide_task: asyncio.Task | None = None
 
+        # Track model of focuser associated to this telescope.
+        self.models.actors.append(f"lvm.{self.telescope}.foc")
+
     @property
     def status(self):
         """Returns the guider status."""
