@@ -41,6 +41,7 @@ async def stop(command: GuiderCommand, now=False):
             with suppress(asyncio.CancelledError):
                 await command.actor.guide_task
         command.actor.guider = None
+        command.actor.status = GuiderStatus.IDLE
         return command.finish("Guider was forcibly stopped.")
 
     if command.actor.status & GuiderStatus.STOPPING:
