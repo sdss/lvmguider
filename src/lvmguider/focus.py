@@ -137,7 +137,7 @@ class Focuser:
             fwhm = asources["xstd"].median()
             self.command.info(
                 focus_point=dict(
-                    focus=focus_position,
+                    focus=round(focus_position, 2),
                     n_sources=len(asources),
                     fwhm=round(fwhm, 2),
                 )
