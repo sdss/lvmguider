@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.1 - August 20, 2023
+
+### ✨ Improved
+
+* Use actor model for `lvm.TEL.foc` to reduce polling.
+* Round up `focus_position`.
+* Prevent `astropy` from downloading data from the internet.
+
+### 🔧 Fixed
+
+* Set guider to `IDLE`` after `stop --now`.
+
+
 ## 0.2.0 - August 14, 2023
 
 ### ✨ Improved
