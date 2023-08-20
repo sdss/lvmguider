@@ -17,6 +17,7 @@ import pandas
 from astropy.coordinates import EarthLocation, SkyCoord
 from astropy.io import fits
 from astropy.time import Time
+from astropy.utils.iers import conf
 from astropy.wcs import WCS
 from astropy.wcs.utils import fit_wcs_from_points, pixel_to_skycoord
 from scipy.spatial import KDTree
@@ -24,6 +25,11 @@ from scipy.spatial import KDTree
 from lvmguider.astrometrynet import AstrometrySolution, astrometrynet_quick
 from lvmguider.extraction import extract_marginal
 from lvmguider.tools import get_proc_path
+
+
+# Prevent astropy from downloading data.
+conf.auto_download = False
+conf.iers_degraded_accuracy = "ignore"
 
 
 # Middle of an AG frame or full frame
@@ -300,7 +306,7 @@ def solve_from_files(
     return solution, locs
 
 
-def radec2azel(raD, decD, lstD):
+def radec2azel(raD, decD, lstD, site: EarthLocation | None = None):
     """Returns the Azimuth and Elevation for the supplied RA, Dec, and sidereal time.
 
     From Tom Herbst and Florian Briegel.
@@ -319,7 +325,14 @@ def radec2azel(raD, decD, lstD):
 
     """
 
-    site = EarthLocation.of_site("Las Campanas Observatory")
+    if site is None:
+        site = EarthLocation.from_geodetic(
+            lon=-70.70166667,
+            lat=-29.00333333,
+            height=2282.0,
+        )
+
+    assert isinstance(site, EarthLocation)
 
     lat_r = numpy.radians(site.lat.deg)
 
@@ -383,19 +396,33 @@ def azel2sazsel(azD, elD):
     return numpy.degrees(SAz), numpy.degrees(SEl)  # Return values in degrees
 
 
-def delta_radec2mot_axis(ra_ref, dec_ref, ra_new, dec_new):
+def delta_radec2mot_axis(
+    ra_ref,
+    dec_ref,
+    ra_new,
+    dec_new,
+    site: EarthLocation | None = None,
+):
     """RA/Dec offset to motor axes.
 
     From Tom Herbst and Florian Briegel.
 
     """
 
-    observing_location = EarthLocation.of_site("Las Campanas Observatory")
-    observing_time = Time(datetime.utcnow(), scale="utc", location=observing_location)
+    if site is None:
+        site = EarthLocation.from_geodetic(
+            lon=-70.70166667,
+            lat=-29.00333333,
+            height=2282.0,
+        )
+
+    assert isinstance(site, EarthLocation)
+
+    observing_time = Time(datetime.utcnow(), scale="utc", location=site)
     lst = observing_time.sidereal_time("mean")
 
-    ref_az_d, ref_el_d = radec2azel(ra_ref, dec_ref, lst.deg)
-    new_az_d, new_el_d = radec2azel(ra_new, dec_new, lst.deg)
+    ref_az_d, ref_el_d = radec2azel(ra_ref, dec_ref, lst.deg, site=site)
+    new_az_d, new_el_d = radec2azel(ra_new, dec_new, lst.deg, site=site)
 
     ref_saz_d, ref_sel_d = azel2sazsel(ref_az_d, ref_el_d)
     new_saz_d, new_sel_d = azel2sazsel(new_az_d, new_el_d)

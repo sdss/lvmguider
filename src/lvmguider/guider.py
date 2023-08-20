@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 import numpy
 import pandas
+from astropy.coordinates import EarthLocation
 from astropy.io import fits
 from astropy.table import Table
 from astropy.wcs import WCS
@@ -97,6 +98,8 @@ class Guider:
         self.reference_frames: dict[str, pathlib.Path] = {}
         self.reference_sources: pandas.DataFrame | None = None
         self.reference_wcs: WCS | None = None
+
+        self.site = EarthLocation(**self.config["site"])
 
     def set_reference_frames(
         self,
@@ -305,7 +308,13 @@ class Guider:
             fra, fdec = self.field_centre
 
             # Calculate offset in motor axes.
-            saz_diff_d, sel_diff_d = delta_radec2mot_axis(fra, fdec, ra_p, dec_p)
+            saz_diff_d, sel_diff_d = delta_radec2mot_axis(
+                fra,
+                fdec,
+                ra_p,
+                dec_p,
+                site=self.site,
+            )
             offset_motax = (saz_diff_d, sel_diff_d)
 
         self.command.info(
@@ -517,7 +526,13 @@ class Guider:
         dec_arcsec = numpy.round(dec_off * 3600, 3)
         sep_arcsec = numpy.round(sep * 3600, 3)
 
-        saz_diff_d, sel_diff_d = delta_radec2mot_axis(fra, fdec, pra, pdec)
+        saz_diff_d, sel_diff_d = delta_radec2mot_axis(
+            fra,
+            fdec,
+            pra,
+            pdec,
+            site=self.site,
+        )
 
         return ((ra_arcsec, dec_arcsec), (saz_diff_d, sel_diff_d), sep_arcsec)
 

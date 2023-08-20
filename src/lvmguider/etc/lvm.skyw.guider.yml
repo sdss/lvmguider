@@ -14,6 +14,11 @@ pid:
 max_correction: 3600
 guide_tolerance: 3
 
+site:
+  lon: -70.70166667
+  lat: -29.00333333
+  height: 2282.0
+
 actor:
   name: lvm.skyw.guider
   host: 10.8.38.21
