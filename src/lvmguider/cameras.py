@@ -128,29 +128,22 @@ class Cameras:
         with elapsed_time(command, "add PROC extension to raw files"):
             for fn in filenames:
                 with fits.open(fn, mode="update") as hdul:
-                    data = hdul["RAW"].data.astype(numpy.float32)
-                    exptime = hdul["RAW"].header["EXPTIME"]
                     camname = hdul["RAW"].header["CAMNAME"].lower()
 
                     dark_file = self._get_dark_frame(fn, camname)
                     if dark_file is None:
                         command.warning(f"No dark frame found for camera {camname}.")
-                        continue
-
-                    dark_data = fits.getdata(dark_file).astype(numpy.float32)
-                    dark_exptime = fits.getheader(dark_file, "RAW")["EXPTIME"]
-
-                    data_sub = data - (dark_data / dark_exptime) * exptime
+                        dark_file = ""
 
                     proc_header = hdul["RAW"].header.copy()
                     proc_header["DARKFILE"] = dark_file
                     proc_header["WCSMODE"] = ("pwi", "Source of astrometric solution")
+
                     hdul.append(
-                        fits.CompImageHDU(
-                            data=data_sub,
+                        fits.ImageHDU(
+                            data=None,
                             header=proc_header,
                             name="PROC",
-                            compression_type="RICE_1",
                         )
                     )
 
