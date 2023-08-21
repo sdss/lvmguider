@@ -24,8 +24,8 @@ from simple_pid import PID
 from sdsstools.time import get_sjd
 
 from lvmguider.maskbits import GuiderStatus
+from lvmguider.tools import elapsed_time, get_proc_path, run_in_executor
 
-from .tools import get_proc_path, run_in_executor
 from .transformations import (
     XZ_FULL_FRAME,
     calculate_guide_offset,
@@ -451,15 +451,16 @@ class Guider:
                 file = filenames[fn]
 
                 # Update proc header with astrometry.net WCS.
-                with fits.open(str(file), mode="update") as hdul:
-                    if "PROC" in hdul:
-                        proc = hdul["PROC"]
-                    else:
-                        proc = fits.ImageHDU(name="PROC")
-                        hdul.append(proc)
+                with elapsed_time(self.command, "update astrometry in PROC raw frames"):
+                    with fits.open(str(file), mode="update") as hdul:
+                        if "PROC" in hdul:
+                            proc = hdul["PROC"]
+                        else:
+                            proc = fits.ImageHDU(name="PROC")
+                            hdul.append(proc)
 
-                    proc.header.update(wcs_camera.to_header())
-                    proc.header["WCSMODE"] = "astrometrynet"
+                        proc.header.update(wcs_camera.to_header())
+                        proc.header["WCSMODE"] = "astrometrynet"
 
         if wcs is None:
             raise ValueError(f"Cannot determine pointing for telescope {telescope}.")

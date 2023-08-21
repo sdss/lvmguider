@@ -24,7 +24,7 @@ from sdsstools.time import get_sjd
 
 from lvmguider.extraction import extract_marginal
 from lvmguider.maskbits import GuiderStatus
-from lvmguider.tools import run_in_executor
+from lvmguider.tools import elapsed_time, run_in_executor
 
 
 if TYPE_CHECKING:
@@ -125,33 +125,34 @@ class Cameras:
                 raise RuntimeError("Run out of retries. Exposing failed.")
 
         # Create a new extension with the dark-subtracted image.
-        for fn in filenames:
-            with fits.open(fn, mode="update") as hdul:
-                data = hdul["RAW"].data.astype(numpy.float32)
-                exptime = hdul["RAW"].header["EXPTIME"]
-                camname = hdul["RAW"].header["CAMNAME"].lower()
+        with elapsed_time(command, "add PROC extension to raw files"):
+            for fn in filenames:
+                with fits.open(fn, mode="update") as hdul:
+                    data = hdul["RAW"].data.astype(numpy.float32)
+                    exptime = hdul["RAW"].header["EXPTIME"]
+                    camname = hdul["RAW"].header["CAMNAME"].lower()
 
-                dark_file = self._get_dark_frame(fn, camname)
-                if dark_file is None:
-                    command.warning(f"No dark frame found for camera {camname}.")
-                    continue
+                    dark_file = self._get_dark_frame(fn, camname)
+                    if dark_file is None:
+                        command.warning(f"No dark frame found for camera {camname}.")
+                        continue
 
-                dark_data = fits.getdata(dark_file).astype(numpy.float32)
-                dark_exptime = fits.getheader(dark_file, "RAW")["EXPTIME"]
+                    dark_data = fits.getdata(dark_file).astype(numpy.float32)
+                    dark_exptime = fits.getheader(dark_file, "RAW")["EXPTIME"]
 
-                data_sub = data - (dark_data / dark_exptime) * exptime
+                    data_sub = data - (dark_data / dark_exptime) * exptime
 
-                proc_header = hdul["RAW"].header.copy()
-                proc_header["DARKFILE"] = dark_file
-                proc_header["WCSMODE"] = ("pwi", "Origin of the astrometric solution")
-                hdul.append(
-                    fits.CompImageHDU(
-                        data=data_sub,
-                        header=proc_header,
-                        name="PROC",
-                        compression_type="RICE_1",
+                    proc_header = hdul["RAW"].header.copy()
+                    proc_header["DARKFILE"] = dark_file
+                    proc_header["WCSMODE"] = ("pwi", "Source of astrometric solution")
+                    hdul.append(
+                        fits.CompImageHDU(
+                            data=data_sub,
+                            header=proc_header,
+                            name="PROC",
+                            compression_type="RICE_1",
+                        )
                     )
-                )
 
         sources = []
         if flavour == "object" and extract_sources:
@@ -163,17 +164,18 @@ class Cameras:
                 command.warning(f"Failed extracting sources: {err}")
                 extract_sources = False
             else:
-                for ifn, fn in enumerate(filenames):
-                    with fits.open(fn, mode="update") as hdul:
-                        camname = hdul["RAW"].header["CAMNAME"].lower()
-                        isources = sources[ifn]
-                        isources["camera"] = camname
-                        hdul.append(
-                            fits.BinTableHDU(
-                                data=Table.from_pandas(isources),
-                                name="SOURCES",
+                with elapsed_time(command, "add SOURCE extension to raw files"):
+                    for ifn, fn in enumerate(filenames):
+                        with fits.open(fn, mode="update") as hdul:
+                            camname = hdul["RAW"].header["CAMNAME"].lower()
+                            isources = sources[ifn]
+                            isources["camera"] = camname
+                            hdul.append(
+                                fits.BinTableHDU(
+                                    data=Table.from_pandas(isources),
+                                    name="SOURCES",
+                                )
                             )
-                        )
 
         if len(sources) > 0:
             all_sources = pandas.concat(sources)

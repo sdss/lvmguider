@@ -13,12 +13,20 @@ import concurrent.futures
 import pathlib
 import re
 import warnings
+from contextlib import contextmanager
 from functools import partial
+from time import time
+
+from typing import TYPE_CHECKING
 
 import numpy
 import pandas
 from astropy.io import fits
 from astropy.table import Table
+
+
+if TYPE_CHECKING:
+    from lvmguider.actor import GuiderCommand
 
 
 async def run_in_executor(fn, *args, catch_warnings=False, executor="thread", **kwargs):
@@ -195,3 +203,17 @@ async def append_extension(
             ext = fits.BinTableHDU(data=table_data, name=name)
 
         hdul.append(ext)
+
+
+@contextmanager
+def elapsed_time(command: GuiderCommand, task_name: str = "unnamed", level: str = "d"):
+    """Context manager to output the elapsed time for a task."""
+
+    time0 = time()
+
+    yield
+
+    command.write(
+        level,
+        text=f"Elapsed time for task {task_name!r}: {time()-time0:.3f} s",
+    )
