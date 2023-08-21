@@ -19,12 +19,11 @@ from astropy.io import fits
 from astropy.time import Time
 from astropy.utils.iers import conf
 from astropy.wcs import WCS
-from astropy.wcs.utils import fit_wcs_from_points, pixel_to_skycoord
+from astropy.wcs.utils import fit_wcs_from_points
 from scipy.spatial import KDTree
 
 from lvmguider.astrometrynet import AstrometrySolution, astrometrynet_quick
 from lvmguider.extraction import extract_marginal
-from lvmguider.tools import get_proc_path
 
 
 # Prevent astropy from downloading data.
@@ -211,99 +210,6 @@ def solve_locs(
         print("Solution has match ? ", solution.solved)
 
     return solution
-
-
-def solve_from_files(
-    files: list[str],
-    telescope: str,
-    reextract_sources: bool = False,
-    solve_locs_kwargs: dict | None = None,
-):
-    """Determines the telescope pointing from a set of AG frames.
-
-    Parameters
-    ----------
-    files
-        The AG FITS files to use determine the telescope pointing. Normally
-        these are a pair of east/west camera frames, except for ``spec``.
-    telescope
-        The telescope to which these exposures are associated.
-    reextract_sources
-        Runs the source extraction algorithm again. If `False`, extraction is only
-        done if a ``SOURCES`` extensions is not found in the files.
-    solve_locs_kwargs
-        A dictionary of kwargs to pass to `.solve_locs`.
-
-    Returns
-    -------
-    wcs
-        The wcs of the astrometric solution or `None` if no solution was found.
-    locs
-        The locations used to solve with astrometry.net. This is basically the
-        extracted sources with two new ``x_master`` and ``y_master`` columns.
-
-    """
-
-    if len(files) == 0:
-        raise ValueError("No files provided.")
-
-    solve_locs_kwargs = solve_locs_kwargs if solve_locs_kwargs is not None else {}
-
-    mf_sources: list[pandas.DataFrame] = []
-    ra = 0.0
-    dec = 0.0
-    for file in files:
-        header = fits.getheader(file, "RAW")
-        camname = header["CAMNAME"].lower()
-        ra = header["RA"]
-        dec = header["DEC"]
-
-        if reextract_sources is False:
-            try:
-                sources = pandas.DataFrame(fits.getdata(file, "SOURCES"))
-            except KeyError:
-                warnings.warn("SOURCES ext not found. Extracting sources", UserWarning)
-                return solve_from_files(
-                    files,
-                    telescope,
-                    reextract_sources=True,
-                    solve_locs_kwargs=solve_locs_kwargs,
-                )
-        else:
-            hdul = fits.open(file)
-            if "PROC" in hdul:
-                data = hdul["PROC"].data
-            else:
-                data = hdul["RAW"].data
-            sources = extract_marginal(data)
-            sources["camera"] = camname
-
-        xy = sources[["x", "y"]].values
-
-        camera = f"{telescope}-{camname[0]}"
-        file_locs, _ = ag_to_master_frame(camera, xy)
-        sources.loc[:, ["x_master", "y_master"]] = file_locs
-        mf_sources.append(sources)
-
-    locs = pandas.concat(mf_sources)
-
-    if "output_root" not in solve_locs_kwargs:
-        # Generate root path for astrometry files.
-        proc_path = get_proc_path(files[0])
-        dirname = proc_path.parent
-        proc_base = proc_path.name.replace(".fits.gz", "").replace(".fits", "")
-        output_root = str(dirname / "astrometry" / proc_base)
-        solve_locs_kwargs["output_root"] = output_root
-
-    solution = solve_locs(
-        locs[["x_master", "y_master", "flux"]],
-        ra=ra,
-        dec=dec,
-        full_frame=True,
-        **solve_locs_kwargs,
-    )
-
-    return solution, locs
 
 
 def radec2azel(raD, decD, lstD, site: EarthLocation | None = None):
@@ -522,7 +428,6 @@ def solve_camera(
 def wcs_from_single_cameras(
     solutions: dict[str, AstrometrySolution],
     telescope: str,
-    method: str = "astropy",
 ) -> WCS:
     """Determines the telescope pointing using individual AG frames.
 
@@ -536,9 +441,6 @@ def wcs_from_single_cameras(
         A dictionary of the astrometric solutions for each camera.
     telescope
         The telescope to which the exposures are associated.
-    method
-        Either ``'astropy'`` or ``'tom'``. The method used to generate the master
-        WCS from the independent solutions.
 
     Returns
     -------
@@ -563,74 +465,23 @@ def wcs_from_single_cameras(
         if ew_separation < 3000:
             raise ValueError("Found potential double image.")
 
-    # Build a master frame WCS from the individual WCS solutions. We implement two
-    # methods. Astropy uses the fit_wcs_from_points routine, where we use the
-    # coordinates of the stars identified by astrometry.net and their corresponding
-    # xy pixels on the master frame (as determined above with ag_to_master_frame).
-    # Tom's method manually builds the WCS using the individual WCS solutions.
-    if method == "astropy":
-        all_stars = pandas.concat(
-            [ss.stars for ss in solutions.values() if ss.stars is not None]
-        )
-        if len(all_stars) == 0:
-            raise ValueError("No solved fields found.")
+    # Build a master frame WCS from the individual WCS solutions. We use astropy's
+    # fit_wcs_from_points routine, where we use the coordinates of the stars
+    # identified by astrometry.net and their corresponding xy pixels on the master
+    # frame (as determined above with ag_to_master_frame).
+    all_stars = pandas.concat(
+        [ss.stars for ss in solutions.values() if ss.stars is not None]
+    )
+    if len(all_stars) == 0:
+        raise ValueError("No solved fields found.")
 
-        skycoords = SkyCoord(
-            ra=all_stars.index_ra,
-            dec=all_stars.index_dec,
-            unit="deg",
-            frame="icrs",
-        )
-        wcs = fit_wcs_from_points((all_stars.x_master, all_stars.y_master), skycoords)
-
-    elif method == "tom":
-        if len(solutions) != 2:
-            raise ValueError("Tom's method requires two cameras.")
-
-        assert wcs_west is not None and wcs_east is not None, "Found unsolved fields."
-
-        west_sky = wcs_west.pixel_to_world(*XZ_AG_FRAME)
-
-        # RA, Dec of central pixel of West AG Camera
-        CRVAL = numpy.array([west_sky.ra.deg, west_sky.dec.deg])  # type:ignore
-        # Pixel location in MF of central px of W camera
-        CRPIX = ag_to_master_frame(f"{telescope}-w", numpy.array([XZ_AG_FRAME]))[0][0]
-
-        deg_per_pix = 1.0089 / 3600.0  # Pixel scale in degrees / pixel
-        CDELT = numpy.array([-1.0 * deg_per_pix, deg_per_pix])  # CDELT entity for WCS
-
-        # Derive position angle of field
-        # West point in AG frame
-        west_PA = master_frame_to_ag(f"{telescope}-w", numpy.array([[700.0, 1000.0]]))
-        # and East point
-        east_PA = master_frame_to_ag(f"{telescope}-e", numpy.array([[4300.0, 1000.0]]))
-
-        # Get sky coords of these pixels
-        wPA_sky = pixel_to_skycoord(west_PA[0][0], west_PA[0][1], wcs_west)
-        ePA_sky = pixel_to_skycoord(east_PA[0][0], east_PA[0][1], wcs_east)
-
-        # This is the angle we need
-        west_pa = wPA_sky.position_angle(ePA_sky).degree  # type: ignore
-        PA = numpy.radians((west_pa + 90.0) % 360)
-
-        # Rotation matrix
-        PC = numpy.array(
-            [
-                [numpy.cos(PA), -numpy.sin(PA)],
-                [numpy.sin(PA), numpy.cos(PA)],
-            ]
-        )
-
-        # Assemble WCS
-        wcs = WCS(naxis=2)  # Create new WCS entity
-        wcs.wcs.ctype = ["RA---TAN", "DEC--TAN"]  # Set CTYPE
-        wcs.wcs.crpix = CRPIX  # Reference pixel indices
-        wcs.wcs.crval = CRVAL  # Reference pixel RA/Dec
-        wcs.wcs.cdelt = CDELT  # Pixel scale in deg/px
-        wcs.wcs.pc = PC  # Rotation matrix
-
-    else:
-        raise ValueError("Invalid method.")
+    skycoords = SkyCoord(
+        ra=all_stars.index_ra,
+        dec=all_stars.index_dec,
+        unit="deg",
+        frame="icrs",
+    )
+    wcs = fit_wcs_from_points((all_stars.x_master, all_stars.y_master), skycoords)
 
     return wcs
 
@@ -694,7 +545,7 @@ def calculate_guide_offset(
     reference_sources: pandas.DataFrame,
     reference_wcs: WCS,
     max_separation: float = 5,
-) -> tuple[tuple[float, float], float, pandas.DataFrame]:
+) -> tuple[tuple[float, float], tuple[float, float], float, pandas.DataFrame]:
     """Determines the guide offset by matching sources to reference images.
 
     Parameters
@@ -713,9 +564,11 @@ def calculate_guide_offset(
 
     Returns
     -------
-    offset
-        A tuple of RA and Dec offsets, in arcsec. This is the offset to
+    offset_pix
+        A tuple of x/y pixel offsets, in arcsec. This is the offset to
         go from current pointing to the reference pointing.
+    offset_radec
+        A tuple of RA and Dec offsets, in arcsec.
     separation
         The absolute separation between the reference frame and the
         new set of sources, in arcsec.
@@ -808,4 +661,9 @@ def calculate_guide_offset(
     # for small angles.
     sep_arcsec = numpy.sqrt(offset_ra_arcsec**2 + offset_dec_arcsec**2)
 
-    return (offset_ra_arcsec, offset_dec_arcsec), sep_arcsec, matches
+    return (
+        (float(numpy.mean(offset_x)), float(numpy.mean(offset_y))),
+        (offset_ra_arcsec, offset_dec_arcsec),
+        sep_arcsec,
+        matches,
+    )
