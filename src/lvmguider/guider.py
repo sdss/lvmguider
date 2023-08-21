@@ -295,11 +295,13 @@ class Guider:
             ra_ref = ref_pointing.ra.deg
             dec_ref = ref_pointing.dec.deg
 
-            # Current pointing. Note that the offset is to go from current position
-            # to reference position.
+            # Calculate current pointing. Note to future José: that although the
+            # offset is measured as going from measured to reference sources here
+            # we need to add it because that offset is the result of moving the
+            # telescope and not the sky (just draw it).
             cos_dec = numpy.cos(numpy.radians(dec_ref))
-            ra_p = numpy.round(ra_ref - offset_radec[0] / 3600 / cos_dec, 6)
-            dec_p = numpy.round(dec_ref - offset_radec[1] / 3600.0, 6)
+            ra_p = numpy.round(ra_ref + offset_radec[0] / 3600 / cos_dec, 6)
+            dec_p = numpy.round(dec_ref + offset_radec[1] / 3600.0, 6)
 
             # Where we really want to point.
             fra, fdec = self.field_centre

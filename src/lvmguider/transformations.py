@@ -566,7 +566,7 @@ def calculate_guide_offset(
     -------
     offset_pix
         A tuple of x/y pixel offsets, in arcsec. This is the offset to
-        go from current pointing to the reference pointing.
+        go from the measured sources to reference sources.
     offset_radec
         A tuple of RA and Dec offsets, in arcsec.
     separation
@@ -645,9 +645,8 @@ def calculate_guide_offset(
         raise ValueError("No matches found.")
 
     # Determine offsets in xy.
-    # TODO: should this be reversed?
-    offset_x = matches.x_mf - matches.xref_mf
-    offset_y = matches.y_mf - matches.yref_mf
+    offset_x = matches.xref_mf - matches.x_mf
+    offset_y = matches.yref_mf - matches.y_mf
 
     # Rotate to align with RA/Dec
     PC = reference_wcs.wcs.pc if reference_wcs.wcs.has_pc() else reference_wcs.wcs.cd
