@@ -25,6 +25,13 @@ __all__ = ["focus"]
 
 @lvmguider_parser.command()
 @click.option(
+    "-m",
+    "--fit-method",
+    type=click.Choice(["parabola", "spline"], case_sensitive=False),
+    default="spline",
+    help="The method used to fitting the data, either parabola or spline.",
+)
+@click.option(
     "-g",
     "--guess",
     type=float,
@@ -53,6 +60,7 @@ __all__ = ["focus"]
 )
 async def focus(
     command: GuiderCommand,
+    fit_method: str = "spline",
     guess: float | None = None,
     step_size: float = 0.5,
     steps: int = 7,
@@ -63,16 +71,17 @@ async def focus(
     # Force the cameras to check the last image.
     command.actor.cameras.reset_seqno()
 
-    focuser = Focuser(
-        command,
-        guess=guess,
-        step_size=step_size,
-        steps=steps,
-        exposure_time=exposure_time,
-    )
+    focuser = Focuser(command.actor.telescope)
 
     try:
-        await focuser.focus()
+        await focuser.focus(
+            command,
+            initial_guess=guess,
+            step_size=step_size,
+            steps=steps,
+            exposure_time=exposure_time,
+            fit_method=fit_method,
+        )
     except Exception as err:
         return command.fail(err)
 
