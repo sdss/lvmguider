@@ -45,7 +45,7 @@ class FrameData:
     focusdt: float
     fwhm_median: float | None = None
     fwhm_std: float | None = None
-    mode: str = "guide"
+    guide_mode: str = "guide"
     stacked: bool = False
 
 
@@ -131,8 +131,10 @@ def coadd_camera_frames(
     outpath: str = "coadds/lvm.{telescope}.agcam.{camname}.coadd_{frameno0:08d}_{frameno1:08d}.fits",  # noqa: E501
     use_sigmaclip: bool = False,
     sigma: float = 3.0,
-    exclude_acquisition_after_guiding: bool = False,
+    skip_acquisition_after_guiding: bool = False,
     log: logging.Logger | None = None,
+    verbose: bool = False,
+    quiet: bool = False,
 ):
     """Co-adds a series of AG camera frames.
 
@@ -167,14 +169,18 @@ def coadd_camera_frames(
         by default as it uses significant CPU and memory.
     sigma
         The sigma value for co-addition sigma clipping.
-    exclude_acquisition_after_guiding
+    skip_acquisition_after_guiding
         Images are co-added starting on the first frame marked as ``'guide'``
-        and until the last frame. If ``exclude_acquisition_after_guiding=True``,
+        and until the last frame. If ``skip_acquisition_after_guiding=True``,
         ``'acquisition'`` images found after the initial acquisition are
         discarded.
     log
         An instance of a logger to be used to output messages. If not provided
         a custom logger will be created.
+    verbose
+        Increase verbosity of the logging.
+    quiet
+        Do not output log messages.
 
     Returns
     -------
@@ -183,13 +189,19 @@ def coadd_camera_frames(
 
     """
 
+    # Create log and set verbosity
     log = log or get_logger("lvmguider.coadd_camera_frames", use_rich_handler=True)
-    if hasattr(log, "sh"):
-        log.sh.setLevel(5)
+    for handler in log.handlers:
+        if verbose:
+            handler.setLevel(logging.DEBUG)
+        elif quiet:
+            handler.setLevel(logging.CRITICAL)
 
+    # Get the list of frame numbers from the files.
     files = list(sorted(files))
     frame_nos = sorted([get_frameno(file) for file in files])
 
+    # Use the first file to get some common data (or at least it should be common!)
     sample_raw_header = fits.getheader(files[0], "RAW")
 
     camname: str = sample_raw_header["CAMNAME"]
@@ -206,6 +218,8 @@ def coadd_camera_frames(
     dark: ARRAY_2D | None = None
     data_stack: list[ARRAY_2D] = []
 
+    # Loop over each file, add the dark-subtracked data to the stack, and collect
+    # frame metadata.
     for ii, file in enumerate(files):
         frameno = frame_nos[ii]
 
@@ -214,8 +228,11 @@ def coadd_camera_frames(
                 log.warning(f"Frame {frameno}: PROC extension not found.")
                 continue
 
+            # PROC header of the raw AG frame.
             proc_header = hdul["PROC"].header
 
+            # Get the proc- file. Just used to determine
+            # if we were acquiring or guiding.
             proc_file = get_proc_path(file)
             if not proc_file.exists():
                 log.warning(f"Frame {frameno}: cannot find associated proc- image.")
@@ -223,32 +240,40 @@ def coadd_camera_frames(
 
             proc_astrometry = fits.getheader(str(proc_file), "ASTROMETRY")
 
+            # If we have not yet loaded the dark frame, get it and get the
+            # normalised dark.
             if dark is None and proc_header.get("DARKFILE", None):
                 hdul_dark = fits.open(str(proc_header["DARKFILE"]))
 
-                dark_data: ARRAY_2D_UINT = hdul_dark["RAW"].data
+                dark_data: ARRAY_2D_UINT = hdul_dark["RAW"].data.astype(numpy.float32)
                 dark_exptime: float = hdul_dark["RAW"].header["EXPTIME"]
 
-                dark = dark_data.astype(numpy.float32) / dark_exptime
+                dark = dark_data / dark_exptime
 
+                hdul_dark.close()
+
+            # Get the frame data and exposure time. Calculate the counts per second.
             exptime = float(hdul["RAW"].header["EXPTIME"])
             data: ARRAY_2D = hdul["RAW"].data.astype(numpy.float32) / exptime
 
+            # If we have a dark frame, subtract it now. If not fit a
+            # background model and subtract that.
             if dark is not None:
                 data -= dark
             else:
                 back = sep.Background(data)
                 data -= back.back()
 
-            mode = "acquisition" if proc_astrometry["ACQUISIT"] else "guide"
-            if mode == "acquisition" and (
-                len(data_stack) == 0 or exclude_acquisition_after_guiding
-            ):
+            # Decide whether this frame should be stacked.
+            guide_mode = "acquisition" if proc_astrometry["ACQUISIT"] else "guide"
+            skip_acquisition = len(data_stack) == 0 or skip_acquisition_after_guiding
+            if guide_mode == "acquisition" and skip_acquisition:
                 stacked = False
             else:
                 stacked = True
                 data_stack.append(data)
 
+            # Determine the median FWHM and FWHM deviation for this frame.
             sources = hdul["SOURCES"] if "SOURCES" in hdul else None
             if sources is None:
                 log.warning(f"Frame {frameno}: SOURCES extension not found.")
@@ -259,6 +284,8 @@ def coadd_camera_frames(
                 fwhm_median = float(numpy.median(fwhm))
                 fwhm_std = float(numpy.std(fwhm))
 
+            # Add information as a FrameData. We do not include the data itself
+            # because it's in data_stack and we don't need it beyond that.
             frame_data[frameno] = FrameData(
                 file=pathlib.Path(file),
                 frameno=frameno,
@@ -272,7 +299,7 @@ def coadd_camera_frames(
                 focusdt=proc_header["FOCUSDT"],
                 fwhm_median=fwhm_median,
                 fwhm_std=fwhm_std,
-                mode=mode,
+                guide_mode=guide_mode,
                 stacked=stacked,
             )
 
@@ -281,6 +308,8 @@ def coadd_camera_frames(
     if dark is None:
         log.critical("No dark frame found in range. Co-added frame may be unreliable.")
 
+    # Combine the stack of data frames using the median of each pixel.
+    # Optionally sigma-clip each pixel (this is computationally intensive).
     if use_sigmaclip:
         log.debug(f"Sigma-clipping stack with sigma={sigma}")
         stack_masked = sigma_clip(
@@ -301,6 +330,7 @@ def coadd_camera_frames(
 
     del data_stack
 
+    # Create the path for the output file.
     frameno0 = min(frame_nos)
     frameno1 = max(frame_nos)
     outpath = outpath.format(
@@ -318,8 +348,10 @@ def coadd_camera_frames(
     if outpath_full.parent.exists() is False:
         outpath_full.parent.mkdir(parents=True, exist_ok=True)
 
+    # Construct the header.
     header = create_coadded_frame_header(frame_data)
 
+    # Write the file.
     log.debug(f"Writing co-added frame to {outpath_full.absolute()!s}")
     hdul = fits.HDUList([fits.PrimaryHDU()])
     hdul.append(fits.CompImageHDU(data=coadd, header=header, name="COADD"))
