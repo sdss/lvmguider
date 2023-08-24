@@ -1,6 +1,4 @@
 ---
-telescope: sci
-
 pid:
   ra:
     Kp: 0.7
@@ -19,8 +17,9 @@ site:
   lat: -29.00333333
   height: 2282.0
 
-actor:
-  name: lvm.sci.guider
-  host: 10.8.38.21
-  port: 5672
-  log_dir: /data/logs/lvm.sci.guider
+database:
+  host: lvm-webapp.lco.cl
+  port: 5432
+  user: sdss
+  dbname: lvmdb
+  pgpass: ~sdss5/.pgpass
