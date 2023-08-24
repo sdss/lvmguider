@@ -178,7 +178,6 @@ class Focuser:
             raise ValueError("Insufficient number of focus points.")
 
         sources = pandas.concat(source_list)
-        sources["fwhm"] = 0.5 * (sources.xstd + sources.ystd)
 
         fit_data = self.fit_focus(
             sources,
@@ -230,11 +229,13 @@ class Focuser:
     def fit_focus(self, sources: pandas.DataFrame, fit_method: str = "parabola"):
         """Fits the data and returns the best focus and measured FWHM."""
 
+        sources_valid = sources.loc[(sources.xfitvalid == 1) & (sources.yfitvalid == 1)]
+
         if fit_method == "parabola":
             a, b, c, R2 = fit_parabola(
-                sources.dt.tolist(),
-                sources.fwhm.tolist(),
-                sources.xrms.tolist(),
+                sources_valid.dt.tolist(),
+                sources_valid.fwhm.tolist(),
+                sources_valid.xrms.tolist(),
             )
 
             xmin = -b / 2 / a
@@ -243,7 +244,7 @@ class Focuser:
             return {"xmin": xmin, "ymin": ymin, "R2": R2, "coeffs": [a, b, c]}
 
         elif fit_method == "spline":
-            fwhm = sources.groupby("dt").apply(
+            fwhm = sources_valid.groupby("dt").apply(
                 lambda gg: pandas.Series(
                     {
                         "fwhm": gg.fwhm.median(),
@@ -280,14 +281,21 @@ class Focuser:
 
         seaborn.set_theme(palette="deep")
 
-        data["fwhm"] = 0.5 * (data.xstd + data.ystd)
+        data_valid = data.loc[(data.xfitvalid == 1) & (data.yfitvalid == 1)]
 
         with plt.ioff():
             fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(13, 8))
 
-            ax.scatter(data.dt, data.fwhm, s=10, color="y", ec="None", alpha=0.3)
+            ax.scatter(
+                data_valid.dt,
+                data_valid.fwhm,
+                s=10,
+                color="y",
+                ec="None",
+                alpha=0.3,
+            )
 
-            fwhm_median = data.groupby("dt").fwhm.median()
+            fwhm_median = data_valid.groupby("dt").fwhm.median()
 
             ax.scatter(
                 fwhm_median.index,
@@ -298,8 +306,8 @@ class Focuser:
                 s=20,
             )
 
-            xmin = numpy.min(data.dt.to_numpy()).astype(numpy.float32)
-            xmax = numpy.max(data.dt.to_numpy()).astype(numpy.float32)
+            xmin = numpy.min(data_valid.dt.to_numpy()).astype(numpy.float32)
+            xmax = numpy.max(data_valid.dt.to_numpy()).astype(numpy.float32)
 
             xx = numpy.arange(xmin - 0.5, xmax + 0.5, 0.01)
 

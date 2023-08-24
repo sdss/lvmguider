@@ -163,6 +163,7 @@ class Cameras:
                             camname = hdul["RAW"].header["CAMNAME"].lower()
                             isources = sources[ifn]
                             isources["camera"] = camname
+                            isources["fwhm"] = 0.5 * (isources.xstd + isources.ystd)
                             hdul.append(
                                 fits.BinTableHDU(
                                     data=Table.from_pandas(isources),
