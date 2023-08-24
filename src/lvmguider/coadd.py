@@ -14,6 +14,7 @@ from dataclasses import dataclass
 
 import nptyping as npt
 import numpy
+import pandas
 import sep
 from astropy.io import fits
 from astropy.stats import sigma_clip
@@ -274,13 +275,15 @@ def coadd_camera_frames(
                 data_stack.append(data)
 
             # Determine the median FWHM and FWHM deviation for this frame.
-            sources = hdul["SOURCES"] if "SOURCES" in hdul else None
-            if sources is None:
+            if "SOURCES" not in hdul:
                 log.warning(f"Frame {frameno}: SOURCES extension not found.")
                 fwhm_median = None
                 fwhm_std = None
             else:
-                fwhm = 0.5 * (sources.data["xstd"] + sources.data["ystd"])
+                sources = pandas.DataFrame(hdul["SOURCES"].data)
+                valid = sources.loc[(sources.xfitvalid == 1) & (sources.yfitvalid == 1)]
+
+                fwhm = 0.5 * (valid.xstd + valid.ystd)
                 fwhm_median = float(numpy.median(fwhm))
                 fwhm_std = float(numpy.std(fwhm))
 
