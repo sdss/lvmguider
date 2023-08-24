@@ -33,7 +33,7 @@ from lvmguider import config
 from lvmguider import log as llog
 from lvmguider.extraction import extract_marginal
 from lvmguider.tools import get_db_connection, get_frameno, get_proc_path
-from lvmguider.transformations import XZ_AG_FRAME, solve_locs
+from lvmguider.transformations import XZ_AG_FRAME, get_crota2, solve_locs
 
 
 ARRAY_2D_UINT = npt.NDArray[npt.Shape["*, *"], npt.UInt16]
@@ -59,6 +59,7 @@ class FrameData:
     fwhm_std: float | None = None
     guide_mode: str = "guide"
     stacked: bool = False
+    wcs: WCS | None = None
 
 
 def create_coadded_frame_header(
@@ -91,6 +92,11 @@ def create_coadded_frame_header(
 
     zp = round(sources.zp.dropna().median(), 3)
 
+    frame_wcs = [frame.wcs for frame in frames if frame.wcs is not None]
+    crota2 = numpy.array(list(map(get_crota2, frame_wcs)))
+    crota2[crota2 < 0] += 360
+    crota2_span = abs(numpy.max(crota2) - numpy.min(crota2))
+
     wcs_header = wcs.to_header() if wcs is not None else []
 
     header = fits.Header()
@@ -119,6 +125,9 @@ def create_coadded_frame_header(
     header["COFWHMST"] = (cofwhmst, "[arcsec] Co-added FWHM standard deviation")
     header["GERRMEAN"] = (guide_error_mean, "[arcsec] Mean of guider errors")
     header["GERRSTD"] = (guide_error_std, "[arcsec] Deviation of guider errors")
+    header["PAMIN"] = (round(numpy.min(crota2), 4), "[deg] Minimum PA from WCS")
+    header["PAMAX"] = (round(numpy.max(crota2), 4), "[deg] Maximum PA from WCS")
+    header["PADRIFT"] = (round(crota2_span, 4), "[deg] PA drift in frame range")
     header["ZEROPT"] = (zp, "[mag] Instrumental zero-point")
     header.insert("FRAME0", ("", "/*** CO-ADDED PARAMETERS ***/"))
 
@@ -522,6 +531,7 @@ def coadd_camera_frames(
                 guide_error=guide_error,
                 guide_mode=guide_mode,
                 stacked=stacked,
+                wcs=WCS(proc_header),
             )
 
             del data

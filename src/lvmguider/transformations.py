@@ -12,6 +12,7 @@ import pathlib
 import warnings
 from datetime import datetime
 
+import nptyping as npt
 import numpy
 import pandas
 from astropy.coordinates import EarthLocation, SkyCoord
@@ -30,10 +31,11 @@ from lvmguider.extraction import extract_marginal
 conf.auto_download = False
 conf.iers_degraded_accuracy = "ignore"
 
-
 # Middle of an AG frame or full frame
 XZ_FULL_FRAME = (2500.0, 1000.0)
 XZ_AG_FRAME = (800.0, 550.0)
+
+ARRAY_2D_F32 = npt.NDArray[npt.Shape["*, *"], npt.Float32]
 
 
 def ag_to_master_frame(
@@ -666,3 +668,20 @@ def calculate_guide_offset(
         sep_arcsec,
         matches,
     )
+
+
+def get_crota2(wcs: WCS):
+    """Determines the ``CROTA2`` angle, in degrees, from a CD matrix."""
+
+    cd: ARRAY_2D_F32
+
+    if wcs.wcs.has_crota():
+        return wcs.wcs.crota[1]
+    elif wcs.wcs.has_cd():
+        cd = wcs.wcs.cd
+    elif wcs.wcs.has_pc():
+        cd = wcs.wcs.pc * wcs.wcs.cdelt
+    else:
+        raise ValueError("WCS does not have information to determine CROTA2.")
+
+    return numpy.degrees(numpy.arctan2(-cd[0, 1], cd[1, 1]))
