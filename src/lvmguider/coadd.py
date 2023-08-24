@@ -11,19 +11,29 @@ from __future__ import annotations
 import logging
 import pathlib
 from dataclasses import dataclass
+from sqlite3 import OperationalError
+
+from typing import Any
 
 import nptyping as npt
 import numpy
 import pandas
+import peewee
 import sep
 from astropy.io import fits
 from astropy.stats import sigma_clip
+from astropy.table import Table
 from astropy.time import Time
+from astropy.wcs import WCS
+from scipy.spatial import KDTree
 
-from sdsstools import get_logger
 from sdsstools.time import get_sjd
 
-from lvmguider.tools import get_frameno, get_proc_path
+from lvmguider import config
+from lvmguider import log as llog
+from lvmguider.extraction import extract_marginal
+from lvmguider.tools import get_db_connection, get_frameno, get_proc_path
+from lvmguider.transformations import XZ_AG_FRAME, solve_locs
 
 
 ARRAY_2D_UINT = npt.NDArray[npt.Shape["*, *"], npt.UInt16]
@@ -44,13 +54,20 @@ class FrameData:
     image_type: str
     kmirror_drot: float
     focusdt: float
+    guide_error: float | None = None
     fwhm_median: float | None = None
     fwhm_std: float | None = None
     guide_mode: str = "guide"
     stacked: bool = False
 
 
-def create_coadded_frame_header(frame_data: dict[int, FrameData]):
+def create_coadded_frame_header(
+    frame_data: dict[int, FrameData],
+    sources: pandas.DataFrame,
+    use_sigmaclip: bool = False,
+    sigma: int | None = None,
+    wcs: WCS | None = None,
+):
     """Creates the header object for a co-added frame."""
 
     # Create a list with only the stacked frames and sort by frame number.
@@ -61,26 +78,219 @@ def create_coadded_frame_header(frame_data: dict[int, FrameData]):
         )
     )
 
-    header = fits.Header()
-
     sjd = get_sjd("LCO", frames[0].date_obs.to_datetime())
+
+    fwhm0 = numpy.round(frames[0].fwhm_median, 2) if frames[0].fwhm_median else None
+    fwhmn = numpy.round(frames[-1].fwhm_median, 2) if frames[-1].fwhm_median else None
+    cofwhm = numpy.round(sources.fwhm.median(), 2)
+    cofwhmst = numpy.round(sources.fwhm.std(), 2)
+
+    guide_errors = numpy.array([f.guide_error for f in frames if f.guide_error])
+    guide_error_mean = round(float(guide_errors.mean()), 3)
+    guide_error_std = round(float(guide_errors.std()), 3)
+
+    zp = round(sources.zp.dropna().median(), 3)
+
+    wcs_header = wcs.to_header() if wcs is not None else []
+
+    header = fits.Header()
 
     header["TELESCOP"] = (frames[0].telescope, " Telescope that took the image")
     header["CAMNAME"] = (frames[0].camera, "Camera name")
     header["INSTRUME"] = ("LVM", "SDSS-V Local Volume Mapper")
     header["OBSERVAT"] = ("LCO", "Observatory")
     header["MJD"] = (sjd, "SDSS MJD (MJD+0.4)")
-    header["EXPTIME"] = (1.0, "Exposure time [s]")
-    header["PIXSIZE"] = (9.0, "Pixel size [um]")
-    header["PIXSCALE"] = (1.009, "Scaled of unbinned pixel [arcsec/pix]")
-    header["FRAME0"] = (frames[0].frameno, "First co-added frame")
-    header["FRAME1"] = (frames[-1].frameno, "Last co-added frame")
-    header["NFRAMES"] = (len(frames), "Number of frames stacked")
-    header["OBSTIME0"] = (frames[0].date_obs.isot, "DATE-OBS of FRAME0")
-    header["OBSTIME1"] = (frames[-1].date_obs.isot, "DATE-OBS of FRAME1")
+    header["EXPTIME"] = (1.0, "[s] Exposure time")
+    header["PIXSIZE"] = (9.0, "[um] Pixel size")
+    header["PIXSCALE"] = (1.009, "[arcsec/pix]Scaled of unbinned pixel")
     header.insert("TELESCOP", ("", "/*** BASIC DATA ***/"))
 
+    header["FRAME0"] = (frames[0].frameno, "First co-added frame")
+    header["FRAMEN"] = (frames[-1].frameno, "Last co-added frame")
+    header["NFRAMES"] = (len(frames), "Number of frames stacked")
+    header["COESTIM"] = ("median", "Estimator used to stack data")
+    header["SIGCLIP"] = (use_sigmaclip, "Was the stack sigma-clipped?")
+    header["SIGMA"] = (sigma, "Sigma used for sigma-clipping")
+    header["OBSTIME0"] = (frames[0].date_obs.isot, "DATE-OBS of first frame")
+    header["OBSTIMEN"] = (frames[-1].date_obs.isot, "DATE-OBS of last frame")
+    header["FWHM0"] = (fwhm0, "[arcsec] FWHM of sources in first frame")
+    header["FWHMN"] = (fwhmn, "[arcsec] FWHM of sources in last frame")
+    header["COFWHM"] = (cofwhm, "[arcsec] Co-added FWHM")
+    header["COFWHMST"] = (cofwhmst, "[arcsec] Co-added FWHM standard deviation")
+    header["GERRMEAN"] = (guide_error_mean, "[arcsec] Mean of guider errors")
+    header["GERRSTD"] = (guide_error_std, "[arcsec] Deviation of guider errors")
+    header["ZEROPT"] = (zp, "[mag] Instrumental zero-point")
+    header.insert("FRAME0", ("", "/*** CO-ADDED PARAMETERS ***/"))
+
+    header.extend(wcs_header)
+    header.insert("WCSAXES", ("", "/*** CO-ADDED WCS ***/"))
+
     return header
+
+
+def estimate_zeropoint(
+    coadd_image: ARRAY_2D,
+    sources: pandas.DataFrame,
+    wcs: WCS,
+    gain: float = 5,
+    max_separation: float = 2,
+    ap_radius: float = 6,
+    ap_bkgann: tuple[float, float] = (6, 10),
+    log: logging.Logger | None = None,
+    db_connection_params: dict[str, Any] | None = None,
+):
+    """Determines the ``lmag`` zeropoint for each source.
+
+    Parameters
+    ----------
+    sources
+        A data frame with extracted sources. The data frame is returned
+        after adding the aperture photometry and estimated zero-points.
+        If the database connection fails or it is otherwise not possible
+        to calculate zero-points, the original data frame is returned.
+    wcs
+        A WCS associated with the image. Used to determine the centre of the
+        image and perform a radial query in the database.
+    gain
+        The gain of the detector in e-/ADU.
+    max_separation
+        Maximum separation between detections and matched Gaia sources, in arcsec.
+    ap_radius
+        The radius to use for aperture photometry, in pixels.
+    ap_bkgann
+        The inner and outer radii of the annulus used to determine the background
+        around each source.
+    log
+        An instance of a logger to be used to output messages. If not provided
+        defaults to the package log.
+    db_connection_params
+        A dictionary of DB connection parameters to pass to `.get_db_connection`.
+        If `None`, uses the default configuration.
+
+    """
+
+    orig_sources = sources.copy()
+
+    # Camera FOV in degrees. Approximate, just for initial radial query.
+    CAM_FOV = numpy.max(XZ_AG_FRAME) / 3600
+    PIXSCALE = 1.009  # arcsec/pix
+
+    # Epoch difference with Gaia DR3.
+    GAIA_EPOCH = 2016.0
+    epoch = Time.now().jyear
+    epoch_diff = epoch - GAIA_EPOCH
+
+    log = log or llog
+
+    db_connection_params = db_connection_params or {}
+    conn = get_db_connection(**db_connection_params)
+
+    try:
+        conn.connect()
+    except OperationalError as err:
+        log.error(f"Failed connecting to DB: {err}")
+        return orig_sources
+
+    # Get RA/Dec of centre of frame.
+    skyc = wcs.pixel_to_world(*XZ_AG_FRAME)
+    ra: float = skyc.ra.deg
+    dec: float = skyc.dec.deg
+
+    # Query lvm_magnitude and gaia_dr3_source in a radial query around RA/Dec.
+
+    gdr3_sch, gdr3_table = config["database"]["gaia_dr3_source_table"].split(".")
+    lmag_sch, lmag_table = config["database"]["lvm_magnitude_table"].split(".")
+    GDR3 = peewee.Table(gdr3_table, schema=gdr3_sch).bind(conn)
+    LMAG = peewee.Table(lmag_table, schema=lmag_sch).bind(conn)
+
+    cte = (
+        LMAG.select(
+            LMAG.c.source_id,
+            LMAG.c.lmag_ab,
+            LMAG.c.lflux,
+        )
+        .where(peewee.fn.q3c_radial_query(LMAG.c.ra, LMAG.c.dec, ra, dec, CAM_FOV))
+        .cte("cte", materialized=True)
+    )
+    query = (
+        cte.select(
+            cte.star,
+            GDR3.c.ra,
+            GDR3.c.dec,
+            GDR3.c.pmra,
+            GDR3.c.pmdec,
+            GDR3.c.phot_g_mean_mag,
+        )
+        .join(GDR3, on=(cte.c.source_id == GDR3.c.source_id))
+        .with_cte(cte)
+        .dicts()
+    )
+
+    with conn.atomic():
+        conn.execute_sql("SET LOCAL work_mem='2GB'")
+        conn.execute_sql("SET LOCAL enable_seqscan=false")
+        data = query.execute(conn)
+
+    gaia_df = pandas.DataFrame.from_records(data)
+
+    # Match detections with Gaia sources. Take into account proper motions.
+    ra_gaia = gaia_df.ra
+    dec_gaia = gaia_df.dec
+    pmra_gaia = gaia_df.pmra / 1000 / 3600  # deg/yr
+    pmdec_gaia = gaia_df.pmdec / 1000 / 3600
+
+    ra_epoch = ra_gaia + pmra_gaia / numpy.cos(numpy.radians(dec)) * epoch_diff
+    dec_epoch = dec_gaia + pmdec_gaia * epoch_diff
+
+    # Reset index of sources.
+    sources = sources.reset_index(drop=True)
+
+    # Calculate x/y pixels of the Gaia detections. We use origin 0 but the
+    # sep/SExtractor x/y in sources assume that the centre of the lower left
+    # pixel is (1,1) so we adjust the returned pixel values.
+    xpix, ypix = wcs.wcs_world2pix(ra_epoch, dec_epoch, 0)
+    gaia_df["xpix"] = xpix + 0.5
+    gaia_df["ypix"] = ypix + 0.5
+
+    tree = KDTree(gaia_df.loc[:, ["xpix", "ypix"]].to_numpy())
+    dd, ii = tree.query(sources.loc[:, ["x", "y"]].to_numpy())
+    valid = dd < max_separation
+
+    # Get Gaia rows for the valid matches. Change their indices to those
+    # of their matching sources (which are 0..len(sources)-1 since we reindexed).
+    matches = gaia_df.iloc[ii[valid]]
+    matches.index = numpy.arange(len(ii))[valid]
+
+    # Concatenate frames.
+    sources = pandas.concat([sources, matches], axis=1)
+
+    # Calculate the separation between matched sources. Drop xpix/ypix.
+    dx = sources.xpix - sources.x
+    dy = sources.ypix - sources.y
+    sources["match_sep"] = numpy.hypot(dx, dy) * PIXSCALE
+    sources.drop(columns=["xpix", "ypix"], inplace=True)
+
+    # Do aperture photometry around the detections.
+    flux_adu, fluxerr_adu, _ = sep.sum_circle(
+        coadd_image,
+        sources.x,
+        sources.y,
+        ap_radius,
+        bkgann=ap_bkgann,
+        gain=gain,
+    )
+
+    # Calculate zero point. By definition this is the magnitude
+    # of an object that produces 1 count per second on the detector.
+    # For an arbitrary object producing DT counts per second then
+    # m = -2.5 x log10(DN) - ZP
+    zp = -2.5 * numpy.log10(flux_adu * gain) - sources.lmag_ab
+
+    sources["ap_flux"] = flux_adu
+    sources["ap_fluxerr"] = fluxerr_adu
+    sources["zp"] = zp
+
+    return sources
 
 
 def get_frame_range(
@@ -177,7 +387,7 @@ def coadd_camera_frames(
         discarded.
     log
         An instance of a logger to be used to output messages. If not provided
-        a custom logger will be created.
+        defaults to the package log.
     verbose
         Increase verbosity of the logging.
     quiet
@@ -191,7 +401,7 @@ def coadd_camera_frames(
     """
 
     # Create log and set verbosity
-    log = log or get_logger("lvmguider.coadd_camera_frames", use_rich_handler=True)
+    log = log or llog
     for handler in log.handlers:
         if verbose:
             handler.setLevel(logging.DEBUG)
@@ -205,6 +415,9 @@ def coadd_camera_frames(
     # Use the first file to get some common data (or at least it should be common!)
     sample_raw_header = fits.getheader(files[0], "RAW")
 
+    gain: float = sample_raw_header["GAIN"]
+    ra: float = sample_raw_header["RA"]
+    dec: float = sample_raw_header["DEC"]
     camname: str = sample_raw_header["CAMNAME"]
     telescope: str = sample_raw_header["TELESCOP"]
     dateobs0: str = sample_raw_header["DATE-OBS"]
@@ -240,6 +453,10 @@ def coadd_camera_frames(
                 continue
 
             proc_astrometry = fits.getheader(str(proc_file), "ASTROMETRY")
+            guide_error = numpy.hypot(
+                proc_astrometry["OFFRAMEA"],
+                proc_astrometry["OFFDEMEA"],
+            )
 
             # If we have not yet loaded the dark frame, get it and get the
             # normalised dark.
@@ -302,6 +519,7 @@ def coadd_camera_frames(
                 focusdt=proc_header["FOCUSDT"],
                 fwhm_median=fwhm_median,
                 fwhm_std=fwhm_std,
+                guide_error=guide_error,
                 guide_mode=guide_mode,
                 stacked=stacked,
             )
@@ -333,6 +551,38 @@ def coadd_camera_frames(
 
     del data_stack
 
+    # Extract sources in the co-added frame.
+    coadd_sources = extract_marginal(
+        coadd,
+        box_size=31,
+        threshold=3.0,
+        max_detections=50,
+        sextractor_quick_options={"minarea": 5},
+    )
+
+    # Get astrometry.net solution.
+    camera_solution = solve_locs(
+        coadd_sources.loc[:, ["x", "y", "flux"]],
+        ra,
+        dec,
+        full_frame=False,
+        raise_on_unsolved=False,
+    )
+    if camera_solution.solved is None:
+        log.warning("Cannot determine astrometric solution for co-added frame.")
+        wcs = None
+        # TODO: if this fails we could still use kd-tree and Gaia but we need
+        #       a better estimate of the RA/Dec of the centre of the camera.
+    else:
+        wcs = camera_solution.wcs
+        coadd_sources = estimate_zeropoint(
+            coadd,
+            coadd_sources,
+            wcs,
+            gain=gain,
+            log=log,
+        )
+
     # Create the path for the output file.
     frameno0 = min(frame_nos)
     frameno1 = max(frame_nos)
@@ -352,12 +602,19 @@ def coadd_camera_frames(
         outpath_full.parent.mkdir(parents=True, exist_ok=True)
 
     # Construct the header.
-    header = create_coadded_frame_header(frame_data)
+    header = create_coadded_frame_header(
+        frame_data,
+        coadd_sources,
+        use_sigmaclip=use_sigmaclip,
+        sigma=int(sigma) if use_sigmaclip else None,
+        wcs=wcs,
+    )
 
     # Write the file.
     log.debug(f"Writing co-added frame to {outpath_full.absolute()!s}")
     hdul = fits.HDUList([fits.PrimaryHDU()])
     hdul.append(fits.CompImageHDU(data=coadd, header=header, name="COADD"))
+    hdul.append(fits.BinTableHDU(data=Table.from_pandas(coadd_sources), name="SOURCES"))
     hdul.writeto(str(outpath_full), overwrite=True)
     hdul.close()
 

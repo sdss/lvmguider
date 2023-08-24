@@ -21,8 +21,12 @@ from typing import TYPE_CHECKING
 
 import numpy
 import pandas
+import peewee
+import pgpasslib
 from astropy.io import fits
 from astropy.table import Table
+
+from lvmguider import config, log
 
 
 if TYPE_CHECKING:
@@ -228,3 +232,55 @@ def get_frameno(file: pathlib.Path | str) -> int:
         raise ValueError("Invalid file format. Cannot determine frame number.")
 
     return int(match.group(1))
+
+
+def get_db_connection(
+    dbname: str | None = None,
+    host: str | None = None,
+    port: int | None = None,
+    user: str | None = None,
+    password: str | None = None,
+    pgpass_path: str | None = None,
+):
+    """Returns a connection to the LVM database.
+
+    Any parameters not provided will default to the configuration value.
+
+    Returns
+    -------
+    connection
+        A ``peewee`` ``PostgresqlDatabase`` object. The connection is returned
+        not connected and it's the user's responsibility to connect and check
+        for errors.
+
+    """
+
+    PARAMS = ["host", "port", "user", "dbname", "password", "pgpass_path"]
+
+    default_params = config.get("database", {}).copy()
+    default_params = {kk: vv for kk, vv in default_params.items() if kk in PARAMS}
+
+    call_params = dict(
+        dbname=dbname,
+        host=host,
+        port=port,
+        user=user,
+        password=password,
+        pgpass_path=pgpass_path,
+    )
+    call_params = {kk: vv for kk, vv in call_params.items() if vv is not None}
+
+    db_params = default_params
+    db_params.update(call_params)
+
+    pgpass_path = db_params.pop("pgpass_path", None)
+    password = db_params.pop("password", None)
+    if password is None and pgpass_path is not None:
+        password = pgpasslib.getpass(**db_params)
+
+    log.debug(f"Connecting to database with params: {db_params!r}")
+
+    dbname = db_params.pop("dbname")
+    conn = peewee.PostgresqlDatabase(database=dbname, password=password, **db_params)
+
+    return conn
