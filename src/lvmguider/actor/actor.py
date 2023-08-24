@@ -13,6 +13,7 @@ import asyncio
 from typing import TYPE_CHECKING
 
 from clu.actor import AMQPActor
+from sdsstools import get_logger
 
 from lvmguider.cameras import Cameras
 from lvmguider.maskbits import GuiderStatus
@@ -28,12 +29,21 @@ class LVMGuiderActor(AMQPActor):
     """The ``lvmguider`` actor."""
 
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+        config = kwargs.get("config", None)
+        if config is None:
+            raise RuntimeError("Actor must be initialised from a configuration file.")
+
+        name = config["actor"]["name"]
+        self.telescope: str = kwargs["config"].get("telescope", name.split(".")[1])
+
+        # Use rich handler instead of the currently default CLU logger. Just nicer.
+        log = get_logger(f"clu.lvmguider.{self.telescope}", use_rich_handler=True)
+
+        super().__init__(*args, log=log, **kwargs)
 
         if self.model and self.model.schema:
             self.model.schema["additionalProperties"] = True
 
-        self.telescope: str = self.config.get("telescope", self.name.split(".")[1])
         self.cameras = Cameras(self.telescope)
 
         self._status = GuiderStatus.IDLE
