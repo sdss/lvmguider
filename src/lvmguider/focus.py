@@ -223,7 +223,7 @@ class Focuser:
             f"moveAbsolute {focus_position} DT",
         )
         if cmd.status.did_fail:
-            raise RuntimeError(f"Failed reaching focus {focus_position:.1f} DT.")
+            raise RuntimeError(f"Failed reaching focus {focus_position:.2f} DT.")
         if cmd.replies.get("AtLimit") is True:
             raise RuntimeError("Hit a limit while focusing.")
 
