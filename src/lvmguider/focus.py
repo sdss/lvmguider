@@ -195,7 +195,7 @@ class Focuser:
 
         if plot:
             frame0 = min(framenos)
-            frame1 = min(framenos)
+            frame1 = max(framenos)
             basepath = pathlib.Path(files[-1]).absolute().parent
 
             plot_name = f"focus_{self.telescope}_{frame0}_{frame1}.pdf"
