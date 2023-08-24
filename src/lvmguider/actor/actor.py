@@ -13,9 +13,8 @@ import asyncio
 from typing import TYPE_CHECKING
 
 from clu.actor import AMQPActor
-from sdsstools import get_logger
 
-from lvmguider import config
+from lvmguider import config, log
 from lvmguider.cameras import Cameras
 from lvmguider.maskbits import GuiderStatus
 
@@ -49,9 +48,6 @@ class LVMGuiderActor(AMQPActor):
 
         # Update the config that will be set in the actor instance.
         kwargs["config"] = dict(config)
-
-        # Use rich handler instead of the currently default CLU logger. Just nicer.
-        log = get_logger(f"clu.lvmguider.{self.telescope}", use_rich_handler=True)
 
         super().__init__(*args, log=log, **kwargs)
 
