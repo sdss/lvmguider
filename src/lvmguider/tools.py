@@ -217,3 +217,14 @@ def elapsed_time(command: GuiderCommand, task_name: str = "unnamed", level: str 
         level,
         text=f"Elapsed time for task {task_name!r}: {time()-time0:.3f} s",
     )
+
+
+def get_frameno(file: pathlib.Path | str) -> int:
+    """Returns the frame number for a frame."""
+
+    match = re.match(r"^.+?([0-9]+)\.fits$", str(file))
+
+    if match is None:
+        raise ValueError("Invalid file format. Cannot determine frame number.")
+
+    return int(match.group(1))
