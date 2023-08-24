@@ -173,9 +173,10 @@ class Cameras:
 
         if len(sources) > 0:
             all_sources = pandas.concat(sources)
-            fwhm = numpy.median(all_sources["xstd"]) if len(all_sources) > 0 else None
+            valid = all_sources.loc[all_sources.valid == 1]
+            fwhm = numpy.median(valid["fwhm"]) if len(valid) > 0 else None
         else:
-            all_sources = []
+            valid = []
             fwhm = None
 
         command.info(
@@ -183,9 +184,9 @@ class Cameras:
                 "seqno": next_seqno,
                 "filenames": list(filenames),
                 "flavour": flavour,
-                "n_sources": len(all_sources),
+                "n_sources": len(valid),
                 "focus_position": round(focus_position, 1),
-                "fwhm": numpy.round(fwhm, 3) if fwhm else fwhm,
+                "fwhm": numpy.round(fwhm, 3) if fwhm else -999.0,
             }
         )
 

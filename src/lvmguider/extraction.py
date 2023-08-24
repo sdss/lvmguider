@@ -327,11 +327,18 @@ def extract_marginal(
 
             detections = pandas.concat([detections, fit_df], axis=1)
 
+        valid = (detections.xfitvalid == 1) & (detections.yfitvalid == 1)
+        detections["valid"] = valid.to_numpy(int)
+
     else:
         # Add new columns. If there are no detections at least the columns will exist
         # on an empty data frame and the overall shape won't change.
         cols = ["x1", "xstd", "xrms", "y1", "ystd", "yrms", "xfitvalid", "yfitvalid"]
         detections[cols] = numpy.nan
+        detections["valid"] = 0
+
+    # Calculate FWHM as average of xstd and ystd.
+    detections["fwhm"] = 0.5 * (detections.xstd + detections.ystd)
 
     if plot is not None:
         if not isinstance(plot, pathlib.Path) and not isinstance(plot, str):
