@@ -22,6 +22,5 @@ database:
   port: 5432
   user: sdss
   dbname: lvmdb
-  pgpass_path: /home/sdss5/.pgpass
   lvm_magnitude_table: catalogdb.lvm_magnitude
   gaia_dr3_source_table: catalogdb.gaia_dr3_source
