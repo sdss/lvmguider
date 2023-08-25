@@ -29,8 +29,8 @@ lvmguider = "lvmguider.__main__:main"
 
 [tool.poetry.dependencies]
 python = "^3.10,<3.12"
-sdsstools = "^1.2.0"
-sdss-clu = "^2.0.1"
+sdsstools = "^1.2.2"
+sdss-clu = "^2.2.0"
 click-default-group = "^1.2.2"
 typing-extensions = "^4.5.0"
 astropy = "^5.2.1"
