@@ -279,7 +279,7 @@ class Guider:
                 raise RuntimeError(f"Failed determining telescope pointing: {err}")
 
         else:
-            offset_radec, sep = await self.calculate_guide_offset(sources)
+            offset_radec, sep = await self.calculate_guide_offset(sources, filenames)
 
             if numpy.any(numpy.isnan(offset_radec)) or numpy.isnan(sep):
                 self.reset_acquisition()
@@ -292,7 +292,7 @@ class Guider:
 
             # Pointing from the reference frame.
             pixel = self.pixel or XZ_FULL_FRAME
-            ref_pointing = wcs["master"].pixel_to_world(*pixel)
+            ref_pointing = wcs.pixel_to_world(*pixel)
             ra_ref = ref_pointing.ra.deg
             dec_ref = ref_pointing.dec.deg
 
@@ -636,9 +636,12 @@ class Guider:
 
                     wcs = self.reference_wcs[camname].copy()
                     wcs.wcs.crpix -= numpy.array(offset_xy)
-                    proc = hdul.get("PROC", fits.ImageHDU())
+                    if "PROC" in hdul:
+                        proc = hdul["PROC"]
+                    else:
+                        proc = fits.ImageHDU()
                     proc.header.update(wcs.to_header())
-                    proc.header["WCSMODE"] = "guide"
+                    proc.header["WCSMODE"] = "astrometrynet+guide"
 
         # Rounding.
         offset_radec = tuple(numpy.round(offset_radec, 3))
