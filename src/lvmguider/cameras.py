@@ -135,9 +135,9 @@ class Cameras:
                         command.warning(f"No dark frame found for camera {camname}.")
                         dark_file = ""
 
-                    proc_header = hdul["RAW"].header.copy()
+                    proc_header = fits.Header()
                     proc_header["DARKFILE"] = dark_file
-                    proc_header["WCSMODE"] = ("pwi", "Source of astrometric solution")
+                    proc_header["WCSMODE"] = ("none", "Source of astrometric solution")
 
                     hdul.append(
                         fits.ImageHDU(
@@ -198,14 +198,21 @@ class Cameras:
 
         return (list(filenames), next_seqno, list(sources) if extract_sources else None)
 
-    async def extract_sources(self, filename: str):
+    async def extract_sources(self, filename: str, subtract_dark: bool = True):
         """Extracts sources from a file."""
 
         hdus = fits.open(filename)
-        if "PROC" in hdus:
-            data = hdus["PROC"].data
-        else:
-            data = hdus["RAW"].data
+
+        # Initially use raw data.
+        data = hdus["RAW"].data / hdus["RAW"].header["EXPTIME"]
+
+        if subtract_dark and "PROC" in hdus:
+            darkfile = hdus["PROC"].header["DARKFILE"]
+            if darkfile and pathlib.Path(darkfile).exists():
+                dark_data = fits.getdata(darkfile).astype(numpy.float32)
+                dark_exptime = fits.getheader(darkfile, "RAW")["EXPTIME"]
+
+                data = data - (dark_data / dark_exptime)
 
         return await run_in_executor(
             extract_marginal,

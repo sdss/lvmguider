@@ -45,7 +45,7 @@ class FrameData:
     """Data associated with a frame."""
 
     file: pathlib.Path
-    proc_header: fits.Header
+    raw_header: fits.Header
     frameno: int
     date_obs: Time
     camera: str
@@ -54,6 +54,7 @@ class FrameData:
     image_type: str
     kmirror_drot: float
     focusdt: float
+    proc_header: fits.Header | None = None
     guide_error: float | None = None
     fwhm_median: float | None = None
     fwhm_std: float | None = None
@@ -457,12 +458,20 @@ def coadd_camera_frames(
         frameno = frame_nos[ii]
 
         with fits.open(str(file)) as hdul:
-            if "PROC" not in hdul:
-                log.warning(f"Frame {frameno}: PROC extension not found.")
-                continue
+            # RAW header
+            raw_header = hdul["RAW"].header
 
             # PROC header of the raw AG frame.
-            proc_header = hdul["PROC"].header
+            if "PROC" not in hdul:
+                log.warning(f"Frame {frameno}: PROC extension not found.")
+                proc_header = None
+            else:
+                proc_header = hdul["PROC"].header
+
+            if proc_header is None or proc_header["WCSMODE"] == "none":
+                wcs = None
+            else:
+                wcs = WCS(proc_header)
 
             # Get the proc- file. Just used to determine
             # if we were acquiring or guiding.
@@ -479,7 +488,7 @@ def coadd_camera_frames(
 
             # If we have not yet loaded the dark frame, get it and get the
             # normalised dark.
-            if dark is None and proc_header.get("DARKFILE", None):
+            if dark is None and proc_header and proc_header.get("DARKFILE", None):
                 hdul_dark = fits.open(str(proc_header["DARKFILE"]))
 
                 dark_data: ARRAY_2D_UINT = hdul_dark["RAW"].data.astype(numpy.float32)
@@ -528,20 +537,21 @@ def coadd_camera_frames(
             frame_data[frameno] = FrameData(
                 file=pathlib.Path(file),
                 frameno=frameno,
+                raw_header=raw_header,
                 proc_header=proc_header,
-                camera=proc_header["CAMNAME"],
-                telescope=proc_header["TELESCOP"],
-                date_obs=Time(proc_header["DATE-OBS"], format="isot"),
+                camera=raw_header["CAMNAME"],
+                telescope=raw_header["TELESCOP"],
+                date_obs=Time(raw_header["DATE-OBS"], format="isot"),
                 exptime=exptime,
-                image_type=proc_header["IMAGETYP"],
-                kmirror_drot=proc_header["KMIRDROT"],
-                focusdt=proc_header["FOCUSDT"],
+                image_type=raw_header["IMAGETYP"],
+                kmirror_drot=raw_header["KMIRDROT"],
+                focusdt=raw_header["FOCUSDT"],
                 fwhm_median=fwhm_median,
                 fwhm_std=fwhm_std,
                 guide_error=guide_error,
                 guide_mode=guide_mode,
                 stacked=stacked,
-                wcs=WCS(proc_header),
+                wcs=wcs,
             )
 
             del data
