@@ -210,17 +210,14 @@ async def append_extension(
 
 
 @contextmanager
-def elapsed_time(command: GuiderCommand, task_name: str = "unnamed", level: str = "d"):
+def elapsed_time(command: GuiderCommand, task_name: str = "unnamed"):
     """Context manager to output the elapsed time for a task."""
 
-    time0 = time()
+    t0 = time()
 
     yield
 
-    command.write(
-        level,
-        text=f"Elapsed time for task {task_name!r}: {time()-time0:.3f} s",
-    )
+    command.actor.log.debug(f"Elapsed time for task {task_name!r}: {time()-t0:.3f} s")
 
 
 def get_frameno(file: pathlib.Path | str) -> int:
