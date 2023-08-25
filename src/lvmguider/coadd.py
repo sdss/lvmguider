@@ -92,10 +92,16 @@ def create_coadded_frame_header(
 
     zp = round(sources.zp.dropna().median(), 3)
 
+    # Determine the PA drift due to k-mirror tracking.
     frame_wcs = [frame.wcs for frame in frames if frame.wcs is not None]
     crota2 = numpy.array(list(map(get_crota2, frame_wcs)))
     crota2[crota2 < 0] += 360
-    crota2_span = abs(numpy.max(crota2) - numpy.min(crota2))
+
+    # Do some sigma clipping to remove big outliers (usually due to WCS errors).
+    crota2_masked = sigma_clip(crota2, 5, masked=True)
+    crota2_min = numpy.ma.min(crota2_masked)
+    crota2_max = numpy.ma.max(crota2_masked)
+    crota2_drift = abs(crota2_min - crota2_max)
 
     wcs_header = wcs.to_header() if wcs is not None else []
 
@@ -125,9 +131,9 @@ def create_coadded_frame_header(
     header["COFWHMST"] = (cofwhmst, "[arcsec] Co-added FWHM standard deviation")
     header["GERRMEAN"] = (guide_error_mean, "[arcsec] Mean of guider errors")
     header["GERRSTD"] = (guide_error_std, "[arcsec] Deviation of guider errors")
-    header["PAMIN"] = (round(numpy.min(crota2), 4), "[deg] Minimum PA from WCS")
-    header["PAMAX"] = (round(numpy.max(crota2), 4), "[deg] Maximum PA from WCS")
-    header["PADRIFT"] = (round(crota2_span, 4), "[deg] PA drift in frame range")
+    header["PAMIN"] = (round(crota2_min, 4), "[deg] Minimum PA from WCS")
+    header["PAMAX"] = (round(crota2_max, 4), "[deg] Maximum PA from WCS")
+    header["PADRIFT"] = (round(crota2_drift, 4), "[deg] PA drift in frame range")
     header["ZEROPT"] = (zp, "[mag] Instrumental zero-point")
     header.insert("FRAME0", ("", "/*** CO-ADDED PARAMETERS ***/"))
 
