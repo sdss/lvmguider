@@ -12,7 +12,7 @@ RUN apt install -y build-essential
 RUN apt install -y astrometry.net
 
 RUN pip3 install -U pip setuptools wheel
-RUN pip3 install -U cython=0.29.36
+RUN pip3 install -U cython==0.29.36
 RUN cd lvmguider && pip3 install .
 RUN rm -Rf lvmguider
 
