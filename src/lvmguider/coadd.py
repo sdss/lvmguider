@@ -137,6 +137,10 @@ def create_coadded_frame_header(
     header["ZEROPT"] = (zp, "[mag] Instrumental zero-point")
     header.insert("FRAME0", ("", "/*** CO-ADDED PARAMETERS ***/"))
 
+    header["WARNGUID"] = (guide_error_mean > 3, "Mean guide error > 3 arcsec")
+    header["WARNPADR"] = (crota2_drift > 0.1, "PA drift > 0.1 degrees")
+    header.insert("WARNGUID", ("", "/*** WARNINGS ***/"))
+
     header.extend(wcs_header)
     header.insert("WCSAXES", ("", "/*** CO-ADDED WCS ***/"))
 
