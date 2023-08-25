@@ -1,4 +1,4 @@
-FROM python:3.11-slim-bookworm
+FROM python:3.10-slim-bookworm
 
 MAINTAINER Jose Sanchez-Gallego, gallegoj@uw.edu
 LABEL org.opencontainers.image.source https://github.com/sdss/lvmguider
@@ -12,7 +12,6 @@ RUN apt install -y build-essential
 RUN apt install -y astrometry.net
 
 RUN pip3 install -U pip setuptools wheel
-RUN pip3 install -U cython==0.29.36
 RUN cd lvmguider && pip3 install .
 RUN rm -Rf lvmguider
 
