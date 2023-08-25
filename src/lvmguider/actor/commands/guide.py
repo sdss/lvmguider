@@ -78,13 +78,6 @@ def is_stopping(command: GuiderCommand):
     help="Whether to apply corrections as motor offsets.",
 )
 @click.option(
-    "--use-individual-images/--no-use-individual-images",
-    is_flag=True,
-    default=True,
-    show_default=True,
-    help="Whether to use individual images to generate the WCS during acquisition.",
-)
-@click.option(
     "--one",
     is_flag=True,
     help="Do one single iteration and exit.",
@@ -100,7 +93,6 @@ async def guide(
     guide_tolerance: float | None = None,
     apply_corrections: bool = True,
     use_motor_offsets: bool = True,
-    use_individual_images: bool = False,
     one: bool = False,
 ):
     """Starts the guide loop."""
@@ -144,7 +136,6 @@ async def guide(
                     mode=mode,
                     guide_tolerance=guide_tolerance,
                     apply_correction=apply_corrections,
-                    use_individual_images=use_individual_images,
                     use_motor_offsets=use_motor_offsets,
                 )
             )
