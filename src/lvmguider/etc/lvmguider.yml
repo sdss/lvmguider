@@ -18,10 +18,9 @@ site:
   height: 2282.0
 
 database:
-  host: localhost
-  port: 5433
+  host: lvm-web.lco.cl
+  port: 5432
   user: sdss
-  dbname: sdss5db
-  pgpass_path: ~gallegoj/.pgpass
+  dbname: lvmdb
   lvm_magnitude_table: catalogdb.lvm_magnitude
   gaia_dr3_source_table: catalogdb.gaia_dr3_source
