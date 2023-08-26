@@ -2,9 +2,10 @@ name: Docker
 
 on:
   push:
-    paths-ignore:
-      - 'docs/**'
-  pull_request:
+    branches:
+      - '*'
+    tags:
+      - '*'
     paths-ignore:
       - 'docs/**'
 
