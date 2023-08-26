@@ -140,6 +140,7 @@ def create_coadded_frame_header(
 
     header["WARNGUID"] = (guide_error_mean > 3, "Mean guide error > 3 arcsec")
     header["WARNPADR"] = (crota2_drift > 0.1, "PA drift > 0.1 degrees")
+    header["WARNTRAN"] = (False, "Transparency N magnitudes above photometric")
     header.insert("WARNGUID", ("", "/*** WARNINGS ***/"))
 
     header.extend(wcs_header)
