@@ -40,6 +40,11 @@ ARRAY_2D_UINT = npt.NDArray[npt.Shape["*, *"], npt.UInt16]
 ARRAY_2D = npt.NDArray[npt.Shape["*, *"], npt.Float32]
 
 
+COADD_DEFAULT_PATH = (
+    "coadds/lvm.{telescope}.agcam.{camname}.coadd_{frameno0:08d}_{frameno1:08d}.fits"
+)
+
+
 @dataclass
 class FrameData:
     """Data associated with a frame."""
@@ -360,7 +365,7 @@ def get_frame_range(
 
 def coadd_camera_frames(
     files: list[str | pathlib.Path],
-    outpath: str = "coadds/lvm.{telescope}.agcam.{camname}.coadd_{frameno0:08d}_{frameno1:08d}.fits",  # noqa: E501
+    outpath: str | None = COADD_DEFAULT_PATH,
     use_sigmaclip: bool = False,
     sigma: float = 3.0,
     skip_acquisition_after_guiding: bool = False,
@@ -395,7 +400,8 @@ def coadd_camera_frames(
         The list of files to be co-added.
     outpath
         The path to the co-added frame. If a relative path, written relative to
-        the path of the first file to be co-added.
+        the path of the first file to be co-added. If `None`, the file is not
+        written to disk but the ``HDUList` is returned.
     use_sigmaclip
         Whether to use sigma clipping when combining the stack of data. Disabled
         by default as it uses significant CPU and memory.
@@ -614,24 +620,6 @@ def coadd_camera_frames(
             log=log,
         )
 
-    # Create the path for the output file.
-    frameno0 = min(frame_nos)
-    frameno1 = max(frame_nos)
-    outpath = outpath.format(
-        telescope=telescope,
-        camname=camname,
-        frameno0=frameno0,
-        frameno1=frameno1,
-    )
-
-    if pathlib.Path(outpath).is_absolute():
-        outpath_full = pathlib.Path(outpath)
-    else:
-        outpath_full = pathlib.Path(files[0]).parent / outpath
-
-    if outpath_full.parent.exists() is False:
-        outpath_full.parent.mkdir(parents=True, exist_ok=True)
-
     # Construct the header.
     header = create_coadded_frame_header(
         frame_data,
@@ -641,12 +629,33 @@ def coadd_camera_frames(
         wcs=wcs,
     )
 
-    # Write the file.
-    log.debug(f"Writing co-added frame to {outpath_full.absolute()!s}")
+    # Create the co-added HDU list.
     hdul = fits.HDUList([fits.PrimaryHDU()])
     hdul.append(fits.CompImageHDU(data=coadd, header=header, name="COADD"))
     hdul.append(fits.BinTableHDU(data=Table.from_pandas(coadd_sources), name="SOURCES"))
-    hdul.writeto(str(outpath_full), overwrite=True)
+
+    if outpath is not None:
+        # Create the path for the output file.
+        frameno0 = min(frame_nos)
+        frameno1 = max(frame_nos)
+        outpath = outpath.format(
+            telescope=telescope,
+            camname=camname,
+            frameno0=frameno0,
+            frameno1=frameno1,
+        )
+
+        if pathlib.Path(outpath).is_absolute():
+            outpath_full = pathlib.Path(outpath)
+        else:
+            outpath_full = pathlib.Path(files[0]).parent / outpath
+
+        if outpath_full.parent.exists() is False:
+            outpath_full.parent.mkdir(parents=True, exist_ok=True)
+
+        log.debug(f"Writing co-added frame to {outpath_full.absolute()!s}")
+        hdul.writeto(str(outpath_full), overwrite=True)
+
     hdul.close()
 
     return hdul
