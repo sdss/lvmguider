@@ -204,7 +204,10 @@ def fit_gaussian_to_marginal(
     valid = 1
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore")
-        gg = fitter(model, xx, marginal)
+        try:
+            gg = fitter(model, xx, marginal)
+        except Exception:
+            return (-1, -1, -1, 0)
 
         if fitter.fit_info["cov_x"] is None:
             valid = 0

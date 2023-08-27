@@ -71,6 +71,7 @@ class FrameData:
     raw_header: fits.Header
     frameno: int
     date_obs: Time
+    sjd: int
     camera: str
     telescope: str
     exptime: float
@@ -479,6 +480,10 @@ def estimate_zeropoint(
         log.error("Cannot match sources with Gaia DR3.")
         return (False, sources)
 
+    if len(gaia_df) == 0:
+        log.warning("No Gaia sources found.")
+        return (False, sources)
+
     # Reset index of sources.
     sources = sources.reset_index(drop=True)
 
@@ -805,6 +810,8 @@ def get_framedata(
             guide_mode = "none"
             stacked = False
 
+        obs_time = Time(raw_header["DATE-OBS"], format="isot")
+
         # Add information as a FrameData. We do not include the data itself
         # because it's in data_stack and we don't need it beyond that.
         return FrameData(
@@ -815,7 +822,8 @@ def get_framedata(
             proc_file=proc_file,
             camera=raw_header["CAMNAME"],
             telescope=raw_header["TELESCOP"],
-            date_obs=Time(raw_header["DATE-OBS"], format="isot"),
+            date_obs=obs_time,
+            sjd=get_sjd("LCO", obs_time.to_datetime()),
             exptime=exptime,
             image_type=raw_header["IMAGETYP"],
             kmirror_drot=raw_header["KMIRDROT"],
@@ -829,8 +837,6 @@ def get_framedata(
             wcs_mode=wcs_mode,
             data=data,
         )
-
-        del data
 
 
 def coadd_camera_frames(
@@ -1054,6 +1060,7 @@ def coadd_camera_frames(
             camname=camname,
             frameno0=frameno0,
             frameno1=frameno1,
+            mjd=sjd,
         )
 
         if pathlib.Path(outpath).is_absolute():
@@ -1200,7 +1207,7 @@ def create_master_coadd(
     pawcs = round(get_crota2(wcs_mf), 3) if wcs_mf else None
     mf_hdu.header.insert(
         "ZEROPT",
-        ("PAWCS", pawcs, "[deg] PA of the IFU derived from WCS"),
+        ("PAWCS", pawcs, "[deg] PA of the IFU from master frame co-added WCS"),
     )
 
     guide_data = get_guide_dataframe(frame_data_all)
@@ -1216,9 +1223,18 @@ def create_master_coadd(
     pa_max = round(pa_values.max(), 6)
     pa_drift = abs(pa_max - pa_min)
 
-    mf_hdu.header.insert("ZEROPT", ("PAMIN", pa_min, "[deg] Minimum PA from WCS"))
-    mf_hdu.header.insert("ZEROPT", ("PAMAX", pa_max, "[deg] Maximum PA from WCS"))
-    mf_hdu.header.insert("ZEROPT", ("PADRIFT", pa_drift, "[deg] PA drift in sequence"))
+    mf_hdu.header.insert(
+        "ZEROPT",
+        ("PAMIN", pa_min, "[deg] Min PA from individual master frames"),
+    )
+    mf_hdu.header.insert(
+        "ZEROPT",
+        ("PAMAX", pa_max, "[deg] Max PA from individual master frames"),
+    )
+    mf_hdu.header.insert(
+        "ZEROPT",
+        ("PADRIFT", pa_drift, "[deg] PA drift in sequence"),
+    )
 
     mf_hdu.header["WARNPADR"] = pa_drift > DRIFT_WARN_THRESHOLD
 
@@ -1233,6 +1249,7 @@ def create_master_coadd(
             telescope=telescope,
             frameno0=frameno0,
             frameno1=frameno1,
+            mjd=frame_data_all[0].sjd,
         )
 
         if pathlib.Path(outpath).is_absolute():
@@ -1253,6 +1270,7 @@ def process_spec_frame(
     file: pathlib.Path | str,
     outpath: str = MASTER_COADD_SPEC_PATH,
     log: logging.Logger = llog,
+    fail_silent: bool = False,
     **kwargs,
 ):
     """Processes the guider frames associated with an spectrograph file."""
@@ -1265,12 +1283,23 @@ def process_spec_frame(
     outpath = outpath.format(specno=specno)
 
     for telescope in ["sci", "skye", "skyw"]:
+        try:
+            frames = get_guider_files_from_spec(file, telescope=telescope)
+        except Exception as err:
+            if fail_silent is False:
+                log.error(f"Cannot process {telescope} for {file!s}: {err}")
+            continue
+
+        if len(frames) == 0:
+            if fail_silent is False:
+                log.warning(f"No guider frames found for {telescope} in {file!s}")
+            continue
+
         log.info(
             f"Generating master co-added frame for {telescope} for "
             f"spectrograph file {file!s}"
         )
 
-        frames = get_guider_files_from_spec(file, telescope=telescope)
         create_master_coadd(frames, outpath=outpath, log=log, **kwargs)
 
 
@@ -1281,7 +1310,13 @@ def process_all_spec_frames(path: pathlib.Path | str, **kwargs):
     spec_files = sorted(path.glob("sdR-*-b1-*.fits.gz"))
 
     for file in spec_files:
-        process_spec_frame(file, **kwargs)
+        # Skip cals and frames without any guider information.
+        header = fits.getheader(str(file))
+
+        if header["IMAGETYP"] != "object":
+            continue
+
+        process_spec_frame(file, fail_silent=True, **kwargs)
 
 
 def get_guider_files_from_spec(
