@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from functools import partial
 from sqlite3 import OperationalError
 
-from typing import Any
+from typing import Any, cast
 
 import nptyping as npt
 import numpy
@@ -72,6 +72,7 @@ class FrameData:
     kmirror_drot: float
     focusdt: float
     proc_header: fits.Header | None = None
+    proc_file: pathlib.Path | None = None
     guide_error: float | None = None
     fwhm_median: float | None = None
     fwhm_std: float | None = None
@@ -118,7 +119,6 @@ def create_coadded_frame_header(
     # Determine the PA drift due to k-mirror tracking.
     frame_wcs = [frame.wcs for frame in stacked if frame.wcs is not None]
     crota2 = numpy.array(list(map(get_crota2, frame_wcs)))
-    crota2[crota2 < 0] += 360
 
     # Do some sigma clipping to remove big outliers (usually due to WCS errors).
     if len(crota2) > 0:
@@ -373,6 +373,59 @@ def estimate_zeropoint(
     return sources
 
 
+def get_guide_dataframe(frames: list[FrameData]):
+    """Creates a data frame with guide information from ``proc-`` files."""
+
+    guide_records: list[dict] = []
+    _processed_proc_files: list[pathlib.Path] = []
+
+    for frame in frames:
+        proc_file = frame.proc_file
+
+        if proc_file is None or not proc_file.exists():
+            continue
+
+        if proc_file in _processed_proc_files:
+            continue
+
+        hdul = fits.open(proc_file)
+        if "ASTROMETRY" not in hdul or "SOURCES" not in hdul:
+            continue
+
+        astrom = hdul["ASTROMETRY"].header
+        astrom["NAXIS"] = 2
+
+        sources = pandas.DataFrame(hdul["SOURCES"].data)
+
+        wcs = WCS(astrom)
+
+        record = dict(
+            frameno=get_frameno(astrom["FILE0"]),
+            date=astrom["DATE"] if "DATE" in astrom else numpy.nan,
+            n_sources=len(sources),
+            fwhm=frame.fwhm_median,
+            telescope=frame.telescope,
+            ra=astrom["RAMEAS"],
+            dec=astrom["DECMEAS"],
+            ra_offset=astrom["OFFRAMEA"],
+            dec_offset=astrom["OFFDEMEA"],
+            separation=numpy.hypot(astrom["OFFRAMEA"], astrom["OFFDEMEA"]),
+            ra_corr=astrom["RACORR"],
+            dec_corr=astrom["DECORR"],
+            ax0_corr=astrom["AX0CORR"],
+            ax1_corr=astrom["AX1CORR"],
+            mode="acquisition" if astrom["ACQUISIT"] else "guide",
+            pa=get_crota2(wcs),
+        )
+
+        guide_records.append(record)
+
+    df = pandas.DataFrame.from_records(guide_records)
+    df.sort_values("frameno", inplace=True)
+
+    return df
+
+
 def get_frame_range(
     path: str | pathlib.Path,
     telescope: str,
@@ -557,6 +610,7 @@ def coadd_camera_frames(
                 log.warning(f"Frame {frameno}: cannot find associated proc- image.")
                 proc_astrometry = None
                 guide_error = None
+                proc_file = None
             else:
                 proc_astrometry = fits.getheader(str(proc_file), "ASTROMETRY")
                 guide_error = numpy.hypot(
@@ -623,6 +677,7 @@ def coadd_camera_frames(
                 frameno=frameno,
                 raw_header=raw_header,
                 proc_header=proc_header,
+                proc_file=proc_file,
                 camera=raw_header["CAMNAME"],
                 telescope=raw_header["TELESCOP"],
                 date_obs=Time(raw_header["DATE-OBS"], format="isot"),
@@ -864,11 +919,25 @@ def create_master_coadd(
     master_hdu.insert(1, mf_hdu)
 
     # Add PA derived from MF WCS.
-    crota2 = (get_crota2(wcs_mf) + 360) % 360
+    crota2 = get_crota2(wcs_mf)
     mf_hdu.header.insert(
         "ZEROPT",
         ("PAWCS", round(crota2, 3), "[deg] PA of the IFU derived from WCS"),
     )
+
+    guide_df = get_guide_dataframe(frame_data_all)
+    master_hdu.append(fits.BinTableHDU(Table.from_pandas(guide_df), name="GUIDEDATA"))
+
+    # Calculate PA drift. Do some sigma clipping to remove big outliers.
+    pa_values: ARRAY_1D = guide_df.pa.dropna().to_numpy(numpy.float32)
+    pa_values = cast(ARRAY_1D, sigma_clip(pa_values, 10, masked=True))
+    pa_min = round(pa_values.min(), 6)
+    pa_max = round(pa_values.max(), 6)
+    pa_drift = abs(pa_max - pa_min)
+
+    mf_hdu.header.insert("ZEROPT", ("PAMIN", pa_min, "[deg] Minimum PA from WCS"))
+    mf_hdu.header.insert("ZEROPT", ("PAMAX", pa_max, "[deg] Maximum PA from WCS"))
+    mf_hdu.header.insert("ZEROPT", ("PADRIFT", pa_drift, "[deg] PA drift in sequence"))
 
     # If any of the cameras measured PA drift, set the warning.
     padrift_warn: bool = False

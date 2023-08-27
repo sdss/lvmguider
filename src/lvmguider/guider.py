@@ -18,13 +18,14 @@ import pandas
 from astropy.coordinates import EarthLocation
 from astropy.io import fits
 from astropy.table import Table
+from astropy.time import Time
 from astropy.wcs import WCS
 from simple_pid import PID
 
 from sdsstools.time import get_sjd
 
 from lvmguider.maskbits import GuiderStatus
-from lvmguider.tools import elapsed_time, get_proc_path, run_in_executor
+from lvmguider.tools import elapsed_time, get_frameno, get_proc_path, run_in_executor
 
 from .transformations import (
     XZ_FULL_FRAME,
@@ -698,7 +699,10 @@ class Guider:
         astro_hdu = fits.ImageHDU(name="ASTROMETRY")
         astro_hdr = astro_hdu.header
 
+        astro_hdr["TELESCOPE"] = (self.telescope, "Telescope that took the images")
         astro_hdr["ACQUISIT"] = (is_acquisition, "Acquisition or guiding?")
+        astro_hdr["DATE"] = (Time.now().isot, "Date of file creation")
+        astro_hdr["FRAMENO"] = (get_frameno(filenames[0]), "Frame number")
 
         for fn, file_ in enumerate(filenames):
             astro_hdr[f"FILE{fn}"] = (str(file_), f"AG frame {fn}")
