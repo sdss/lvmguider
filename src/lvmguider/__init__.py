@@ -2,12 +2,7 @@
 
 import pathlib
 
-from rich import traceback
-
 from sdsstools import Configuration, get_logger, get_package_version
-
-
-traceback.install()
 
 
 NAME = "lvmguider"
