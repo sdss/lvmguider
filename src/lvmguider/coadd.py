@@ -350,9 +350,9 @@ def get_frame_range(
     """
 
     if camera is None:
-        files = pathlib.Path(path).glob(f"lvm.{telescope}.agcam.*")
+        files = pathlib.Path(path).glob(f"lvm.{telescope}.agcam.*.fits")
     else:
-        files = pathlib.Path(path).glob(f"lvm.{telescope}.agcam.{camera}_*")
+        files = pathlib.Path(path).glob(f"lvm.{telescope}.agcam.{camera}_*.fits")
 
     selected: list[pathlib.Path] = []
     for file in files:
@@ -659,3 +659,62 @@ def coadd_camera_frames(
     hdul.close()
 
     return hdul
+
+
+def get_guider_files_from_spec(
+    spec_file: str | pathlib.Path,
+    telescope: str | None = None,
+    agcam_path: str | pathlib.Path = "/data/agcam",
+    camera: str | None = None,
+):
+    """Returns the AG files taken during a spectrograph exposure.
+
+    A convenience function that reads the header of the spectrograph frame,
+    extracts the guide frames range and returns a list of those frames
+    filenames (missing frames are skipped).
+
+    Parameters
+    ----------
+    spec_file
+        The path to the spectrograph frame to use to determine the range.
+    telescope
+        The telescope for which to extract the range of guide/AG frames.
+        Defaults to the value in the configuration file.
+    agcam_path
+        The ``agcam`` path where AG frames are ordered by SJD.
+    camera
+        The camera, east or west, for which to select frames. If not provided
+        selects both cameras.
+
+    Returns
+    -------
+    frames
+        A list of AG file names that match the range of guide frames
+        taken during the spectrograph exposure. Missing frames in the
+        range are not included.
+
+    """
+
+    spec_file = pathlib.Path(spec_file)
+    if not spec_file.exists():
+        raise FileNotFoundError(f"Cannot find file {spec_file!s}")
+
+    header = fits.getheader(str(spec_file))
+
+    if telescope is None:
+        telescope = config["telescope"]
+
+    assert isinstance(telescope, str)
+
+    sjd = get_sjd("LCO", date=Time(header["OBSTIME"], format="isot").to_datetime())
+    frame0 = header.get(f"G{telescope.upper()}FR0", None)
+    frame1 = header.get(f"G{telescope.upper()}FRN", None)
+
+    if frame0 is None or frame1 is None:
+        raise ValueError(f"Cannot determine the guider frame range for {spec_file!s}")
+
+    agcam_path = pathlib.Path(agcam_path) / str(sjd)
+    if not agcam_path.exists():
+        raise FileNotFoundError(f"Cannot find agcam path {agcam_path!s}")
+
+    return get_frame_range(agcam_path, telescope, frame0, frame1, camera=camera)
