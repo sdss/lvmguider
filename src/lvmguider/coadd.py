@@ -33,7 +33,12 @@ from lvmguider import config
 from lvmguider import log as llog
 from lvmguider.extraction import extract_marginal
 from lvmguider.tools import get_db_connection, get_frameno, get_proc_path
-from lvmguider.transformations import XZ_AG_FRAME, get_crota2, solve_locs
+from lvmguider.transformations import (
+    XZ_AG_FRAME,
+    ag_to_master_frame,
+    get_crota2,
+    solve_locs,
+)
 
 
 ARRAY_2D_UINT = npt.NDArray[npt.Shape["*, *"], npt.UInt16]
@@ -301,6 +306,13 @@ def estimate_zeropoint(
     dy = sources.ypix - sources.y
     sources["match_sep"] = numpy.hypot(dx, dy) * PIXSCALE
     sources.drop(columns=["xpix", "ypix"], inplace=True)
+
+    # Add master frame pixels.
+    xy = sources.loc[:, ["x", "y"]].to_numpy()
+    camera = sources.iloc[0]["camera"]
+    telescope = sources.iloc[0]["telescope"]
+    mf_locs, _ = ag_to_master_frame(f"{telescope}-{camera[0]}", xy)
+    sources.loc[:, ["x_mf", "y_mf"]] = mf_locs
 
     # Do aperture photometry around the detections.
     flux_adu, fluxerr_adu, _ = sep.sum_circle(
@@ -616,6 +628,8 @@ def coadd_camera_frames(
         max_detections=50,
         sextractor_quick_options={"minarea": 5},
     )
+    coadd_sources["telescope"] = telescope
+    coadd_sources["camera"] = camname
 
     # Get astrometry.net solution.
     camera_solution = solve_locs(
