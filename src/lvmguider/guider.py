@@ -24,6 +24,7 @@ from simple_pid import PID
 
 from sdsstools.time import get_sjd
 
+from lvmguider import __version__
 from lvmguider.maskbits import GuiderStatus
 from lvmguider.tools import elapsed_time, get_frameno, get_proc_path, run_in_executor
 
@@ -699,7 +700,8 @@ class Guider:
         astro_hdu = fits.ImageHDU(name="ASTROMETRY")
         astro_hdr = astro_hdu.header
 
-        astro_hdr["TELESCOPE"] = (self.telescope, "Telescope that took the images")
+        astro_hdr["GUIDERV"] = (__version__, "Version of lvmguider")
+        astro_hdr["TELESCOP"] = (self.telescope, "Telescope that took the images")
         astro_hdr["ACQUISIT"] = (is_acquisition, "Acquisition or guiding?")
         astro_hdr["DATE"] = (Time.now().isot, "Date of file creation")
         astro_hdr["FRAMENO"] = (get_frameno(filenames[0]), "Frame number")

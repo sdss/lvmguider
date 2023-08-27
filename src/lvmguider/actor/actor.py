@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 
 from clu.actor import AMQPActor
 
-from lvmguider import config, log
+from lvmguider import __version__, config, log
 from lvmguider.cameras import Cameras
 from lvmguider.maskbits import GuiderStatus
 
@@ -49,7 +49,7 @@ class LVMGuiderActor(AMQPActor):
         # Update the config that will be set in the actor instance.
         kwargs["config"] = dict(config)
 
-        super().__init__(*args, log=log, **kwargs)
+        super().__init__(*args, log=log, version=__version__, **kwargs)
 
         if self.model and self.model.schema:
             self.model.schema["additionalProperties"] = True

@@ -22,6 +22,7 @@ from astropy.table import Table
 
 from sdsstools.time import get_sjd
 
+from lvmguider import __version__
 from lvmguider.extraction import extract_marginal
 from lvmguider.maskbits import GuiderStatus
 from lvmguider.tools import elapsed_time, run_in_executor
@@ -137,6 +138,7 @@ class Cameras:
 
                     proc_header = fits.Header()
                     proc_header["DARKFILE"] = dark_file
+                    proc_header["GUIDERV"] = (__version__, "Version of lvmguider")
                     proc_header["WCSMODE"] = ("none", "Source of astrometric solution")
 
                     hdul.append(
