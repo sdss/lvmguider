@@ -636,7 +636,7 @@ class Guider:
                         self.command.warning(f"No WCS for reference frame {file_!s}.")
                         continue
 
-                    wcs = self.reference_wcs[camname].copy()
+                    wcs = self.reference_wcs[camname].deepcopy()
                     wcs.wcs.crpix -= numpy.array(offset_xy)
                     if "PROC" in hdul:
                         proc = hdul["PROC"]
