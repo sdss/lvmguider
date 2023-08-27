@@ -426,6 +426,34 @@ def get_guide_dataframe(frames: list[FrameData]):
     return df
 
 
+def framedata_to_dataframe(frame_data: list[FrameData]):
+    """Converts a list of frame data to a data frame (!)."""
+
+    records: list[dict] = []
+    for fd in frame_data:
+        records.append(
+            dict(
+                frameno=fd.frameno,
+                date_obs=fd.date_obs.isot,
+                camera=fd.camera,
+                telescope=fd.telescope,
+                exptime=fd.exptime,
+                kmirror_drot=fd.kmirror_drot,
+                focusdt=fd.focusdt,
+                guide_error=fd.guide_error,
+                fwhm_median=fd.fwhm_median,
+                fwhm_std=fd.fwhm_std,
+                guide_mode=fd.guide_mode,
+                stacked=int(fd.stacked),
+            )
+        )
+
+    df = pandas.DataFrame.from_records(records)
+    df = df.sort_values(["frameno", "camera"])
+
+    return df
+
+
 def get_frame_range(
     path: str | pathlib.Path,
     telescope: str,
@@ -765,10 +793,14 @@ def coadd_camera_frames(
         wcs=wcs,
     )
 
+    # Get frame data table.
+    frame_data_df = framedata_to_dataframe(list(frame_data.values()))
+
     # Create the co-added HDU list.
     hdul = fits.HDUList([fits.PrimaryHDU()])
     hdul.append(fits.CompImageHDU(data=coadd, header=header, name="COADD"))
-    hdul.append(fits.BinTableHDU(data=Table.from_pandas(coadd_sources), name="SOURCES"))
+    hdul.append(fits.BinTableHDU(Table.from_pandas(coadd_sources), name="SOURCES"))
+    hdul.append(fits.BinTableHDU(Table.from_pandas(frame_data_df), name="FRAMEDATA"))
 
     if outpath is not None:
         # Create the path for the output file.
@@ -925,11 +957,14 @@ def create_master_coadd(
         ("PAWCS", round(crota2, 3), "[deg] PA of the IFU derived from WCS"),
     )
 
-    guide_df = get_guide_dataframe(frame_data_all)
-    master_hdu.append(fits.BinTableHDU(Table.from_pandas(guide_df), name="GUIDEDATA"))
+    guide_data = get_guide_dataframe(frame_data_all)
+    frame_data_t = Table.from_pandas(framedata_to_dataframe(frame_data_all))
+
+    master_hdu.append(fits.BinTableHDU(Table.from_pandas(guide_data), name="GUIDEDATA"))
+    master_hdu.append(fits.BinTableHDU(frame_data_t, name="FRAMEDATA"))
 
     # Calculate PA drift. Do some sigma clipping to remove big outliers.
-    pa_values: ARRAY_1D = guide_df.pa.dropna().to_numpy(numpy.float32)
+    pa_values: ARRAY_1D = guide_data.pa.dropna().to_numpy(numpy.float32)
     pa_values = cast(ARRAY_1D, sigma_clip(pa_values, 10, masked=True))
     pa_min = round(pa_values.min(), 6)
     pa_max = round(pa_values.max(), 6)
