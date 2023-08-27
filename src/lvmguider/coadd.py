@@ -468,6 +468,13 @@ def coadd_camera_frames(
             # RAW header
             raw_header = hdul["RAW"].header
 
+            # Do some sanity checks.
+            if raw_header["CAMNAME"] != camname:
+                raise ValueError("Multiple cameras found in the list of frames.")
+
+            if raw_header["TELESCOP"] != telescope:
+                raise ValueError("Multiple telescopes found in the list of frames.")
+
             # PROC header of the raw AG frame.
             if "PROC" not in hdul:
                 log.warning(f"Frame {frameno}: PROC extension not found.")
@@ -478,6 +485,7 @@ def coadd_camera_frames(
             if proc_header is None or proc_header["WCSMODE"] == "none":
                 wcs = None
             else:
+                proc_header["NAXIS"] = 2
                 wcs = WCS(proc_header)
 
             # Get the proc- file. Just used to determine
