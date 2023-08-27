@@ -232,6 +232,7 @@ def get_frameno(file: pathlib.Path | str) -> int:
 
 
 def get_db_connection(
+    profile: str = "default",
     dbname: str | None = None,
     host: str | None = None,
     port: int | None = None,
@@ -241,7 +242,8 @@ def get_db_connection(
 ):
     """Returns a connection to the LVM database.
 
-    Any parameters not provided will default to the configuration value.
+    Any parameters not provided will default to the configuration values
+    from the selected profile.
 
     Returns
     -------
@@ -254,7 +256,7 @@ def get_db_connection(
 
     PARAMS = ["host", "port", "user", "dbname", "password", "pgpass_path"]
 
-    default_params = config.get("database", {}).copy()
+    default_params = config.get("database", {}).get(profile, {}).copy()
     default_params = {kk: vv for kk, vv in default_params.items() if kk in PARAMS}
 
     call_params = dict(

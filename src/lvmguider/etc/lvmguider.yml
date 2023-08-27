@@ -18,9 +18,20 @@ site:
   height: 2282.0
 
 database:
-  host: lvm-webapp.lco.cl
-  port: 5432
-  user: sdss
-  dbname: lvmdb
+  default:
+    host: lvm-webapp.lco.cl
+    port: 5432
+    user: sdss
+    dbname: lvmdb
+  utah:
+    host: operations.sdss.org
+    port: 5432
+    user: sdss
+    dbname: sdss5db
+  mako:
+    host: localhost
+    port: 5433
+    user: sdss
+    dbname: sdss5db
   lvm_magnitude_table: catalogdb.lvm_magnitude
   gaia_dr3_source_table: catalogdb.gaia_dr3_source

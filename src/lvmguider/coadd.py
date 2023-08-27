@@ -38,7 +38,7 @@ from lvmguider.transformations import XZ_AG_FRAME, get_crota2, solve_locs
 
 ARRAY_2D_UINT = npt.NDArray[npt.Shape["*, *"], npt.UInt16]
 ARRAY_2D = npt.NDArray[npt.Shape["*, *"], npt.Float32]
-
+ARRAY_1D = npt.NDArray[npt.Shape["*"], npt.Float32]
 
 COADD_DEFAULT_PATH = (
     "coadds/lvm.{telescope}.agcam.{camname}.coadd_{frameno0:08d}_{frameno1:08d}.fits"
@@ -104,10 +104,15 @@ def create_coadded_frame_header(
     crota2[crota2 < 0] += 360
 
     # Do some sigma clipping to remove big outliers (usually due to WCS errors).
-    crota2_masked = sigma_clip(crota2, 5, masked=True)
-    crota2_min = numpy.ma.min(crota2_masked)
-    crota2_max = numpy.ma.max(crota2_masked)
-    crota2_drift = abs(crota2_min - crota2_max)
+    if len(crota2) > 0:
+        crota2_masked = sigma_clip(crota2, 5, masked=True)
+        crota2_min = round(numpy.ma.min(crota2_masked), 4)
+        crota2_max = round(numpy.ma.max(crota2_masked), 4)
+        crota2_drift = round(abs(crota2_min - crota2_max), 4)
+        drift_warning = crota2_drift > 0.1
+    else:
+        crota2_min = crota2_max = crota2_drift = None
+        drift_warning = True
 
     wcs_header = wcs.to_header() if wcs is not None else []
 
@@ -137,14 +142,14 @@ def create_coadded_frame_header(
     header["COFWHMST"] = (cofwhmst, "[arcsec] Co-added FWHM standard deviation")
     header["GERRMEAN"] = (guide_error_mean, "[arcsec] Mean of guider errors")
     header["GERRSTD"] = (guide_error_std, "[arcsec] Deviation of guider errors")
-    header["PAMIN"] = (round(crota2_min, 4), "[deg] Minimum PA from WCS")
-    header["PAMAX"] = (round(crota2_max, 4), "[deg] Maximum PA from WCS")
-    header["PADRIFT"] = (round(crota2_drift, 4), "[deg] PA drift in frame range")
+    header["PAMIN"] = (crota2_min, "[deg] Minimum PA from WCS")
+    header["PAMAX"] = (crota2_max, "[deg] Maximum PA from WCS")
+    header["PADRIFT"] = (crota2_drift, "[deg] PA drift in frame range")
     header["ZEROPT"] = (zp, "[mag] Instrumental zero-point")
     header.insert("FRAME0", ("", "/*** CO-ADDED PARAMETERS ***/"))
 
     header["WARNGUID"] = (guide_error_mean > 3, "Mean guide error > 3 arcsec")
-    header["WARNPADR"] = (crota2_drift > 0.1, "PA drift > 0.1 degrees")
+    header["WARNPADR"] = (drift_warning, "PA drift > 0.1 degrees")
     header["WARNTRAN"] = (False, "Transparency N magnitudes above photometric")
     header.insert("WARNGUID", ("", "/*** WARNINGS ***/"))
 
@@ -163,7 +168,7 @@ def estimate_zeropoint(
     ap_radius: float = 6,
     ap_bkgann: tuple[float, float] = (6, 10),
     log: logging.Logger | None = None,
-    db_connection_params: dict[str, Any] | None = None,
+    db_connection_params: dict[str, Any] = {},
 ):
     """Determines the ``lmag`` zeropoint for each source.
 
@@ -191,7 +196,6 @@ def estimate_zeropoint(
         defaults to the package log.
     db_connection_params
         A dictionary of DB connection parameters to pass to `.get_db_connection`.
-        If `None`, uses the default configuration.
 
     """
 
@@ -208,7 +212,6 @@ def estimate_zeropoint(
 
     log = log or llog
 
-    db_connection_params = db_connection_params or {}
     conn = get_db_connection(**db_connection_params)
 
     try:
@@ -260,10 +263,13 @@ def estimate_zeropoint(
     gaia_df = pandas.DataFrame.from_records(data)
 
     # Match detections with Gaia sources. Take into account proper motions.
-    ra_gaia = gaia_df.ra
-    dec_gaia = gaia_df.dec
-    pmra_gaia = gaia_df.pmra / 1000 / 3600  # deg/yr
-    pmdec_gaia = gaia_df.pmdec / 1000 / 3600
+    ra_gaia: ARRAY_1D = gaia_df.ra.to_numpy(numpy.float32)
+    dec_gaia: ARRAY_1D = gaia_df.dec.to_numpy(numpy.float32)
+    pmra: ARRAY_1D = gaia_df.pmra.to_numpy(numpy.float32)
+    pmdec: ARRAY_1D = gaia_df.pmdec.to_numpy(numpy.float32)
+
+    pmra_gaia = numpy.nan_to_num(pmra) / 1000 / 3600  # deg/yr
+    pmdec_gaia = numpy.nan_to_num(pmdec) / 1000 / 3600
 
     ra_epoch = ra_gaia + pmra_gaia / numpy.cos(numpy.radians(dec)) * epoch_diff
     dec_epoch = dec_gaia + pmdec_gaia * epoch_diff
@@ -369,6 +375,8 @@ def coadd_camera_frames(
     use_sigmaclip: bool = False,
     sigma: float = 3.0,
     skip_acquisition_after_guiding: bool = False,
+    database_profile: str = "default",
+    database_params: dict = {},
     log: logging.Logger | None = None,
     verbose: bool = False,
     quiet: bool = False,
@@ -412,6 +420,10 @@ def coadd_camera_frames(
         and until the last frame. If ``skip_acquisition_after_guiding=True``,
         ``'acquisition'`` images found after the initial acquisition are
         discarded.
+    database_profile
+        Profile name to use to connect to the database and query Gaia.
+    database_params
+        Additional database parameters used to override the profile.
     log
         An instance of a logger to be used to output messages. If not provided
         defaults to the package log.
@@ -620,12 +632,14 @@ def coadd_camera_frames(
         #       a better estimate of the RA/Dec of the centre of the camera.
     else:
         wcs = camera_solution.wcs
+        db_connection_params = {"profile": database_profile, **database_params}
         coadd_sources = estimate_zeropoint(
             coadd,
             coadd_sources,
             wcs,
             gain=gain,
             log=log,
+            db_connection_params=db_connection_params,
         )
 
     # Construct the header.
@@ -661,7 +675,7 @@ def coadd_camera_frames(
         if outpath_full.parent.exists() is False:
             outpath_full.parent.mkdir(parents=True, exist_ok=True)
 
-        log.debug(f"Writing co-added frame to {outpath_full.absolute()!s}")
+        log.info(f"Writing co-added frame to {outpath_full.absolute()!s}")
         hdul.writeto(str(outpath_full), overwrite=True)
 
     hdul.close()
