@@ -56,8 +56,9 @@ COADD_CAMERA_DEFAULT_PATH = (
 MASTER_COADD_DEFAULT_PATH = (
     "coadds/lvm.{telescope}.agcam.coadd_{frameno0:08d}_{frameno1:08d}.fits"
 )
+MASTER_COADD_SPEC_PATH = "coadds/lvm.{{telescope}}.agcam.coadd_s{specno:08d}.fits"
 
-DRIFT_WARN_THRESHOLD:float = 0.1
+DRIFT_WARN_THRESHOLD: float = 0.1
 
 warnings.simplefilter("ignore", category=FITSFixedWarning)
 
@@ -201,11 +202,12 @@ def create_coadded_frame_header(
     header["WARNMATC"] = (not matched, "Co-added frame could not be matched with Gaia")
     header.insert("WARNPADR", ("", "/*** WARNINGS ***/"))
 
-    header.extend(wcs_header)
-    if is_master:
-        header.insert("WCSAXES", ("", "/*** MASTER FRAME WCS ***/"))
-    else:
-        header.insert("WCSAXES", ("", "/*** CO-ADDED WCS ***/"))
+    if wcs is not None:
+        header.extend(wcs_header)
+        if is_master:
+            header.insert("WCSAXES", ("", "/*** MASTER FRAME WCS ***/"))
+        else:
+            header.insert("WCSAXES", ("", "/*** CO-ADDED WCS ***/"))
 
     return header
 
@@ -679,7 +681,7 @@ def get_framedata(
 
         # PROC header of the raw AG frame.
         if "PROC" not in hdul:
-            log.warning(f"Frame {frameno}: PROC extension not found.")
+            log.warning(f"Frame {camname}-{frameno}: PROC extension not found.")
             proc_header = None
         else:
             proc_header = hdul["PROC"].header
@@ -702,7 +704,7 @@ def get_framedata(
         # if we were acquiring or guiding.
         proc_file = get_proc_path(file)
         if not proc_file.exists():
-            log.warning(f"Frame {frameno}: cannot find associated proc- image.")
+            log.warning(f"Frame {camname}-{frameno}: missing associated proc- image.")
             proc_astrometry = None
             guide_error = None
             proc_file = None
@@ -742,12 +744,13 @@ def get_framedata(
                     if ref_file is None:
                         log.error(
                             f"Cannot find reference file for {file!s}. "
-                            "Cannot refine WCS."
+                            f"Cannot refine WCS for {camname}-{frameno}."
                         )
                     else:
                         ref_header = fits.getheader(ref_file, "PROC")
                         ref_wcs = WCS(ref_header)
 
+                        log.debug(f"Refining WCS for frame {camname}-{frameno}.")
                         (refine_ok, refine_wcs) = refine_camera_wcs(
                             ref_wcs,
                             sources,
@@ -757,7 +760,10 @@ def get_framedata(
                         if refine_ok:
                             wcs = refine_wcs
                         else:
-                            log.warning(f"Failed refining WCS for file {file!s}")
+                            log.warning(
+                                f"Frame {camname}-{frameno}: "
+                                f"failed refining WCS for file {file!s}"
+                            )
                             wcs = None
 
         # If we have not yet loaded the dark frame, get it and get the
@@ -1003,7 +1009,7 @@ def coadd_camera_frames(
         raise_on_unsolved=False,
     )
 
-    if camera_solution.solved is None:
+    if camera_solution.solved is False:
         log.warning("Cannot determine astrometric solution for co-added frame.")
         wcs = None
         matched = False
@@ -1067,7 +1073,7 @@ def coadd_camera_frames(
 
 
 def create_master_coadd(
-    files: list[str | pathlib.Path],
+    files: list[str] | list[pathlib.Path],
     outpath: str | None = MASTER_COADD_DEFAULT_PATH,
     save_camera_coadded_frames: bool = False,
     log: logging.Logger | None = None,
@@ -1164,23 +1170,26 @@ def create_master_coadd(
         )
     )
 
-    # Now let's create the master frame WCS. It's easy since we already matched
-    # with Gaia.
-    wcs_data = sources_coadd.loc[:, ["x_mf", "y_mf", "ra_epoch", "dec_epoch"]]
-    wcs_data = wcs_data.dropna()
+    wcs_mf: WCS | None = None
+    if "x_mf" in sources_coadd:
+        # Now let's create the master frame WCS. It's easy since we already matched
+        # with Gaia.
+        wcs_data = sources_coadd.loc[:, ["x_mf", "y_mf", "ra_epoch", "dec_epoch"]]
+        wcs_data = wcs_data.dropna()
 
-    skycoords = SkyCoord(
-        ra=wcs_data.ra_epoch,
-        dec=wcs_data.dec_epoch,
-        unit="deg",
-        frame="icrs",
-    )
-    wcs_mf: WCS = fit_wcs_from_points((wcs_data.x_mf, wcs_data.y_mf), skycoords)
+        skycoords = SkyCoord(
+            ra=wcs_data.ra_epoch,
+            dec=wcs_data.dec_epoch,
+            unit="deg",
+            frame="icrs",
+        )
+        wcs_mf = fit_wcs_from_points((wcs_data.x_mf, wcs_data.y_mf), skycoords)
 
     # Initial MF HDU
     mf_header = create_coadded_frame_header(
         frame_data_all,
         sources_coadd,
+        matched=wcs_mf is not None,
         wcs=wcs_mf,
         is_master=True,
     )
@@ -1188,10 +1197,10 @@ def create_master_coadd(
     master_hdu.insert(1, mf_hdu)
 
     # Add PA derived from MF WCS.
-    crota2 = get_crota2(wcs_mf)
+    pawcs = round(get_crota2(wcs_mf), 3) if wcs_mf else None
     mf_hdu.header.insert(
         "ZEROPT",
-        ("PAWCS", round(crota2, 3), "[deg] PA of the IFU derived from WCS"),
+        ("PAWCS", pawcs, "[deg] PA of the IFU derived from WCS"),
     )
 
     guide_data = get_guide_dataframe(frame_data_all)
@@ -1240,6 +1249,41 @@ def create_master_coadd(
     return master_hdu
 
 
+def process_spec_frame(
+    file: pathlib.Path | str,
+    outpath: str = MASTER_COADD_SPEC_PATH,
+    log: logging.Logger = llog,
+    **kwargs,
+):
+    """Processes the guider frames associated with an spectrograph file."""
+
+    file = pathlib.Path(file)
+    if not file.exists():
+        raise FileExistsError(f"File {file!s} not found.")
+
+    specno = int(file.name.split("-")[-1].split(".")[0])
+    outpath = outpath.format(specno=specno)
+
+    for telescope in ["sci", "skye", "skyw"]:
+        log.info(
+            f"Generating master co-added frame for {telescope} for "
+            f"spectrograph file {file!s}"
+        )
+
+        frames = get_guider_files_from_spec(file, telescope=telescope)
+        create_master_coadd(frames, outpath=outpath, log=log, **kwargs)
+
+
+def process_all_spec_frames(path: pathlib.Path | str, **kwargs):
+    """Processes all the spectrograph frames in a directory."""
+
+    path = pathlib.Path(path)
+    spec_files = sorted(path.glob("sdR-*-b1-*.fits.gz"))
+
+    for file in spec_files:
+        process_spec_frame(file, **kwargs)
+
+
 def get_guider_files_from_spec(
     spec_file: str | pathlib.Path,
     telescope: str | None = None,
@@ -1276,7 +1320,7 @@ def get_guider_files_from_spec(
 
     spec_file = pathlib.Path(spec_file)
     if not spec_file.exists():
-        raise FileNotFoundError(f"Cannot find file {spec_file!s}")
+        raise FileExistsError(f"Cannot find file {spec_file!s}")
 
     header = fits.getheader(str(spec_file))
 
@@ -1294,6 +1338,6 @@ def get_guider_files_from_spec(
 
     agcam_path = pathlib.Path(agcam_path) / str(sjd)
     if not agcam_path.exists():
-        raise FileNotFoundError(f"Cannot find agcam path {agcam_path!s}")
+        raise FileExistsError(f"Cannot find agcam path {agcam_path!s}")
 
     return get_frame_range(agcam_path, telescope, frame0, frame1, camera=camera)
