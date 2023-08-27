@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import logging
 import pathlib
+from collections import defaultdict
 from dataclasses import dataclass
+from functools import partial
 from sqlite3 import OperationalError
 
 from typing import Any
@@ -20,11 +22,13 @@ import numpy
 import pandas
 import peewee
 import sep
+from astropy.coordinates import SkyCoord
 from astropy.io import fits
 from astropy.stats import sigma_clip
 from astropy.table import Table
 from astropy.time import Time
 from astropy.wcs import WCS
+from astropy.wcs.utils import fit_wcs_from_points
 from scipy.spatial import KDTree
 
 from sdsstools.time import get_sjd
@@ -45,8 +49,11 @@ ARRAY_2D_UINT = npt.NDArray[npt.Shape["*, *"], npt.UInt16]
 ARRAY_2D = npt.NDArray[npt.Shape["*, *"], npt.Float32]
 ARRAY_1D = npt.NDArray[npt.Shape["*"], npt.Float32]
 
-COADD_DEFAULT_PATH = (
+COADD_CAMERA_DEFAULT_PATH = (
     "coadds/lvm.{telescope}.agcam.{camname}.coadd_{frameno0:08d}_{frameno1:08d}.fits"
+)
+MASTER_COADD_DEFAULT_PATH = (
+    "coadds/lvm.{telescope}.agcam.coadd_{frameno0:08d}_{frameno1:08d}.fits"
 )
 
 
@@ -74,26 +81,32 @@ class FrameData:
 
 
 def create_coadded_frame_header(
-    frame_data: dict[int, FrameData],
+    frame_data: list[FrameData],
     sources: pandas.DataFrame,
     use_sigmaclip: bool = False,
     sigma: int | None = None,
     wcs: WCS | None = None,
+    is_master: bool = False,
 ):
     """Creates the header object for a co-added frame."""
 
     # Create a list with only the stacked frames and sort by frame number.
     frames = list(
         sorted(
-            [fd for fd in frame_data.values() if fd.stacked],
+            [fd for fd in frame_data if fd.stacked],
             key=lambda x: x.frameno,
         )
     )
 
+    frame0 = frames[0].frameno
+    framen = frames[-1].frameno
+
     sjd = get_sjd("LCO", frames[0].date_obs.to_datetime())
 
-    fwhm0 = numpy.round(frames[0].fwhm_median, 2) if frames[0].fwhm_median else None
-    fwhmn = numpy.round(frames[-1].fwhm_median, 2) if frames[-1].fwhm_median else None
+    fwhm_medians = [ff.fwhm_median for ff in frames if ff.fwhm_median is not None]
+    fwhm0 = numpy.round(fwhm_medians[0], 2)
+    fwhmn = numpy.round(fwhm_medians[-1], 2)
+    fwhm_median = numpy.round(numpy.median(fwhm_medians), 2)
     cofwhm = numpy.round(sources.fwhm.median(), 2)
     cofwhmst = numpy.round(sources.fwhm.std(), 2)
 
@@ -123,43 +136,62 @@ def create_coadded_frame_header(
 
     header = fits.Header()
 
+    # Basic info
     header["TELESCOP"] = (frames[0].telescope, " Telescope that took the image")
-    header["CAMNAME"] = (frames[0].camera, "Camera name")
+
+    if not is_master:
+        header["CAMNAME"] = (frames[0].camera, "Camera name")
+
     header["INSTRUME"] = ("LVM", "SDSS-V Local Volume Mapper")
     header["OBSERVAT"] = ("LCO", "Observatory")
     header["MJD"] = (sjd, "SDSS MJD (MJD+0.4)")
-    header["EXPTIME"] = (1.0, "[s] Exposure time")
-    header["PIXSIZE"] = (9.0, "[um] Pixel size")
-    header["PIXSCALE"] = (1.009, "[arcsec/pix]Scaled of unbinned pixel")
+
+    if is_master:
+        header["EXPTIME"] = (1.0, "[s] Exposure time")
+        header["PIXSIZE"] = (9.0, "[um] Pixel size")
+        header["PIXSCALE"] = (1.009, "[arcsec/pix]Scaled of unbinned pixel")
+
     header.insert("TELESCOP", ("", "/*** BASIC DATA ***/"))
 
-    header["FRAME0"] = (frames[0].frameno, "First co-added frame")
-    header["FRAMEN"] = (frames[-1].frameno, "Last co-added frame")
-    header["NFRAMES"] = (len(frames), "Number of frames stacked")
-    header["COESTIM"] = ("median", "Estimator used to stack data")
-    header["SIGCLIP"] = (use_sigmaclip, "Was the stack sigma-clipped?")
-    header["SIGMA"] = (sigma, "Sigma used for sigma-clipping")
+    # Frame info
+    header["FRAME0"] = (frame0, "First co-added frame")
+    header["FRAMEN"] = (framen, "Last co-added frame")
+    header["NFRAMES"] = (framen - frame0 + 1, "Number of frames stacked")
+
+    if not is_master:
+        header["COESTIM"] = ("median", "Estimator used to stack data")
+        header["SIGCLIP"] = (use_sigmaclip, "Was the stack sigma-clipped?")
+        header["SIGMA"] = (sigma, "Sigma used for sigma-clipping")
+
     header["OBSTIME0"] = (frames[0].date_obs.isot, "DATE-OBS of first frame")
     header["OBSTIMEN"] = (frames[-1].date_obs.isot, "DATE-OBS of last frame")
     header["FWHM0"] = (fwhm0, "[arcsec] FWHM of sources in first frame")
     header["FWHMN"] = (fwhmn, "[arcsec] FWHM of sources in last frame")
-    header["COFWHM"] = (cofwhm, "[arcsec] Co-added FWHM")
+    header["FHHMMED"] = (fwhm_median, "[arcsec] Median of the FHWM of all frames")
+    header["COFWHM"] = (cofwhm, "[arcsec] Co-added median FWHM")
     header["COFWHMST"] = (cofwhmst, "[arcsec] Co-added FWHM standard deviation")
     header["GERRMEAN"] = (guide_error_mean, "[arcsec] Mean of guider errors")
     header["GERRSTD"] = (guide_error_std, "[arcsec] Deviation of guider errors")
-    header["PAMIN"] = (crota2_min, "[deg] Minimum PA from WCS")
-    header["PAMAX"] = (crota2_max, "[deg] Maximum PA from WCS")
-    header["PADRIFT"] = (crota2_drift, "[deg] PA drift in frame range")
+
+    if not is_master:
+        header["PAMIN"] = (crota2_min, "[deg] Minimum PA from WCS")
+        header["PAMAX"] = (crota2_max, "[deg] Maximum PA from WCS")
+        header["PADRIFT"] = (crota2_drift, "[deg] PA drift in frame range")
+
     header["ZEROPT"] = (zp, "[mag] Instrumental zero-point")
     header.insert("FRAME0", ("", "/*** CO-ADDED PARAMETERS ***/"))
 
+    # Warnings
     header["WARNGUID"] = (guide_error_mean > 3, "Mean guide error > 3 arcsec")
     header["WARNPADR"] = (drift_warning, "PA drift > 0.1 degrees")
     header["WARNTRAN"] = (False, "Transparency N magnitudes above photometric")
     header.insert("WARNGUID", ("", "/*** WARNINGS ***/"))
 
     header.extend(wcs_header)
-    header.insert("WCSAXES", ("", "/*** CO-ADDED WCS ***/"))
+    if is_master:
+        header.insert("WCSAXES", ("", "/*** MASTER FRAME WCS ***/"))
+    else:
+        header.insert("WCSAXES", ("", "/*** CO-ADDED WCS ***/"))
 
     return header
 
@@ -279,6 +311,9 @@ def estimate_zeropoint(
     ra_epoch = ra_gaia + pmra_gaia / numpy.cos(numpy.radians(dec)) * epoch_diff
     dec_epoch = dec_gaia + pmdec_gaia * epoch_diff
 
+    gaia_df["ra_epoch"] = ra_epoch
+    gaia_df["dec_epoch"] = dec_epoch
+
     # Reset index of sources.
     sources = sources.reset_index(drop=True)
 
@@ -383,7 +418,7 @@ def get_frame_range(
 
 def coadd_camera_frames(
     files: list[str | pathlib.Path],
-    outpath: str | None = COADD_DEFAULT_PATH,
+    outpath: str | None = COADD_CAMERA_DEFAULT_PATH,
     use_sigmaclip: bool = False,
     sigma: float = 3.0,
     skip_acquisition_after_guiding: bool = False,
@@ -417,10 +452,11 @@ def coadd_camera_frames(
     Parameters
     ----------
     files
-        The list of files to be co-added.
+        The list of files to be co-added. The must all correspond to a single
+        camera and telescope.
     outpath
-        The path to the co-added frame. If a relative path, written relative to
-        the path of the first file to be co-added. If `None`, the file is not
+        The path of the co-added frame. If a relative path, it is written relative
+        to the path of the first file to be co-added. If `None`, the file is not
         written to disk but the ``HDUList` is returned.
     use_sigmaclip
         Whether to use sigma clipping when combining the stack of data. Disabled
@@ -446,8 +482,9 @@ def coadd_camera_frames(
 
     Returns
     -------
-    hdul
-        An ``HDUList`` object with the co-added frame written to disk.
+    hdul,frame_data
+        A tuple with the ``HDUList`` object with the co-added frame, and
+        the frame data.
 
     """
 
@@ -658,7 +695,7 @@ def coadd_camera_frames(
 
     # Construct the header.
     header = create_coadded_frame_header(
-        frame_data,
+        list(frame_data.values()),
         coadd_sources,
         use_sigmaclip=use_sigmaclip,
         sigma=int(sigma) if use_sigmaclip else None,
@@ -694,7 +731,170 @@ def coadd_camera_frames(
 
     hdul.close()
 
-    return hdul
+    return hdul, frame_data
+
+
+def create_master_coadd(
+    files: list[str | pathlib.Path],
+    outpath: str | None = MASTER_COADD_DEFAULT_PATH,
+    save_camera_coadded_frames: bool = False,
+    log: logging.Logger | None = None,
+    verbose: bool = False,
+    quiet: bool = False,
+    **coadd_camera_frames_kwargs,
+):
+    """Produces a master co-added frame.
+
+    Calls `.coadd_camera_frames` with the frames for each camera and produces
+    a single co-added file with the extensions from the camera co-added frames
+    and an extension ``MASTER`` with the global astrometric solution of the
+    master frame.
+
+    Parameters
+    ----------
+    files
+        The list of files to co-add. Must include frames from all the cameras for
+        a given guide sequences.
+    outpath
+        The path of the master co-added frame. If a relative path, it is written
+        relative to the path of the first file in the list. If `None`, the file
+        is not written to disk but the ``HDUList` is returned.
+    save_camera_coadded_frames
+        Whether to write to disk the individual co-added images for each camera.
+    log
+        An instance of a logger to be used to output messages. If not provided
+        defaults to the package log.
+    verbose
+        Increase verbosity of the logging.
+    quiet
+        Do not output log messages.
+    coadd_camera_frames_kwargs
+        Arguments to pass to `.coadd_camera_frames` for each set of camera frames.
+
+    Returns
+    -------
+    hdul
+        An ``HDUList`` object with the maste co-added frame.
+
+    """
+
+    # Create log and set verbosity
+    log = log or llog
+    for handler in log.handlers:
+        if verbose:
+            handler.setLevel(logging.DEBUG)
+        elif quiet:
+            handler.setLevel(logging.CRITICAL)
+
+    coadd_camera_frames_kwargs = coadd_camera_frames_kwargs.copy()
+    if save_camera_coadded_frames is False:
+        coadd_camera_frames_kwargs["outpath"] = None
+
+    coadd_camera_frames_kwargs["log"] = log
+    coadd_camera_frames_kwargs["quiet"] = False
+    coadd_camera_frames_kwargs["verbose"] = False
+
+    camera_to_files: defaultdict[str, list[pathlib.Path]] = defaultdict(list)
+    for file in files:
+        for camera in ["east", "west"]:
+            if camera in str(file):
+                camera_to_files[camera].append(pathlib.Path(file))
+                break
+
+    cameras = [camera for camera in camera_to_files if len(camera_to_files[camera]) > 0]
+    camera_files = [camera_to_files[camera] for camera in cameras]
+
+    # TODO: this could be async but I'm getting some errors in astropy when
+    #       trying it, so for now let's do sync.
+    ccf_partial = partial(coadd_camera_frames, **coadd_camera_frames_kwargs)
+    hduls = map(ccf_partial, camera_files)
+
+    # Create master HDU list and concatenate sources. Create MASTER
+    # extension but leave empty for now.
+    master_hdu = fits.HDUList([fits.PrimaryHDU()])
+    source_dfs: list[pandas.DataFrame] = []
+    frame_data_all: list[FrameData] = []
+    for ii, (hdul, frame_data) in enumerate(hduls):
+        assert isinstance(hdul, fits.HDUList)
+
+        source_dfs.append(pandas.DataFrame(hdul["SOURCES"].data))
+        coadd_hdu = hdul["COADD"]
+        coadd_hdu.name = f"COADD_{cameras[ii].upper()}"
+        master_hdu.append(coadd_hdu)
+
+        frame_data_all += frame_data.values()
+
+    sources_coadd = pandas.concat(source_dfs)
+    master_hdu.append(
+        fits.BinTableHDU(
+            data=Table.from_pandas(sources_coadd),
+            name="SOURCES",
+        )
+    )
+
+    # Now let's create the master frame WCS. It's easy since we already matched
+    # with Gaia.
+    wcs_data = sources_coadd.loc[:, ["x_mf", "y_mf", "ra_epoch", "dec_epoch"]]
+    wcs_data = wcs_data.dropna()
+
+    skycoords = SkyCoord(
+        ra=wcs_data.ra_epoch,
+        dec=wcs_data.dec_epoch,
+        unit="deg",
+        frame="icrs",
+    )
+    wcs_mf: WCS = fit_wcs_from_points((wcs_data.x_mf, wcs_data.y_mf), skycoords)
+
+    # Initial MF HDU
+    mf_header = create_coadded_frame_header(
+        frame_data_all,
+        sources_coadd,
+        wcs=wcs_mf,
+        is_master=True,
+    )
+    mf_hdu = fits.ImageHDU(name="MASTER", header=mf_header)
+    master_hdu.insert(1, mf_hdu)
+
+    # Add PA derived from MF WCS.
+    crota2 = (get_crota2(wcs_mf) + 360) % 360
+    mf_hdu.header.insert(
+        "ZEROPT",
+        ("PAWCS", round(crota2, 3), "[deg] PA of the IFU derived from WCS"),
+    )
+
+    # If any of the cameras measured PA drift, set the warning.
+    padrift_warn: bool = False
+    for cam in ["EAST", "WEST"]:
+        if master_hdu[f"COADD_{cam}"].header["WARNPADR"]:
+            padrift_warn = True
+            break
+    mf_hdu.header["WARNPADR"] = padrift_warn
+
+    if outpath is not None:
+        # Create the path for the output file.
+        sample_header = master_hdu[f"COADD_{cameras[0].upper()}"].header
+        frameno0 = sample_header["FRAME0"]
+        frameno1 = sample_header["FRAMEN"]
+        telescope = sample_header["TELESCOP"]
+
+        outpath = outpath.format(
+            telescope=telescope,
+            frameno0=frameno0,
+            frameno1=frameno1,
+        )
+
+        if pathlib.Path(outpath).is_absolute():
+            outpath_full = pathlib.Path(outpath)
+        else:
+            outpath_full = pathlib.Path(files[0]).parent / outpath
+
+        if outpath_full.parent.exists() is False:
+            outpath_full.parent.mkdir(parents=True, exist_ok=True)
+
+        log.info(f"Writing co-added frame to {outpath_full.absolute()!s}")
+        master_hdu.writeto(str(outpath_full), overwrite=True)
+
+    return master_hdu
 
 
 def get_guider_files_from_spec(
