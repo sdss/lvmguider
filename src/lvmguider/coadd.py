@@ -91,7 +91,8 @@ def create_coadded_frame_header(
     """Creates the header object for a co-added frame."""
 
     # Create a list with only the stacked frames and sort by frame number.
-    frames = list(
+    frames = list(sorted(frame_data, key=lambda x: x.frameno))
+    stacked = list(
         sorted(
             [fd for fd in frame_data if fd.stacked],
             key=lambda x: x.frameno,
@@ -100,33 +101,31 @@ def create_coadded_frame_header(
 
     frame0 = frames[0].frameno
     framen = frames[-1].frameno
+    stack0 = stacked[0].frameno
+    stackn = stacked[-1].frameno
 
     sjd = get_sjd("LCO", frames[0].date_obs.to_datetime())
 
-    fwhm_medians = [ff.fwhm_median for ff in frames if ff.fwhm_median is not None]
+    fwhm_medians = [ff.fwhm_median for ff in stacked if ff.fwhm_median is not None]
     fwhm0 = numpy.round(fwhm_medians[0], 2)
     fwhmn = numpy.round(fwhm_medians[-1], 2)
     fwhm_median = numpy.round(numpy.median(fwhm_medians), 2)
     cofwhm = numpy.round(sources.fwhm.median(), 2)
     cofwhmst = numpy.round(sources.fwhm.std(), 2)
 
-    guide_errors = numpy.array([f.guide_error for f in frames if f.guide_error])
-    guide_error_mean = round(float(guide_errors.mean()), 3)
-    guide_error_std = round(float(guide_errors.std()), 3)
-
     zp = round(sources.zp.dropna().median(), 3)
 
     # Determine the PA drift due to k-mirror tracking.
-    frame_wcs = [frame.wcs for frame in frames if frame.wcs is not None]
+    frame_wcs = [frame.wcs for frame in stacked if frame.wcs is not None]
     crota2 = numpy.array(list(map(get_crota2, frame_wcs)))
     crota2[crota2 < 0] += 360
 
     # Do some sigma clipping to remove big outliers (usually due to WCS errors).
     if len(crota2) > 0:
         crota2_masked = sigma_clip(crota2, 5, masked=True)
-        crota2_min = round(numpy.ma.min(crota2_masked), 4)
-        crota2_max = round(numpy.ma.max(crota2_masked), 4)
-        crota2_drift = round(abs(crota2_min - crota2_max), 4)
+        crota2_min = round(numpy.ma.min(crota2_masked), 6)
+        crota2_max = round(numpy.ma.max(crota2_masked), 6)
+        crota2_drift = round(abs(crota2_min - crota2_max), 6)
         drift_warning = crota2_drift > 0.1
     else:
         crota2_min = crota2_max = crota2_drift = None
@@ -154,9 +153,14 @@ def create_coadded_frame_header(
     header.insert("TELESCOP", ("", "/*** BASIC DATA ***/"))
 
     # Frame info
-    header["FRAME0"] = (frame0, "First co-added frame")
-    header["FRAMEN"] = (framen, "Last co-added frame")
-    header["NFRAMES"] = (framen - frame0 + 1, "Number of frames stacked")
+    header["FRAME0"] = (frame0, "First frame in guide sequence")
+    header["FRAMEN"] = (framen, "Last frame in guide sequence")
+    header["NFRAMES"] = (framen - frame0 + 1, "Number of frames in sequence")
+
+    if not is_master:
+        header["STACK0"] = (stack0, "First stacked frame")
+        header["STACKN"] = (stackn, "Last stacked frame")
+        header["NSTACKED"] = (stackn - stack0 + 1, "Number of frames stacked")
 
     if not is_master:
         header["COESTIM"] = ("median", "Estimator used to stack data")
@@ -170,8 +174,6 @@ def create_coadded_frame_header(
     header["FHHMMED"] = (fwhm_median, "[arcsec] Median of the FHWM of all frames")
     header["COFWHM"] = (cofwhm, "[arcsec] Co-added median FWHM")
     header["COFWHMST"] = (cofwhmst, "[arcsec] Co-added FWHM standard deviation")
-    header["GERRMEAN"] = (guide_error_mean, "[arcsec] Mean of guider errors")
-    header["GERRSTD"] = (guide_error_std, "[arcsec] Deviation of guider errors")
 
     if not is_master:
         header["PAMIN"] = (crota2_min, "[deg] Minimum PA from WCS")
@@ -182,10 +184,9 @@ def create_coadded_frame_header(
     header.insert("FRAME0", ("", "/*** CO-ADDED PARAMETERS ***/"))
 
     # Warnings
-    header["WARNGUID"] = (guide_error_mean > 3, "Mean guide error > 3 arcsec")
     header["WARNPADR"] = (drift_warning, "PA drift > 0.1 degrees")
     header["WARNTRAN"] = (False, "Transparency N magnitudes above photometric")
-    header.insert("WARNGUID", ("", "/*** WARNINGS ***/"))
+    header.insert("WARNPADR", ("", "/*** WARNINGS ***/"))
 
     header.extend(wcs_header)
     if is_master:
@@ -554,13 +555,14 @@ def coadd_camera_frames(
             proc_file = get_proc_path(file)
             if not proc_file.exists():
                 log.warning(f"Frame {frameno}: cannot find associated proc- image.")
-                continue
-
-            proc_astrometry = fits.getheader(str(proc_file), "ASTROMETRY")
-            guide_error = numpy.hypot(
-                proc_astrometry["OFFRAMEA"],
-                proc_astrometry["OFFDEMEA"],
-            )
+                proc_astrometry = None
+                guide_error = None
+            else:
+                proc_astrometry = fits.getheader(str(proc_file), "ASTROMETRY")
+                guide_error = numpy.hypot(
+                    proc_astrometry["OFFRAMEA"],
+                    proc_astrometry["OFFDEMEA"],
+                )
 
             # If we have not yet loaded the dark frame, get it and get the
             # normalised dark.
@@ -587,13 +589,19 @@ def coadd_camera_frames(
                 data -= back.back()
 
             # Decide whether this frame should be stacked.
-            guide_mode = "acquisition" if proc_astrometry["ACQUISIT"] else "guide"
-            skip_acquisition = len(data_stack) == 0 or skip_acquisition_after_guiding
-            if guide_mode == "acquisition" and skip_acquisition:
-                stacked = False
+            if proc_astrometry:
+                guide_mode = "acquisition" if proc_astrometry["ACQUISIT"] else "guide"
+                skip_acquisition = (
+                    len(data_stack) == 0 or skip_acquisition_after_guiding
+                )
+                if guide_mode == "acquisition" and skip_acquisition:
+                    stacked = False
+                else:
+                    stacked = True
+                    data_stack.append(data)
             else:
-                stacked = True
-                data_stack.append(data)
+                guide_mode = "none"
+                stacked = False
 
             # Determine the median FWHM and FWHM deviation for this frame.
             if "SOURCES" not in hdul:
