@@ -22,9 +22,10 @@ from astropy.table import Table
 
 from sdsstools.time import get_sjd
 
+from lvmguider import __version__
 from lvmguider.extraction import extract_marginal
 from lvmguider.maskbits import GuiderStatus
-from lvmguider.tools import run_in_executor
+from lvmguider.tools import elapsed_time, run_in_executor
 
 
 if TYPE_CHECKING:
@@ -125,33 +126,28 @@ class Cameras:
                 raise RuntimeError("Run out of retries. Exposing failed.")
 
         # Create a new extension with the dark-subtracted image.
-        for fn in filenames:
-            with fits.open(fn, mode="update") as hdul:
-                data = hdul["RAW"].data.astype(numpy.float32)
-                exptime = hdul["RAW"].header["EXPTIME"]
-                camname = hdul["RAW"].header["CAMNAME"].lower()
+        with elapsed_time(command, "add PROC extension to raw files"):
+            for fn in filenames:
+                with fits.open(fn, mode="update") as hdul:
+                    camname = hdul["RAW"].header["CAMNAME"].lower()
 
-                dark_file = self._get_dark_frame(fn, camname)
-                if dark_file is None:
-                    command.warning(f"No dark frame found for camera {camname}.")
-                    continue
+                    dark_file = self._get_dark_frame(fn, camname)
+                    if dark_file is None:
+                        command.warning(f"No dark frame found for camera {camname}.")
+                        dark_file = ""
 
-                dark_data = fits.getdata(dark_file).astype(numpy.float32)
-                dark_exptime = fits.getheader(dark_file, "RAW")["EXPTIME"]
+                    proc_header = fits.Header()
+                    proc_header["DARKFILE"] = dark_file
+                    proc_header["GUIDERV"] = (__version__, "Version of lvmguider")
+                    proc_header["WCSMODE"] = ("none", "Source of astrometric solution")
 
-                data_sub = data - (dark_data / dark_exptime) * exptime
-
-                proc_header = hdul["RAW"].header.copy()
-                proc_header["DARKFILE"] = dark_file
-                proc_header["WCSMODE"] = ("pwi", "Origin of the astrometric solution")
-                hdul.append(
-                    fits.CompImageHDU(
-                        data=data_sub,
-                        header=proc_header,
-                        name="PROC",
-                        compression_type="RICE_1",
+                    hdul.append(
+                        fits.ImageHDU(
+                            data=None,
+                            header=proc_header,
+                            name="PROC",
+                        )
                     )
-                )
 
         sources = []
         if flavour == "object" and extract_sources:
@@ -163,23 +159,25 @@ class Cameras:
                 command.warning(f"Failed extracting sources: {err}")
                 extract_sources = False
             else:
-                for ifn, fn in enumerate(filenames):
-                    with fits.open(fn, mode="update") as hdul:
-                        camname = hdul["RAW"].header["CAMNAME"].lower()
-                        isources = sources[ifn]
-                        isources["camera"] = camname
-                        hdul.append(
-                            fits.BinTableHDU(
-                                data=Table.from_pandas(isources),
-                                name="SOURCES",
+                with elapsed_time(command, "add SOURCE extension to raw files"):
+                    for ifn, fn in enumerate(filenames):
+                        with fits.open(fn, mode="update") as hdul:
+                            camname = hdul["RAW"].header["CAMNAME"].lower()
+                            isources = sources[ifn]
+                            isources["camera"] = camname
+                            hdul.append(
+                                fits.BinTableHDU(
+                                    data=Table.from_pandas(isources),
+                                    name="SOURCES",
+                                )
                             )
-                        )
 
         if len(sources) > 0:
             all_sources = pandas.concat(sources)
-            fwhm = numpy.median(all_sources["xstd"]) if len(all_sources) > 0 else None
+            valid = all_sources.loc[all_sources.valid == 1]
+            fwhm = numpy.median(valid["fwhm"]) if len(valid) > 0 else None
         else:
-            all_sources = []
+            valid = []
             fwhm = None
 
         command.info(
@@ -187,9 +185,9 @@ class Cameras:
                 "seqno": next_seqno,
                 "filenames": list(filenames),
                 "flavour": flavour,
-                "n_sources": len(all_sources),
+                "n_sources": len(valid),
                 "focus_position": round(focus_position, 1),
-                "fwhm": numpy.round(fwhm, 3) if fwhm else fwhm,
+                "fwhm": numpy.round(fwhm, 3) if fwhm else -999.0,
             }
         )
 
@@ -201,14 +199,21 @@ class Cameras:
 
         return (list(filenames), next_seqno, list(sources) if extract_sources else None)
 
-    async def extract_sources(self, filename: str):
+    async def extract_sources(self, filename: str, subtract_dark: bool = True):
         """Extracts sources from a file."""
 
         hdus = fits.open(filename)
-        if "PROC" in hdus:
-            data = hdus["PROC"].data
-        else:
-            data = hdus["RAW"].data
+
+        # Initially use raw data.
+        data = hdus["RAW"].data / hdus["RAW"].header["EXPTIME"]
+
+        if subtract_dark and "PROC" in hdus:
+            darkfile = hdus["PROC"].header["DARKFILE"]
+            if darkfile and pathlib.Path(darkfile).exists():
+                dark_data = fits.getdata(darkfile).astype(numpy.float32)
+                dark_exptime = fits.getheader(darkfile, "RAW")["EXPTIME"]
+
+                data = data - (dark_data / dark_exptime)
 
         return await run_in_executor(
             extract_marginal,

@@ -12,13 +12,25 @@ import asyncio
 import concurrent.futures
 import pathlib
 import re
-import shutil
 import warnings
+from contextlib import contextmanager
 from functools import partial
+from time import time
 
+from typing import TYPE_CHECKING
+
+import numpy
 import pandas
+import peewee
+import pgpasslib
 from astropy.io import fits
 from astropy.table import Table
+
+from lvmguider import config, log
+
+
+if TYPE_CHECKING:
+    from lvmguider.actor import GuiderCommand
 
 
 async def run_in_executor(fn, *args, catch_warnings=False, executor="thread", **kwargs):
@@ -141,207 +153,133 @@ def get_proc_path(filename: str | pathlib.Path):
     return proc_path
 
 
-def reprocess_proc_image(
+async def append_extension(
     filename: str | pathlib.Path,
-    telescope: str,
-    output_path: str | pathlib.Path,
-    keep_previous_wcs: bool = True,
-    solve_individual_cameras: bool = True,
-    generate_astrometrynet_outputs: bool = False,
-    index_paths: dict[int, str] | None = None,
-    scales: dict[int, list[int]] | None = None,
+    data: numpy.ndarray | None = None,
+    table: pandas.DataFrame | numpy.recarray | Table | None = None,
+    header: tuple | list = (),
+    compress: str | None = None,
+    name: str | None = None,
 ):
-    """Reprocesses a proc- file."""
+    """Updates a FITS file with a new extension.
 
-    from lvmguider.astrometrynet import astrometrynet_quick
-    from lvmguider.transformations import ag_to_master_frame, solve_locs
-
-    proc_orig = pathlib.Path(filename).absolute()
-    output_path = pathlib.Path(output_path).absolute()
-
-    hdus = fits.open(str(proc_orig))
-    header = hdus[1].header
-
-    ra = header["RAFIELD"]
-    dec = header["DECFIELD"]
-
-    if "SOURCES" not in hdus:
-        warnings.warn("No SOURCES found.", UserWarning)
-        return None
-
-    sources = pandas.DataFrame(hdus["SOURCES"].data)
-    sources.loc[:, "x_master"] = 0.0
-    sources.loc[:, "y_master"] = 0.0
-
-    output_path.mkdir(parents=True, exist_ok=True)
-    proc_new = output_path / proc_orig.name
-
-    shutil.copyfile(proc_orig, proc_new)
-
-    proc_new = output_path / proc_orig.name
-    new_sources_cam = []
-    for camname in ["east", "west"]:
-        sources_cam = sources.loc[sources.camera == camname]
-        xy = sources_cam[["x", "y"]].values
-
-        camera = f"{telescope}-{camname[0]}"
-        file_locs, _ = ag_to_master_frame(camera, xy)
-        sources_cam.loc[:, ["x_master", "y_master"]] = file_locs
-        new_sources_cam.append(sources_cam)
-
-    new_sources = pandas.concat(new_sources_cam)
-    output_root = str(proc_new).replace(".fits.gz", "").replace(".fits", "")
-
-    xyls = new_sources.loc[:, ["x_master", "y_master", "flux"]]
-    xyls.rename(columns={"x_master": "x", "y_master": "y"}, inplace=True)
-
-    try:
-        solution = solve_locs(
-            xyls,
-            ra=ra,
-            dec=dec,
-            full_frame=True,
-            index_paths=index_paths,
-            scales=scales,
-            output_root=output_root if generate_astrometrynet_outputs else None,
-        )
-        new_wcs = solution.wcs
-    except RuntimeError:
-        print(f"[WARNING]: Failed solving {filename}.")
-        solution = None
-        new_wcs = None
-
-    with fits.open(str(proc_new), "update") as hdul:
-        del hdul["SOURCES"]
-        new_sources_t = Table.from_pandas(new_sources)
-        hdul.append(fits.BinTableHDU(data=new_sources_t, name="SOURCES"))
-
-        if new_wcs is None and keep_previous_wcs:
-            hdul.append(fits.ImageHDU(name="REPROC"))
-        elif new_wcs:
-            if keep_previous_wcs:
-                new_hdu = fits.ImageHDU(name="REPROC")
-                new_hdu.header += new_wcs.to_header(relax=True)
-                hdul.append(new_hdu)
-            else:
-                orig_hdu = hdul[1]
-                orig_hdu.header += new_wcs.to_header(relax=True)
-
-    if solve_individual_cameras:
-        for camname in ["east", "west"]:
-            sources_cam = new_sources.loc[new_sources.camera == camname]
-
-            solution = astrometrynet_quick(
-                {5200: "/data/astrometrynet/5200"},
-                sources_cam,
-                ra=ra,
-                dec=dec,
-                radius=5.0,
-                pixel_scale=1.0,
-                pixel_scale_factor_hi=1.2,
-                pixel_scale_factor_lo=0.8,
-                scales={5200: [5, 6]},
-                plot=False,
-                output_root=(output_root + f"_{camname}") if output_root else None,
-            )
-
-            with fits.open(str(proc_new), "update") as hdul:
-                new_hdu = fits.ImageHDU(name=camname.upper())
-                if solution.wcs:
-                    new_hdu.header += solution.wcs.to_header(relax=True)
-                    new_hdu.header["SOLVED"] = True
-                else:
-                    print(f"[WARNING]: Failed solving {filename} ({camname}).")
-                    new_hdu.header["SOLVED"] = False
-                hdul.append(new_hdu)
-
-    return solution
-
-
-def reprocess_files(
-    filenames: list[str],
-    telescope: str,
-    proc_output_path: str | pathlib.Path,
-    solve_individual_cameras: bool = True,
-    generate_astrometrynet_outputs: bool = False,
-    index_paths: dict[int, str] | None = None,
-    scales: dict[int, list[int]] | None = None,
-    **kwargs,
-):
-    """Reprocesses raw files.
-
-    This basically calls `.solve_from_files` but writes the proc- file
-    to a new location and allows to specify indexes and scales.
+    Parameters
+    ----------
+    filename
+        The path to the file to update.
+    data
+        A numpy array with the image data to add.
+    table
+        A table to add as a binary table extension
+    header
+        The header to add to the extension, as a list of tuples,
+        each one of them including the keyword name, value, and
+        optionally a comment.
+    compress
+        If ``data`` is passed, whether to use a compressed image
+        extension. Must be the compression algorithm to use
+        (e.g., ``RICE_1``).
+    name
+        The name to give to the extension.
 
     """
 
-    from lvmguider.astrometrynet import astrometrynet_quick
-    from lvmguider.transformations import solve_from_files
+    if data is not None and table is not None:
+        raise ValueError("data and table are mutually exclusive.")
 
-    proc_output_path = pathlib.Path(proc_output_path)
-    parent = proc_output_path.parent
-    parent.mkdir(parents=True, exist_ok=True)
-
-    output_root = (
-        str(proc_output_path).replace(".fits.gz", "").replace(".fits", "")
-        if generate_astrometrynet_outputs
-        else None
-    )
-
-    solution, new_sources = solve_from_files(
-        filenames,
-        telescope,
-        reextract_sources=True,
-        solve_locs_kwargs={
-            "index_paths": index_paths,
-            "output_root": output_root,
-            "scales": scales,
-            **kwargs,
-        },
-    )
-    assert solution.wcs
-
-    new_sources_t = Table.from_pandas(new_sources)
-    hdul = fits.HDUList(
-        [
-            fits.PrimaryHDU(header=solution.wcs.to_header(relax=True)),
-            fits.BinTableHDU(data=new_sources_t, name="SOURCES"),
-        ]
-    )
-
-    if solve_individual_cameras:
-        header = fits.getheader(filenames[0])
-        ra = header["RA"]
-        dec = header["DEC"]
-
-        for camname in ["east", "west"]:
-            sources_cam = new_sources.loc[new_sources.camera == camname]
-
-            cam_solution = astrometrynet_quick(
-                {5200: "/data/astrometrynet/5200"},
-                sources_cam,
-                ra=ra,
-                dec=dec,
-                radius=5.0,
-                pixel_scale=1.0,
-                pixel_scale_factor_hi=1.2,
-                pixel_scale_factor_lo=0.8,
-                scales={5200: [5, 6]},
-                plot=False,
-                raise_on_unsolved=True,
-                output_root=(output_root + f"_{camname}") if output_root else None,
-                **kwargs,
-            )
-
-            new_hdu = fits.ImageHDU(name=camname.upper())
-            if cam_solution.wcs:
-                new_hdu.header += cam_solution.wcs.to_header(relax=True)
-                new_hdu.header["SOLVED"] = True
+    with fits.open(filename, mode="update") as hdul:
+        if data is not None:
+            if compress is None:
+                ext = fits.ImageHDU(data=data, header=header, name=name)
             else:
-                print(f"[WARNING]: Failed solving {camname}.")
-                new_hdu.header["SOLVED"] = False
-            hdul.append(new_hdu)
+                ext = fits.CompImageHDU(
+                    data=data,
+                    header=header,
+                    compression_type=compress,
+                    name=name,
+                )
+        else:
+            if isinstance(table, pandas.DataFrame):
+                table_data = Table.from_pandas(table)
+            else:
+                table_data = table
 
-    hdul.writeto(str(proc_output_path), overwrite=True)
+            ext = fits.BinTableHDU(data=table_data, name=name)
 
-    return solution
+        hdul.append(ext)
+
+
+@contextmanager
+def elapsed_time(command: GuiderCommand, task_name: str = "unnamed"):
+    """Context manager to output the elapsed time for a task."""
+
+    t0 = time()
+
+    yield
+
+    command.actor.log.debug(f"Elapsed time for task {task_name!r}: {time()-t0:.3f} s")
+
+
+def get_frameno(file: pathlib.Path | str) -> int:
+    """Returns the frame number for a frame."""
+
+    match = re.match(r"^.+?([0-9]+)\.fits$", str(file))
+
+    if match is None:
+        raise ValueError("Invalid file format. Cannot determine frame number.")
+
+    return int(match.group(1))
+
+
+def get_db_connection(
+    profile: str = "default",
+    dbname: str | None = None,
+    host: str | None = None,
+    port: int | None = None,
+    user: str | None = None,
+    password: str | None = None,
+    pgpass_path: str | None = None,
+):
+    """Returns a connection to the LVM database.
+
+    Any parameters not provided will default to the configuration values
+    from the selected profile.
+
+    Returns
+    -------
+    connection
+        A ``peewee`` ``PostgresqlDatabase`` object. The connection is returned
+        not connected and it's the user's responsibility to connect and check
+        for errors.
+
+    """
+
+    PARAMS = ["host", "port", "user", "dbname", "password", "pgpass_path"]
+
+    default_params = config.get("database", {}).get(profile, {}).copy()
+    default_params = {kk: vv for kk, vv in default_params.items() if kk in PARAMS}
+
+    call_params = dict(
+        dbname=dbname,
+        host=host,
+        port=port,
+        user=user,
+        password=password,
+        pgpass_path=pgpass_path,
+    )
+    call_params = {kk: vv for kk, vv in call_params.items() if vv is not None}
+
+    db_params = default_params
+    db_params.update(call_params)
+
+    pgpass_path = db_params.pop("pgpass_path", None)
+    password = db_params.pop("password", None)
+    if password is None and pgpass_path is not None:
+        password = pgpasslib.getpass(**db_params)
+
+    log.debug(f"Connecting to database with params: {db_params!r}")
+
+    dbname = db_params.pop("dbname")
+    conn = peewee.PostgresqlDatabase(database=dbname, password=password, **db_params)
+
+    return conn

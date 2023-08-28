@@ -204,7 +204,10 @@ def fit_gaussian_to_marginal(
     valid = 1
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore")
-        gg = fitter(model, xx, marginal)
+        try:
+            gg = fitter(model, xx, marginal)
+        except Exception:
+            return (-1, -1, -1, 0)
 
         if fitter.fit_info["cov_x"] is None:
             valid = 0
@@ -287,9 +290,6 @@ def extract_marginal(
     assert isinstance(detections, pandas.DataFrame)
     assert isinstance(back, numpy.ndarray)
 
-    if len(detections) == 0:
-        return detections
-
     if exclude_border:
         detections = detections.loc[
             (detections.x > box_size // 2)
@@ -303,35 +303,45 @@ def extract_marginal(
     if max_detections and len(detections) > max_detections:
         detections = detections.head(max_detections)
 
-    back = sep.Background(data)
-    sub = data - back.back()
-
-    if len(detections) > 0:
-        for axis in [1, 0]:
-            ax = "x" if axis == 1 else "y"
-
-            fit_df = detections.apply(
-                lambda d: pandas.Series(
-                    fit_gaussian_to_marginal(
-                        sub,
-                        d.x,
-                        d.y,
-                        box_size,
-                        axis=axis,
-                        sigma_0=sigma_0,
-                    ),
-                    index=[f"{ax}1", f"{ax}std", f"{ax}rms", f"{ax}fitvalid"],
-                ),
-                axis=1,
-            )
-
-            detections = pandas.concat([detections, fit_df], axis=1)
-
-    else:
+    if len(detections) == 0:
         # Add new columns. If there are no detections at least the columns will exist
         # on an empty data frame and the overall shape won't change.
         cols = ["x1", "xstd", "xrms", "y1", "ystd", "yrms", "xfitvalid", "yfitvalid"]
         detections[cols] = numpy.nan
+        detections["valid"] = 0
+
+        return detections
+
+    back = sep.Background(data)
+    sub = data - back.back()
+
+    for axis in [1, 0]:
+        ax = "x" if axis == 1 else "y"
+
+        fit_df = detections.apply(
+            lambda d: pandas.Series(
+                fit_gaussian_to_marginal(
+                    sub,
+                    d.x,
+                    d.y,
+                    box_size,
+                    axis=axis,
+                    sigma_0=sigma_0,
+                ),
+                index=[f"{ax}1", f"{ax}std", f"{ax}rms", f"{ax}fitvalid"],
+            ),
+            axis=1,
+        )
+
+        detections = pandas.concat([detections, fit_df], axis=1)
+
+    valid = (detections.xfitvalid == 1) & (detections.yfitvalid == 1)
+    detections["valid"] = valid.to_numpy(int)
+
+    # Calculate FWHM as average of xstd and ystd.
+    detections["fwhm"] = 0.5 * (detections.xstd + detections.ystd)
+
+    assert sub is not None
 
     if plot is not None:
         if not isinstance(plot, pathlib.Path) and not isinstance(plot, str):

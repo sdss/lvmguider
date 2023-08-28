@@ -18,20 +18,21 @@ import pandas
 from astropy.coordinates import EarthLocation
 from astropy.io import fits
 from astropy.table import Table
+from astropy.time import Time
 from astropy.wcs import WCS
 from simple_pid import PID
 
 from sdsstools.time import get_sjd
 
+from lvmguider import __version__
 from lvmguider.maskbits import GuiderStatus
+from lvmguider.tools import elapsed_time, get_frameno, get_proc_path, run_in_executor
 
-from .tools import get_proc_path, run_in_executor
 from .transformations import (
     XZ_FULL_FRAME,
     calculate_guide_offset,
     delta_radec2mot_axis,
     solve_camera,
-    solve_from_files,
     wcs_from_single_cameras,
 )
 
@@ -97,7 +98,7 @@ class Guider:
         self.use_reference_frames: bool = False
         self.reference_frames: dict[str, pathlib.Path] = {}
         self.reference_sources: pandas.DataFrame | None = None
-        self.reference_wcs: WCS | None = None
+        self.reference_wcs: dict[str, WCS] = {}
 
         self.site = EarthLocation(**self.config["site"])
 
@@ -113,7 +114,7 @@ class Guider:
             self.use_reference_frames = False
             self.reference_frames = {}
             self.reference_sources = None
-            self.reference_wcs = None
+            self.reference_wcs = {}
             return
 
         # Gets images that match frameno.
@@ -130,14 +131,17 @@ class Guider:
         sources: list[pandas.DataFrame] = []
         for file_ in files:
             try:
-                header = fits.getheader(file_, "RAW")
+                header_raw = fits.getheader(file_, "RAW")
+                header_proc = fits.getheader(file_, "PROC")
                 file_sources = Table.read(file_, "SOURCES").to_pandas()
             except Exception as err:
                 raise ValueError(f"Failed retrieving sources from file {file_}: {err}")
 
-            camname = header["CAMNAME"]
+            camname: str = header_raw["CAMNAME"]
             sources.append(file_sources)
+
             self.reference_frames[camname] = file_
+            self.reference_wcs[camname] = WCS(header_proc)
 
         if mf_wcs is None:
             proc_path = get_proc_path(files[0])
@@ -145,7 +149,7 @@ class Guider:
                 raise CriticalGuiderError("Cannot retrieve reference frame master WCS.")
             self.reference_wcs = WCS(fits.getheader(str(proc_path), "ASTROMETRY"))
         else:
-            self.reference_wcs = mf_wcs
+            self.reference_wcs["master"] = mf_wcs
 
         self.reference_sources = pandas.concat(sources)
         self.use_reference_frames = True
@@ -182,7 +186,6 @@ class Guider:
         guide_tolerance: float | None = None,
         apply_correction: bool = True,
         use_motor_offsets: bool = True,
-        use_individual_images: bool = True,
     ):
         """Performs one guide iteration.
 
@@ -268,7 +271,6 @@ class Guider:
                 ra_p, dec_p, wcs = await self.determine_pointing(
                     filenames,
                     pixel=self.pixel,
-                    use_individual_images=use_individual_images,
                 )
 
                 # Offset is field centre - current pointing.
@@ -279,8 +281,7 @@ class Guider:
                 raise RuntimeError(f"Failed determining telescope pointing: {err}")
 
         else:
-            wcs = self.reference_wcs
-            offset_radec, sep = await self.calculate_guide_offset(sources)
+            offset_radec, sep = await self.calculate_guide_offset(sources, filenames)
 
             if numpy.any(numpy.isnan(offset_radec)) or numpy.isnan(sep):
                 self.reset_acquisition()
@@ -289,20 +290,21 @@ class Guider:
                     "Reverting to acquisition."
                 )
 
-            # Fro typing. This is safe, calculate_guide_offset also checks.
-            assert self.reference_wcs is not None
+            wcs = self.reference_wcs["master"]
 
             # Pointing from the reference frame.
             pixel = self.pixel or XZ_FULL_FRAME
-            ref_pointing = self.reference_wcs.pixel_to_world(*pixel)
+            ref_pointing = wcs.pixel_to_world(*pixel)
             ra_ref = ref_pointing.ra.deg
             dec_ref = ref_pointing.dec.deg
 
-            # Current pointing. Note that the offset is to go from current position
-            # to reference position.
+            # Calculate current pointing. Note to future José: that although the
+            # offset is measured as going from measured to reference sources here
+            # we need to add it because that offset is the result of moving the
+            # telescope and not the sky (just draw it).
             cos_dec = numpy.cos(numpy.radians(dec_ref))
-            ra_p = numpy.round(ra_ref - offset_radec[0] / 3600 / cos_dec, 6)
-            dec_p = numpy.round(dec_ref - offset_radec[1] / 3600.0, 6)
+            ra_p = numpy.round(ra_ref + offset_radec[0] / 3600 / cos_dec, 6)
+            dec_p = numpy.round(dec_ref + offset_radec[1] / 3600.0, 6)
 
             # Where we really want to point.
             fra, fdec = self.field_centre
@@ -408,7 +410,6 @@ class Guider:
         self,
         filenames: list[str],
         pixel: tuple[float, float] | None = None,
-        use_individual_images: bool = False,
     ) -> tuple[float, float, WCS]:
         """Returns the pointing of a telescope based on AG frames.
 
@@ -420,10 +421,6 @@ class Guider:
         pixel
             The ``(x,y)`` pixel of the master frame to use to determine the pointing.
             Default to the central pixel.
-        use_individual_images
-            Determine the coordinates of the central pixel of the master frame
-            using a WCS generated from the individual frames, instead of trying
-            to solve the master frame with astrometry.net.
 
         Returns
         -------
@@ -436,32 +433,28 @@ class Guider:
 
         pixel = pixel or XZ_FULL_FRAME
 
-        if not use_individual_images:
-            solution: AstrometrySolution
-            solution, _ = await run_in_executor(solve_from_files, filenames, telescope)
-            wcs = solution.wcs
-        else:
-            solutions: list[dict[str, AstrometrySolution]] = await asyncio.gather(
-                *[run_in_executor(solve_camera, file, telescope) for file in filenames]
-            )
+        solutions: list[dict[str, AstrometrySolution]] = await asyncio.gather(
+            *[run_in_executor(solve_camera, file, telescope) for file in filenames]
+        )
 
-            # Convert to dictionary of camera name to astrometric solution.
-            camera_solutions = {k: v for d in solutions for k, v in d.items()}
+        # Convert to dictionary of camera name to astrometric solution.
+        camera_solutions = {k: v for d in solutions for k, v in d.items()}
 
-            wcs = await run_in_executor(
-                wcs_from_single_cameras,
-                camera_solutions,
-                telescope,
-            )
+        wcs = await run_in_executor(
+            wcs_from_single_cameras,
+            camera_solutions,
+            telescope,
+        )
 
-            for fn, camname in enumerate(camera_solutions):
-                wcs_camera = camera_solutions[camname].wcs
-                if camera_solutions[camname].solved is False:
-                    self.command.warning(f"Camera {camname} did not solve.")
-                elif wcs_camera is not None:
-                    file = filenames[fn]
+        for fn, camname in enumerate(camera_solutions):
+            wcs_camera = camera_solutions[camname].wcs
+            if camera_solutions[camname].solved is False:
+                self.command.warning(f"Camera {camname} did not solve.")
+            elif wcs_camera is not None:
+                file = filenames[fn]
 
-                    # Update proc header with astrometry.net WCS.
+                # Update proc header with astrometry.net WCS.
+                with elapsed_time(self.command, "update astrometry in PROC raw frames"):
                     with fits.open(str(file), mode="update") as hdul:
                         if "PROC" in hdul:
                             proc = hdul["PROC"]
@@ -595,7 +588,11 @@ class Guider:
 
         return applied_radec, applied_motax
 
-    async def calculate_guide_offset(self, sources: list[pandas.DataFrame]):
+    async def calculate_guide_offset(
+        self,
+        sources: list[pandas.DataFrame],
+        filenames: list[str] = [],
+    ):
         """Determines the guide offset by matching sources to reference images.
 
         Parameters
@@ -604,6 +601,9 @@ class Guider:
             A Pandas DataFrame with the sources to match to the reference frame.
             Must contain a column ``camera`` with the camera associated with each
             source.
+        filenames
+            The filenames from which the sources have been extracted. They will
+            be used to update the WCS of their ``PROC`` headers.
 
         Returns
         -------
@@ -615,26 +615,45 @@ class Guider:
 
         """
 
-        if self.reference_sources is None or self.reference_wcs is None:
+        if self.reference_sources is None or "master" not in self.reference_wcs:
             raise CriticalGuiderError("Missing reference frame data. Cannot guide.")
 
-        offset, sep_arcsec, _ = await run_in_executor(
+        offset_xy, offset_radec, sep_arcsec, _ = await run_in_executor(
             calculate_guide_offset,
             pandas.concat(sources),
             self.telescope,
             self.reference_sources,
-            self.reference_wcs,
+            self.reference_wcs["master"],
         )
 
+        # Update proc- header with new astrometry.
+        with elapsed_time(self.command, "update astrometry in PROC raw frames"):
+            for file_ in filenames:
+                with fits.open(str(file_), mode="update") as hdul:
+                    camname = hdul["RAW"].header["CAMNAME"]
+                    wcs = self.reference_wcs.get(camname, None)
+                    if wcs is None:
+                        self.command.warning(f"No WCS for reference frame {file_!s}.")
+                        continue
+
+                    wcs = self.reference_wcs[camname].deepcopy()
+                    wcs.wcs.crpix -= numpy.array(offset_xy)
+                    if "PROC" in hdul:
+                        proc = hdul["PROC"]
+                    else:
+                        proc = fits.ImageHDU()
+                    proc.header.update(wcs.to_header())
+                    proc.header["WCSMODE"] = "astrometrynet+guide"
+
         # Rounding.
-        offset = tuple(numpy.round(offset, 3))
+        offset_radec = tuple(numpy.round(offset_radec, 3))
         sep_arcsec = float(numpy.round(sep_arcsec, 3))
 
         # Typing.
-        offset = cast(tuple[float, float], offset)
+        offset_radec = cast(tuple[float, float], offset_radec)
         sep_arcsec = cast(float, sep_arcsec)
 
-        return offset, sep_arcsec
+        return offset_radec, sep_arcsec
 
     async def write_proc_file(
         self,
@@ -681,7 +700,11 @@ class Guider:
         astro_hdu = fits.ImageHDU(name="ASTROMETRY")
         astro_hdr = astro_hdu.header
 
+        astro_hdr["GUIDERV"] = (__version__, "Version of lvmguider")
+        astro_hdr["TELESCOP"] = (self.telescope, "Telescope that took the images")
         astro_hdr["ACQUISIT"] = (is_acquisition, "Acquisition or guiding?")
+        astro_hdr["DATE"] = (Time.now().isot, "Date of file creation")
+        astro_hdr["FRAMENO"] = (get_frameno(filenames[0]), "Frame number")
 
         for fn, file_ in enumerate(filenames):
             astro_hdr[f"FILE{fn}"] = (str(file_), f"AG frame {fn}")
