@@ -12,6 +12,12 @@ pid:
 max_correction: 3600
 guide_tolerance: 3
 
+offset:
+  axis_error: 1.0
+  timeout:
+    acquisition: 10.0
+    guide: 5.0
+
 site:
   lon: -70.70166667
   lat: -29.00333333

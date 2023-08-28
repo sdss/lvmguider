@@ -581,6 +581,14 @@ class Guider:
             # delta_mot_axis2radec equivalent, if not it should not be hard
             # to derive.
 
+        # By default lvmpwi requires an axis error < 0.4 to consider an offset done.
+        # That's a bit overzealous in mid- to high-wind conditions. We apply a more
+        # relaxed axis error and a timeout.
+        mode = "guide" if self.use_reference_frames else "acquisition"
+        axis_error = self.config["offset"]["axis_error"]
+        timeout = self.config["offset"]["timeout"][mode]
+        cmd_str += f" --axis_error {axis_error} --timeout {timeout}"
+
         cmd = await self.command.send_command(pwi, cmd_str)
 
         if cmd.status.did_fail:

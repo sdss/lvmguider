@@ -7,6 +7,10 @@
 * [#3](https://github.com/sdss/lvmguider/pull/3) Plotting of focus sweep and fit data using a cubic spline.
 * [#4](https://github.com/sdss/lvmguider/pull/4) Added code to generate co-added frames and QA metrics.
 
+### ✨ Improved
+
+* Command telescope offsets with more relaxed thresholds for axis errors. Timeout and continue guiding if the offset takes longer than a certain amount of time.
+
 
 ## 0.2.1 - August 20, 2023
 
