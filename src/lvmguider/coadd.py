@@ -92,6 +92,7 @@ class FrameData:
     stacked: bool = False
     wcs: WCS | None = None
     wcs_mode: str | None = None
+    wcs_reprocessed: bool = False
     data: ARRAY_2D | None = None
 
 
@@ -225,13 +226,13 @@ def create_coadded_frame_header(
     return header
 
 
-def refine_camera_wcs(
+def reprocess_camera_wcs(
     wcs: WCS,
     sources: pandas.DataFrame,
     db_connection_params: dict[str, Any] = {},
     log: logging.Logger = llog,
 ):
-    """Refines a WCS by matching sources to Gaia positions and recreating the WCS.
+    """Reprocesses a WCS by matching sources to Gaia positions and recreating the WCS.
 
     Parameters
     ----------
@@ -279,7 +280,7 @@ def refine_camera_wcs(
     matches, nmatches = match_with_gaia(wcs, sources, gaia_df, max_separation=5)
 
     if nmatches < 5:
-        log.warning("Insufficient number of matches. Cannot refine WCS.")
+        log.warning("Insufficient number of matches. Cannot reprocess WCS.")
         return (False, wcs)
 
     # Concatenate frames.
@@ -293,12 +294,12 @@ def refine_camera_wcs(
         unit="deg",
         frame="icrs",
     )
-    refined_wcs: WCS = fit_wcs_from_points(
+    reprocessd_wcs: WCS = fit_wcs_from_points(
         (matched_sources.x, matched_sources.y),
         skycoords,
     )
 
-    return (True, refined_wcs)
+    return (True, reprocessd_wcs)
 
 
 def get_gaia_sources(
@@ -760,11 +761,14 @@ def get_framedata(
 
         wcs_mode = None
         wcs = None
+        wcs_reprocessed: bool = False
         if proc_header is not None and "WCSMODE" in proc_header:
             wcs_mode = proc_header["WCSMODE"]
 
             wcs = WCS(proc_header)
 
+            # Determine whether we should reprocess the frame and recover a new
+            # WCS. This will not be required for future frames.
             if proc_header["WCSMODE"] == "astrometrynet":
                 pass
             else:
@@ -794,17 +798,20 @@ def get_framedata(
                         ref_wcs = WCS(ref_header)
 
                         log.debug(f"Refining WCS for frame {camname}-{frameno}.")
-                        (refine_ok, refine_wcs) = refine_camera_wcs(
+                        (reprocess_ok, reprocess_wcs) = reprocess_camera_wcs(
                             ref_wcs,
                             sources,
                             db_connection_params=db_connection_params,
                             log=log,
                         )
-                        if refine_ok:
-                            wcs = refine_wcs
+                        if reprocess_ok:
+                            wcs = reprocess_wcs
+                            wcs_reprocessed = True
                         else:
-                            log.warning(f"{log_h} failed refining WCS.")
+                            log.warning(f"{log_h} failed reprocessing WCS.")
                             wcs = None
+                else:
+                    log.warning(f"{log_h} not enough information to reprocess WCS.")
 
         # If we have not yet loaded the dark frame, get it and get the
         # normalised dark.
@@ -868,6 +875,7 @@ def get_framedata(
             stacked=stacked,
             wcs=wcs,
             wcs_mode=wcs_mode,
+            wcs_reprocessed=wcs_reprocessed,
             data=data,
         )
 
