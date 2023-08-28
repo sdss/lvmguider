@@ -62,6 +62,9 @@ MASTER_COADD_SPEC_PATH = "coadds/lvm.{{telescope}}.agcam.coadd_s{specno:08d}.fit
 
 DRIFT_WARN_THRESHOLD: float = 0.1
 
+_GAIA_CACHE: tuple[SkyCoord, pandas.DataFrame] | None = None
+
+
 warnings.simplefilter("ignore", category=FITSFixedWarning)
 
 
@@ -245,11 +248,30 @@ def refine_camera_wcs(
 
     """
 
-    gaia_df = get_gaia_sources(
-        wcs,
-        db_connection_params=db_connection_params,
-        include_lvm_mags=False,
-    )
+    # Get RA/Dec of centre of frame.
+    skyc = wcs.pixel_to_world(*XZ_AG_FRAME)
+
+    if isinstance(skyc, list):
+        log.error('Invalid WCS; cannot determine field centre.')
+        return (False, wcs)
+
+    # Check if we can use the cached Gaia sources.
+    do_query: bool = True
+    gaia_df: pandas.DataFrame | None = None
+
+    if _GAIA_CACHE is not None:
+        gaia_temp_sky, gaia_temp_df = _GAIA_CACHE
+
+        if gaia_temp_sky.separation(skyc).deg < 0.01:
+            gaia_df = gaia_temp_df
+            do_query = False
+
+    if do_query:
+        gaia_df = get_gaia_sources(
+            wcs,
+            db_connection_params=db_connection_params,
+            include_lvm_mags=False,
+        )
 
     if gaia_df is None:
         return (False, wcs)
@@ -304,6 +326,8 @@ def get_gaia_sources(
         A dictionary of DB connection parameters to pass to `.get_db_connection`.
 
     """
+
+    global _GAIA_CACHE
 
     CAM_FOV = numpy.max(XZ_AG_FRAME) / 3600
 
@@ -370,7 +394,11 @@ def get_gaia_sources(
         conn.execute_sql("SET LOCAL enable_seqscan=false")
         data = query.execute(conn)
 
-    return pandas.DataFrame.from_records(data)
+    df = pandas.DataFrame.from_records(data)
+
+    _GAIA_CACHE = (skyc, df.copy())
+
+    return df
 
 
 def match_with_gaia(
@@ -490,7 +518,7 @@ def estimate_zeropoint(
         return (False, sources)
 
     if len(gaia_df) == 0:
-        log.warning("No Gaia sources found.")
+        log.warning("No Gaia sources found. Cannot estimate zero point.")
         return (False, sources)
 
     # Reset index of sources.
@@ -739,7 +767,7 @@ def get_framedata(
 
             if proc_header["WCSMODE"] == "astrometrynet":
                 pass
-            elif proc_header["WCSMODE"] == "astrometrynet+guide":
+            else:
                 if "GUIDERV" in proc_header and proc_header["GUIDERV"] > "0.4.0":
                     pass
                 elif sources is not None and proc_astrometry is not None:
@@ -1308,11 +1336,11 @@ def process_spec_frame(
 
         if len(frames) == 0:
             if fail_silent is False:
-                log.warning(f"No guider frames found for {telescope} in {file!s}")
+                log.warning(f"No guider frames found for {telescope!r} in {file!s}")
             continue
 
         log.info(
-            f"Generating master co-added frame for {telescope} for "
+            f"Generating master co-added frame for {telescope!r} for "
             f"spectrograph file {file!s}"
         )
 
