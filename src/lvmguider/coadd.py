@@ -252,7 +252,7 @@ def refine_camera_wcs(
     skyc = wcs.pixel_to_world(*XZ_AG_FRAME)
 
     if isinstance(skyc, list):
-        log.error('Invalid WCS; cannot determine field centre.')
+        log.error("Invalid WCS; cannot determine field centre.")
         return (False, wcs)
 
     # Check if we can use the cached Gaia sources.
