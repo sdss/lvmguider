@@ -9,10 +9,12 @@
 from __future__ import annotations
 
 import logging
+import os.path
 import pathlib
 import warnings
 from collections import defaultdict
 from dataclasses import dataclass
+from datetime import datetime
 from functools import partial
 from sqlite3 import OperationalError
 
@@ -118,11 +120,18 @@ def create_coadded_frame_header(
     sjd = get_sjd("LCO", frames[0].date_obs.to_datetime())
 
     fwhm_medians = [ff.fwhm_median for ff in stacked if ff.fwhm_median is not None]
-    fwhm0 = numpy.round(fwhm_medians[0], 2)
-    fwhmn = numpy.round(fwhm_medians[-1], 2)
-    fwhm_median = numpy.round(numpy.median(fwhm_medians), 2)
-    cofwhm = numpy.round(sources.fwhm.median(), 2)
-    cofwhmst = numpy.round(sources.fwhm.std(), 2)
+    fwhm0 = fwhmn = fwhm_median = None
+
+    if len(fwhm_medians) > 0:
+        fwhm0 = numpy.round(fwhm_medians[0], 2)
+        fwhmn = numpy.round(fwhm_medians[-1], 2)
+        fwhm_median = numpy.round(numpy.median(fwhm_medians), 2)
+
+    cofwhm = cofwhmst = None
+    if "fwhm" in sources and len(sources.fwhm.dropna()) > 0:
+        cofwhm = numpy.round(sources.fwhm.dropna().median(), 2)
+        if len(sources.fwhm.dropna()) > 1:
+            cofwhmst = numpy.round(sources.fwhm.dropna().std(), 2)
 
     zp = round(sources.zp.dropna().median(), 3) if matched else None
 
@@ -676,24 +685,25 @@ def get_framedata(
         raw_header = hdul["RAW"].header
 
         frameno = get_frameno(file)
+        log_h = f"Frame {telescope}-{camname}-{frameno}:"
 
         # Do some sanity checks.
         if raw_header["CAMNAME"] != camname:
-            raise ValueError("Multiple cameras found in the list of frames.")
+            raise ValueError(f"{log_h} multiple cameras found in list of frames.")
 
         if raw_header["TELESCOP"] != telescope:
-            raise ValueError("Multiple telescopes found in the list of frames.")
+            raise ValueError(f"{log_h} multiple telescopes found in list of frames.")
 
         # PROC header of the raw AG frame.
         if "PROC" not in hdul:
-            log.warning(f"Frame {camname}-{frameno}: PROC extension not found.")
+            log.warning(f"{log_h} PROC extension not found.")
             proc_header = None
         else:
             proc_header = hdul["PROC"].header
 
         # Determine the median FWHM and FWHM deviation for this frame.
         if "SOURCES" not in hdul:
-            log.warning(f"Frame {frameno}: SOURCES extension not found.")
+            log.warning(f"{log_h} SOURCES extension not found.")
             sources = None
             fwhm_median = None
             fwhm_std = None
@@ -709,7 +719,7 @@ def get_framedata(
         # if we were acquiring or guiding.
         proc_file = get_proc_path(file)
         if not proc_file.exists():
-            log.warning(f"Frame {camname}-{frameno}: missing associated proc- image.")
+            log.warning(f"{log_h} missing associated proc- file.")
             proc_astrometry = None
             guide_error = None
             proc_file = None
@@ -748,8 +758,8 @@ def get_framedata(
 
                     if ref_file is None:
                         log.error(
-                            f"Cannot find reference file for {file!s}. "
-                            f"Cannot refine WCS for {camname}-{frameno}."
+                            f"{log_h} cannot find reference file for {file!s}. "
+                            "Cannot refine WCS."
                         )
                     else:
                         ref_header = fits.getheader(ref_file, "PROC")
@@ -765,10 +775,7 @@ def get_framedata(
                         if refine_ok:
                             wcs = refine_wcs
                         else:
-                            log.warning(
-                                f"Frame {camname}-{frameno}: "
-                                f"failed refining WCS for file {file!s}"
-                            )
+                            log.warning(f"{log_h} failed refining WCS.")
                             wcs = None
 
         # If we have not yet loaded the dark frame, get it and get the
@@ -793,15 +800,13 @@ def get_framedata(
         if dark is not None:
             data -= dark
         else:
+            log.debug(f"{log_h} dark frame not found. Fitting background.")
             back = sep.Background(data)
             data -= back.back()
 
         # Decide whether this frame should be stacked.
         if proc_astrometry:
             guide_mode = "acquisition" if proc_astrometry["ACQUISIT"] else "guide"
-            # skip_acquisition = (
-            #     len(data_stack) == 0 or skip_acquisition_after_guiding
-            # )
             if guide_mode == "acquisition":
                 stacked = False
             else:
@@ -972,6 +977,10 @@ def coadd_camera_frames(
             data_stack.append(data)
 
         del data
+
+    if len(data_stack) == 0:
+        log.error(f"No stack data for {telescope!r}.")
+        return None, frame_data
 
     # Combine the stack of data frames using the median of each pixel.
     # Optionally sigma-clip each pixel (this is computationally intensive).
@@ -1160,6 +1169,9 @@ def create_master_coadd(
     source_dfs: list[pandas.DataFrame] = []
     frame_data_all: list[FrameData] = []
     for ii, (hdul, frame_data) in enumerate(hduls):
+        if hdul is None:
+            continue
+
         assert isinstance(hdul, fits.HDUList)
 
         source_dfs.append(pandas.DataFrame(hdul["SOURCES"].data))
@@ -1168,6 +1180,10 @@ def create_master_coadd(
         master_hdu.append(coadd_hdu)
 
         frame_data_all += frame_data
+
+    if len(source_dfs) == 0:
+        log.error("No source data to concatenate. Cannot create master co-added frame.")
+        return None
 
     sources_coadd = pandas.concat(source_dfs)
     master_hdu.append(
@@ -1365,14 +1381,47 @@ def get_guider_files_from_spec(
     assert isinstance(telescope, str)
 
     sjd = get_sjd("LCO", date=Time(header["OBSTIME"], format="isot").to_datetime())
-    frame0 = header.get(f"G{telescope.upper()}FR0", None)
-    frame1 = header.get(f"G{telescope.upper()}FRN", None)
-
-    if frame0 is None or frame1 is None:
-        raise ValueError(f"Cannot determine the guider frame range for {spec_file!s}")
 
     agcam_path = pathlib.Path(agcam_path) / str(sjd)
     if not agcam_path.exists():
         raise FileExistsError(f"Cannot find agcam path {agcam_path!s}")
 
+    frame0 = header.get(f"G{telescope.upper()}FR0", None)
+    frame1 = header.get(f"G{telescope.upper()}FRN", None)
+
+    if frame0 is None or frame1 is None:
+        time0 = Time(header["INTSTART"])
+        time1 = Time(header["INTEND"])
+        files = get_files_in_time_range(
+            agcam_path,
+            time0,
+            time1,
+            pattern=f"lvm.{telescope}.*.fits",
+        )
+
+        if len(files) == 0:
+            raise ValueError(f"Cannot determine the guider frames for {spec_file!s}")
+
+        return sorted(files)
+
     return get_frame_range(agcam_path, telescope, frame0, frame1, camera=camera)
+
+
+def get_files_in_time_range(
+    path: pathlib.Path,
+    time0: Time,
+    time1: Time,
+    pattern: str = "*",
+):
+    """Returns all files in a directory with creation time in the time range."""
+
+    files = path.glob(pattern)
+
+    dt0 = datetime.timestamp(time0.to_datetime())
+    dt1 = datetime.timestamp(time1.to_datetime())
+
+    return [
+        file
+        for file in files
+        if os.path.getctime(file) > dt0 and os.path.getctime(file) < dt1
+    ]
