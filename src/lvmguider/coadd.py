@@ -94,6 +94,7 @@ class FrameData:
     stacked: bool = False
     wcs: WCS | None = None
     wcs_reprocessed: bool = False
+    pa: float = numpy.nan
     zp: float = numpy.nan
     data: ARRAY_2D | None = None
 
@@ -704,6 +705,7 @@ def framedata_to_dataframe(frame_data: list[FrameData]):
                 focusdt=fd.focusdt,
                 fwhm_median=fd.fwhm_median,
                 fwhm_std=fd.fwhm_std,
+                pa=fd.pa,
                 zp=fd.zp,
                 stacked=int(fd.stacked),
                 guide_mode=str(fd.guide_mode),
@@ -886,9 +888,13 @@ def get_framedata(
 
         obs_time = Time(raw_header["DATE-OBS"], format="isot")
 
-        zp = numpy.nan
+        pa = zp = numpy.nan
+
         if sources is not None and "zp" in sources:
             zp = sources.zp.dropna().median()
+
+        if wcs is not None:
+            pa = get_crota2(wcs)
 
         # Add information as a FrameData. We do not include the data itself
         # because it's in data_stack and we don't need it beyond that.
@@ -917,6 +923,7 @@ def get_framedata(
             sources=sources,
             guide_mode=guide_mode,
             zp=zp,
+            pa=pa
         )
 
 
