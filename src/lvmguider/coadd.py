@@ -18,7 +18,7 @@ from datetime import datetime
 from functools import partial
 from sqlite3 import OperationalError
 
-from typing import Any, cast
+from typing import Any
 
 import nptyping as npt
 import numpy
@@ -106,7 +106,7 @@ class FrameData:
 
 
 def create_coadded_frame_header(
-    frame_data: list[FrameData],
+    frame_data: pandas.DataFrame,
     sources: pandas.DataFrame,
     matched: bool = True,
     use_sigmaclip: bool = False,
@@ -117,27 +117,21 @@ def create_coadded_frame_header(
     """Creates the header object for a co-added frame."""
 
     # Create a list with only the stacked frames and sort by frame number.
-    frames = list(sorted(frame_data, key=lambda x: x.frameno))
-    stacked = list(
-        sorted(
-            [fd for fd in frame_data if fd.stacked],
-            key=lambda x: x.frameno,
-        )
-    )
+    stacked = frame_data.loc[frame_data.stacked == 1]
 
-    frame0 = frames[0].frameno
-    framen = frames[-1].frameno
-    stack0 = stacked[0].frameno
-    stackn = stacked[-1].frameno
+    frame0 = frame_data.iloc[0].frameno
+    framen = frame_data.iloc[-1].frameno
+    stack0 = stacked.iloc[0].frameno
+    stackn = stacked.iloc[-1].frameno
 
-    sjd = get_sjd("LCO", frames[0].date_obs.to_datetime())
+    isot = frame_data.iloc[0].date_obs
+    sjd = get_sjd("LCO", Time(isot, format="isot").to_datetime())
 
-    fwhm_medians = [ff.fwhm_median for ff in stacked if not numpy.isnan(ff.fwhm_median)]
     fwhm0 = fwhmn = fwhm_median = None
-
+    fwhm_medians = stacked.fwhm_median.dropna()
     if len(fwhm_medians) > 0:
-        fwhm0 = numpy.round(fwhm_medians[0], 2)
-        fwhmn = numpy.round(fwhm_medians[-1], 2)
+        fwhm0 = numpy.round(fwhm_medians.iloc[0], 2)
+        fwhmn = numpy.round(fwhm_medians.iloc[-1], 2)
         fwhm_median = numpy.round(numpy.median(fwhm_medians), 2)
 
     cofwhm = cofwhmst = None
@@ -149,33 +143,35 @@ def create_coadded_frame_header(
     zp = round(sources.zp.dropna().median(), 3) if matched else None
 
     # Determine the PA drift due to k-mirror tracking.
-    frame_wcs = [
-        frame.wcs
-        for frame in stacked
-        if frame.wcs is not None and frame.wcs_mode in ["astrometrynet+guide", "guide"]
-    ]
-    crota2 = numpy.array(list(map(get_crota2, frame_wcs)))
+    frame_pa = stacked.loc[:, ["frameno", "pa"]].dropna()
+    pa_min = pa_max = pa_drift = None
+    pa_coeffs = [None, None]
+    drift_warning = True
 
-    # Do some sigma clipping to remove big outliers (usually due to WCS errors).
-    if len(crota2) > 0:
-        crota2_masked = sigma_clip(crota2, 5, masked=True)
-        crota2_min = round(numpy.ma.min(crota2_masked), 6)
-        crota2_max = round(numpy.ma.max(crota2_masked), 6)
-        crota2_drift = round(abs(crota2_min - crota2_max), 6)
-        drift_warning = crota2_drift > DRIFT_WARN_THRESHOLD
-    else:
-        crota2_min = crota2_max = crota2_drift = None
-        drift_warning = True
+    if len(frame_pa) >= 2:
+        pa_coeffs = polyfit_with_sigclip(
+            frame_pa.frameno.to_numpy(numpy.float32),
+            frame_pa.pa.to_numpy(numpy.float32),
+            sigma=3,
+            deg=1,
+        )
+
+        pa_vals = numpy.polyval(pa_coeffs, frame_pa.frameno)
+        pa_min = numpy.round(pa_vals.min(), 6)
+        pa_max = numpy.round(pa_vals.max(), 6)
+        pa_drift = numpy.round(numpy.abs(pa_min - pa_max), 6)
+
+        drift_warning = pa_drift > DRIFT_WARN_THRESHOLD
 
     wcs_header = wcs.to_header() if wcs is not None else []
 
     header = fits.Header()
 
     # Basic info
-    header["TELESCOP"] = (frames[0].telescope, " Telescope that took the image")
+    header["TELESCOP"] = (frame_data.iloc[0].telescope, " Telescope that took the data")
 
     if not is_master:
-        header["CAMNAME"] = (frames[0].camera, "Camera name")
+        header["CAMNAME"] = (frame_data.iloc[0].camera, "Camera name")
 
     header["INSTRUME"] = ("LVM", "SDSS-V Local Volume Mapper")
     header["OBSERVAT"] = ("LCO", "Observatory")
@@ -203,18 +199,19 @@ def create_coadded_frame_header(
         header["SIGCLIP"] = (use_sigmaclip, "Was the stack sigma-clipped?")
         header["SIGMA"] = (sigma, "Sigma used for sigma-clipping")
 
-    header["OBSTIME0"] = (frames[0].date_obs.isot, "DATE-OBS of first frame")
-    header["OBSTIMEN"] = (frames[-1].date_obs.isot, "DATE-OBS of last frame")
+    header["OBSTIME0"] = (frame_data.iloc[0].date_obs, "DATE-OBS of first frame")
+    header["OBSTIMEN"] = (frame_data.iloc[-1].date_obs, "DATE-OBS of last frame")
     header["FWHM0"] = (fwhm0, "[arcsec] FWHM of sources in first frame")
     header["FWHMN"] = (fwhmn, "[arcsec] FWHM of sources in last frame")
     header["FHHMMED"] = (fwhm_median, "[arcsec] Median of the FHWM of all frames")
     header["COFWHM"] = (cofwhm, "[arcsec] Co-added median FWHM")
     header["COFWHMST"] = (cofwhmst, "[arcsec] Co-added FWHM standard deviation")
 
-    if not is_master:
-        header["PAMIN"] = (crota2_min, "[deg] Minimum PA from WCS")
-        header["PAMAX"] = (crota2_max, "[deg] Maximum PA from WCS")
-        header["PADRIFT"] = (crota2_drift, "[deg] PA drift in frame range")
+    header["PACOEFFA"] = (pa_coeffs[0], "Slope of PA fit")
+    header["PACOEFFB"] = (pa_coeffs[1], "Intercept of PA fit")
+    header["PAMIN"] = (pa_min, "[deg] Minimum PA from WCS")
+    header["PAMAX"] = (pa_max, "[deg] Maximum PA from WCS")
+    header["PADRIFT"] = (pa_drift, "[deg] PA drift in frame range")
 
     header["ZEROPT"] = (zp, "[mag] Instrumental zero-point")
     header.insert("FRAME0", ("", "/*** CO-ADDED PARAMETERS ***/"))
@@ -233,6 +230,14 @@ def create_coadded_frame_header(
             header.insert("WCSAXES", ("", "/*** CO-ADDED WCS ***/"))
 
     return header
+
+
+def polyfit_with_sigclip(x: ARRAY_1D, y: ARRAY_2D, sigma: int = 3, deg: int = 1):
+    """Fits a polynomial to data after sigma-clipping the dependent variable."""
+
+    valid = ~sigma_clip(y, sigma=sigma, masked=True).mask  # type:ignore
+
+    return numpy.polyfit(x[valid], y[valid], deg)
 
 
 def reprocess_camera_data(
@@ -923,7 +928,7 @@ def get_framedata(
             sources=sources,
             guide_mode=guide_mode,
             zp=zp,
-            pa=pa
+            pa=pa,
         )
 
 
@@ -1146,18 +1151,18 @@ def coadd_camera_frames(
 
                 matched = True
 
+    # Get frame data table.
+    frame_data_df = framedata_to_dataframe(list(frame_data))
+
     # Construct the header.
     header = create_coadded_frame_header(
-        list(frame_data),
+        frame_data_df,
         coadd_sources,
         matched=matched,
         use_sigmaclip=use_sigmaclip,
         sigma=int(sigma) if use_sigmaclip else None,
         wcs=wcs,
     )
-
-    # Get frame data table.
-    frame_data_df = framedata_to_dataframe(list(frame_data))
 
     # Create the co-added HDU list.
     hdul = fits.HDUList([fits.PrimaryHDU()])
@@ -1315,9 +1320,12 @@ def create_master_coadd(
         )
         wcs_mf = fit_wcs_from_points((wcs_data.x_mf, wcs_data.y_mf), skycoords)
 
+    guide_data = get_guide_dataframe(frame_data_all)
+    frame_data_t = framedata_to_dataframe(frame_data_all)
+
     # Initial MF HDU
     mf_header = create_coadded_frame_header(
-        frame_data_all,
+        frame_data_t,
         sources_coadd,
         matched=wcs_mf is not None,
         wcs=wcs_mf,
@@ -1333,33 +1341,47 @@ def create_master_coadd(
         ("PAWCS", pawcs, "[deg] PA of the IFU from master frame co-added WCS"),
     )
 
-    guide_data = get_guide_dataframe(frame_data_all)
-    frame_data_t = Table.from_pandas(framedata_to_dataframe(frame_data_all))
+    # The PA data is incorrect because it was generate from two cameras
+    # with different orientations. Let's recalculate it.
+    guide_pa = guide_data.loc[:, ["frameno", "pa"]]
+    pa_min = pa_max = pa_drift = None
+    pa_coeffs = [None, None]
+    drift_warning = True
 
-    master_hdu.append(fits.BinTableHDU(Table.from_pandas(guide_data), name="GUIDEDATA"))
-    master_hdu.append(fits.BinTableHDU(frame_data_t, name="FRAMEDATA"))
+    if len(guide_pa) >= 2:
+        pa_coeffs = polyfit_with_sigclip(
+            guide_pa.frameno.to_numpy(numpy.float32),
+            guide_pa.pa.to_numpy(numpy.float32),
+            sigma=3,
+            deg=1,
+        )
 
-    # Calculate PA drift. Do some sigma clipping to remove big outliers.
-    pa_values: ARRAY_1D = guide_data.pa.dropna().to_numpy(numpy.float32)
-    pa_values = cast(ARRAY_1D, sigma_clip(pa_values, 10, masked=True))
-    pa_min = round(pa_values.min(), 6)
-    pa_max = round(pa_values.max(), 6)
-    pa_drift = abs(pa_max - pa_min)
+        pa_vals = numpy.polyval(pa_coeffs, guide_pa.frameno)
+        pa_min = numpy.round(pa_vals.min(), 6)
+        pa_max = numpy.round(pa_vals.max(), 6)
+        pa_drift = numpy.round(numpy.abs(pa_min - pa_max), 6)
 
-    mf_hdu.header.insert(
-        "ZEROPT",
-        ("PAMIN", pa_min, "[deg] Min PA from individual master frames"),
+        drift_warning = pa_drift > DRIFT_WARN_THRESHOLD
+
+    mf_hdu.header["PACOEFFA"] = pa_coeffs[0]
+    mf_hdu.header["PACOEFFB"] = pa_coeffs[1]
+    mf_hdu.header["PAMIN"] = (pa_min, "[deg] Min PA from individual master frames")
+    mf_hdu.header["PAMAX"] = (pa_max, "[deg] Max PA from individual master frames")
+    mf_hdu.header["PADRIFT"] = pa_drift
+    mf_hdu.header["WARNPADR"] = drift_warning
+
+    master_hdu.append(
+        fits.BinTableHDU(
+            Table.from_pandas(guide_data),
+            name="GUIDEDATA",
+        )
     )
-    mf_hdu.header.insert(
-        "ZEROPT",
-        ("PAMAX", pa_max, "[deg] Max PA from individual master frames"),
+    master_hdu.append(
+        fits.BinTableHDU(
+            Table.from_pandas(frame_data_t),
+            name="FRAMEDATA",
+        )
     )
-    mf_hdu.header.insert(
-        "ZEROPT",
-        ("PADRIFT", pa_drift, "[deg] PA drift in sequence"),
-    )
-
-    mf_hdu.header["WARNPADR"] = pa_drift > DRIFT_WARN_THRESHOLD
 
     if outpath is not None:
         # Create the path for the output file.
