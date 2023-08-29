@@ -107,7 +107,7 @@ class FrameData:
 
 def create_coadded_frame_header(
     frame_data: pandas.DataFrame,
-    sources: pandas.DataFrame,
+    sources: pandas.DataFrame | None = None,
     matched: bool = True,
     use_sigmaclip: bool = False,
     sigma: int | None = None,
@@ -116,8 +116,13 @@ def create_coadded_frame_header(
 ):
     """Creates the header object for a co-added frame."""
 
+    telescope = frame_data.iloc[0].telescope
+
     # Create a list with only the stacked frames and sort by frame number.
-    stacked = frame_data.loc[frame_data.stacked == 1]
+    if telescope == "spec":
+        stacked = frame_data
+    else:
+        stacked = frame_data.loc[frame_data.stacked == 1]
 
     frame0 = frame_data.iloc[0].frameno
     framen = frame_data.iloc[-1].frameno
@@ -135,20 +140,32 @@ def create_coadded_frame_header(
         fwhm_median = numpy.round(numpy.median(fwhm_medians), 2)
 
     cofwhm = cofwhmst = None
-    if "fwhm" in sources and len(sources.fwhm.dropna()) > 0:
+    if sources is not None and "fwhm" in sources and len(sources.fwhm.dropna()) > 0:
         cofwhm = numpy.round(sources.fwhm.dropna().median(), 2)
         if len(sources.fwhm.dropna()) > 1:
             cofwhmst = numpy.round(sources.fwhm.dropna().std(), 2)
 
-    zp = round(sources.zp.dropna().median(), 3) if matched else None
+    if sources is not None and matched is True:
+        zp = numpy.round(sources.zp.dropna().median(), 3)
+    else:
+        zp = numpy.round(stacked.zp.dropna().median(), 3)
+
+    if numpy.isnan(zp):
+        zp = None
 
     # Determine the PA drift due to k-mirror tracking.
     frame_pa = stacked.loc[:, ["frameno", "pa"]].dropna()
     pa_min = pa_max = pa_drift = None
     pa_coeffs = [None, None]
-    drift_warning = True
+    drift_warn = True
 
-    if len(frame_pa) >= 2:
+    if telescope == "spec":
+        pa_min = numpy.round(frame_pa.pa.min(), 6)
+        pa_max = numpy.round(frame_pa.pa.max(), 6)
+        pa_drift = numpy.round(numpy.abs(pa_min - pa_max), 6)
+        drift_warn = False
+
+    elif len(frame_pa) >= 2:
         pa_coeffs = polyfit_with_sigclip(
             frame_pa.frameno.to_numpy(numpy.float32),
             frame_pa.pa.to_numpy(numpy.float32),
@@ -161,7 +178,9 @@ def create_coadded_frame_header(
         pa_max = numpy.round(pa_vals.max(), 6)
         pa_drift = numpy.round(numpy.abs(pa_min - pa_max), 6)
 
-        drift_warning = pa_drift > DRIFT_WARN_THRESHOLD
+        drift_warn = pa_drift > DRIFT_WARN_THRESHOLD
+
+    match_warn = not matched if telescope != "spec" else False
 
     wcs_header = wcs.to_header() if wcs is not None else []
 
@@ -189,12 +208,12 @@ def create_coadded_frame_header(
     header["FRAMEN"] = (framen, "Last frame in guide sequence")
     header["NFRAMES"] = (framen - frame0 + 1, "Number of frames in sequence")
 
-    if not is_master:
+    if not is_master and telescope != "spec":
         header["STACK0"] = (stack0, "First stacked frame")
         header["STACKN"] = (stackn, "Last stacked frame")
         header["NSTACKED"] = (stackn - stack0 + 1, "Number of frames stacked")
 
-    if not is_master:
+    if not is_master and telescope != "spec":
         header["COESTIM"] = ("median", "Estimator used to stack data")
         header["SIGCLIP"] = (use_sigmaclip, "Was the stack sigma-clipped?")
         header["SIGMA"] = (sigma, "Sigma used for sigma-clipping")
@@ -204,11 +223,14 @@ def create_coadded_frame_header(
     header["FWHM0"] = (fwhm0, "[arcsec] FWHM of sources in first frame")
     header["FWHMN"] = (fwhmn, "[arcsec] FWHM of sources in last frame")
     header["FHHMMED"] = (fwhm_median, "[arcsec] Median of the FHWM of all frames")
-    header["COFWHM"] = (cofwhm, "[arcsec] Co-added median FWHM")
-    header["COFWHMST"] = (cofwhmst, "[arcsec] Co-added FWHM standard deviation")
 
-    header["PACOEFFA"] = (pa_coeffs[0], "Slope of PA fit")
-    header["PACOEFFB"] = (pa_coeffs[1], "Intercept of PA fit")
+    if telescope != "spec":
+        header["COFWHM"] = (cofwhm, "[arcsec] Co-added median FWHM")
+        header["COFWHMST"] = (cofwhmst, "[arcsec] Co-added FWHM standard deviation")
+
+        header["PACOEFFA"] = (pa_coeffs[0], "Slope of PA fit")
+        header["PACOEFFB"] = (pa_coeffs[1], "Intercept of PA fit")
+
     header["PAMIN"] = (pa_min, "[deg] Minimum PA from WCS")
     header["PAMAX"] = (pa_max, "[deg] Maximum PA from WCS")
     header["PADRIFT"] = (pa_drift, "[deg] PA drift in frame range")
@@ -217,9 +239,9 @@ def create_coadded_frame_header(
     header.insert("FRAME0", ("", "/*** CO-ADDED PARAMETERS ***/"))
 
     # Warnings
-    header["WARNPADR"] = (drift_warning, "PA drift > 0.1 degrees")
+    header["WARNPADR"] = (drift_warn, "PA drift > 0.1 degrees")
     header["WARNTRAN"] = (False, "Transparency N magnitudes above photometric")
-    header["WARNMATC"] = (not matched, "Co-added frame could not be matched with Gaia")
+    header["WARNMATC"] = (match_warn, "Co-added frame could not be matched with Gaia")
     header.insert("WARNPADR", ("", "/*** WARNINGS ***/"))
 
     if wcs is not None:
@@ -526,7 +548,7 @@ def match_with_gaia(
 
     # Get Gaia rows for the valid matches. Change their indices to those
     # of their matching sources (which are 0..len(sources)-1 since we reindexed).
-    matches = gaia_sources.iloc[ii[valid]]
+    matches = gaia_sources.iloc[ii[valid]].copy()
     matches.index = numpy.arange(len(ii))[valid]
 
     # Calculate the separation between matched sources. Drop xpix/ypix.
@@ -593,6 +615,7 @@ def estimate_zeropoint(
     # of an object that produces 1 count per second on the detector.
     # For an arbitrary object producing DT counts per second then
     # m = -2.5 x log10(DN) - ZP
+    flux_adu[flux_adu <= 0] = numpy.nan
     zp = -2.5 * numpy.log10(flux_adu * gain) - sources.lmag_ab
 
     sources["ap_flux"] = flux_adu
@@ -863,7 +886,7 @@ def get_framedata(
         # Decide whether this frame should be stacked.
         if astrometry_header:
             guide_mode = "acquisition" if astrometry_header["ACQUISIT"] else "guide"
-            if guide_mode == "acquisition":
+            if guide_mode == "acquisition" or telescope == "spec":
                 stacked = False
             else:
                 stacked = True
@@ -1007,6 +1030,8 @@ def coadd_camera_frames(
             handler.setLevel(logging.DEBUG)
         elif quiet:
             handler.setLevel(logging.CRITICAL)
+        else:
+            handler.setLevel(logging.INFO)
 
     # Get the list of frame numbers from the files.
     files = list(sorted(files))
@@ -1052,104 +1077,113 @@ def coadd_camera_frames(
 
         fd.data = None
 
+    coadd: ARRAY_2D | None = None
+
     if len(data_stack) == 0:
-        log.error(f"No stack data for {telescope!r}.")
-        return None, frame_data
-
-    # Combine the stack of data frames using the median of each pixel.
-    # Optionally sigma-clip each pixel (this is computationally intensive).
-    if use_sigmaclip:
-        log.debug(f"Sigma-clipping stack with sigma={sigma}")
-        stack_masked = sigma_clip(
-            numpy.array(data_stack),
-            sigma=int(sigma),
-            maxiters=3,
-            masked=True,
-            axis=0,
-            copy=False,
-        )
-
-        log.debug("Creating median-combined co-added frame.")
-        coadd: ARRAY_2D = numpy.ma.median(stack_masked, axis=0).data
-
-    else:
-        log.debug("Creating median-combined co-added frame.")
-        coadd: ARRAY_2D = numpy.median(numpy.array(data_stack), axis=0)
-
-    del data_stack
-
-    # Extract sources in the co-added frame.
-    coadd_sources = extract_marginal(
-        coadd,
-        box_size=31,
-        threshold=3.0,
-        max_detections=50,
-        sextractor_quick_options={"minarea": 5},
-    )
-    coadd_sources["telescope"] = telescope
-    coadd_sources["camera"] = camname
-
-    # Add master frame pixels.
-    xy = coadd_sources.loc[:, ["x", "y"]].to_numpy()
-    camera = coadd_sources.iloc[0]["camera"]
-    telescope = coadd_sources.iloc[0]["telescope"]
-    mf_locs, _ = ag_to_master_frame(f"{telescope}-{camera[0]}", xy)
-    coadd_sources.loc[:, ["x_mf", "y_mf"]] = mf_locs
-
-    # Get astrometry.net solution.
-    camera_solution = solve_locs(
-        coadd_sources.loc[:, ["x", "y", "flux"]],
-        ra,
-        dec,
-        full_frame=False,
-        raise_on_unsolved=False,
-    )
-
-    wcs = None
-    matched = False
-    if camera_solution.solved is False:
-        log.warning("Cannot determine astrometric solution for co-added frame.")
-        # TODO: if this fails we could still use kd-tree and Gaia but we need
-        #       a better estimate of the RA/Dec of the centre of the camera.
-
-    else:
-        wcs = camera_solution.wcs
-
-        gaia_df = get_gaia_sources(
-            wcs,
-            db_connection_params=db_connection_params,
-            log=log,
-        )
-
-        if gaia_df is None or len(gaia_df) == 0:
-            log.warning("No Gaia sources found. Cannot estimate zero point.")
-
+        if telescope == "spec":
+            log.warning(f"Not stacking data for telecope {telescope!r}.")
         else:
-            # Reset index of sources.
-            coadd_sources = coadd_sources.reset_index(drop=True)
+            log.error(f"No data to stack for {telescope!r}.")
 
-            matches, nmatches = match_with_gaia(
-                wcs,
-                coadd_sources,
-                gaia_df,
-                max_separation=2,
+        coadd = coadd_sources = wcs = None
+        matched = False
+
+    else:
+        # Combine the stack of data frames using the median of each pixel.
+        # Optionally sigma-clip each pixel (this is computationally intensive).
+        if use_sigmaclip:
+            log.debug(f"Sigma-clipping stack with sigma={sigma}")
+            stack_masked = sigma_clip(
+                numpy.array(data_stack),
+                sigma=int(sigma),
+                maxiters=3,
+                masked=True,
+                axis=0,
+                copy=False,
             )
 
-            if nmatches < 5:
-                log.error("Insufficient number of matches. Cannot produce ZPs.")
+            log.debug("Creating median-combined co-added frame.")
+            coadd = numpy.ma.median(stack_masked, axis=0).data
+
+        else:
+            log.debug("Creating median-combined co-added frame.")
+            coadd = numpy.median(numpy.array(data_stack), axis=0)
+
+        del data_stack
+        assert coadd is not None
+
+        # Extract sources in the co-added frame.
+        coadd_sources = extract_marginal(
+            coadd,
+            box_size=31,
+            threshold=3.0,
+            max_detections=50,
+            sextractor_quick_options={"minarea": 5},
+        )
+        coadd_sources["telescope"] = telescope
+        coadd_sources["camera"] = camname
+
+        # Add master frame pixels.
+        xy = coadd_sources.loc[:, ["x", "y"]].to_numpy()
+        camera = coadd_sources.iloc[0]["camera"]
+        telescope = coadd_sources.iloc[0]["telescope"]
+        mf_locs, _ = ag_to_master_frame(f"{telescope}-{camera[0]}", xy)
+        coadd_sources.loc[:, ["x_mf", "y_mf"]] = mf_locs
+
+        # Get astrometry.net solution.
+        camera_solution = solve_locs(
+            coadd_sources.loc[:, ["x", "y", "flux"]],
+            ra,
+            dec,
+            full_frame=False,
+            raise_on_unsolved=False,
+        )
+
+        wcs = None
+        matched = False
+        if camera_solution.solved is False:
+            log.warning("Cannot determine astrometric solution for co-added frame.")
+            # TODO: if this fails we could still use kd-tree and Gaia but we need
+            #       a better estimate of the RA/Dec of the centre of the camera.
+
+        else:
+            wcs = camera_solution.wcs
+
+            gaia_df = get_gaia_sources(
+                wcs,
+                db_connection_params=db_connection_params,
+                log=log,
+            )
+
+            if gaia_df is None or len(gaia_df) == 0:
+                log.warning("No Gaia sources found. Cannot estimate zero point.")
 
             else:
-                # Concatenate frames.
-                coadd_sources = pandas.concat([coadd_sources, matches], axis=1)
+                # Reset index of sources.
+                coadd_sources = coadd_sources.reset_index(drop=True)
 
-                coadd_sources = estimate_zeropoint(
-                    coadd,
+                matches, nmatches = match_with_gaia(
+                    wcs,
                     coadd_sources,
-                    gain=gain,
-                    log=log,
+                    gaia_df,
+                    max_separation=2,
                 )
 
-                matched = True
+                if nmatches < 5:
+                    log.error("Insufficient number of matches. Cannot produce ZPs.")
+
+                else:
+                    # Concatenate frames.
+                    coadd_sources = pandas.concat([coadd_sources, matches], axis=1)
+
+                    coadd_sources = estimate_zeropoint(
+                        coadd,
+                        coadd_sources,
+                        gain=gain,
+                        log=log,
+                    )
+
+                    matched = True
 
     # Get frame data table.
     frame_data_df = framedata_to_dataframe(list(frame_data))
@@ -1166,8 +1200,15 @@ def coadd_camera_frames(
 
     # Create the co-added HDU list.
     hdul = fits.HDUList([fits.PrimaryHDU()])
-    hdul.append(fits.CompImageHDU(data=coadd, header=header, name="COADD"))
-    hdul.append(fits.BinTableHDU(Table.from_pandas(coadd_sources), name="SOURCES"))
+
+    if coadd is not None:
+        hdul.append(fits.CompImageHDU(data=coadd, header=header, name="COADD"))
+    else:
+        hdul.append(fits.ImageHDU(header=header, name="COADD"))
+
+    if coadd_sources is not None:
+        hdul.append(fits.BinTableHDU(Table.from_pandas(coadd_sources), name="SOURCES"))
+
     hdul.append(fits.BinTableHDU(Table.from_pandas(frame_data_df), name="FRAMEDATA"))
 
     if outpath is not None:
@@ -1249,6 +1290,8 @@ def create_master_coadd(
             handler.setLevel(logging.DEBUG)
         elif quiet:
             handler.setLevel(logging.CRITICAL)
+        else:
+            handler.setLevel(logging.INFO)
 
     coadd_camera_frames_kwargs = coadd_camera_frames_kwargs.copy()
     if save_camera_coadded_frames is False:
@@ -1286,89 +1329,32 @@ def create_master_coadd(
 
         assert isinstance(hdul, fits.HDUList)
 
-        source_dfs.append(pandas.DataFrame(hdul["SOURCES"].data))
+        if "SOURCES" in hdul:
+            source_dfs.append(pandas.DataFrame(hdul["SOURCES"].data))
+
         coadd_hdu = hdul["COADD"]
         coadd_hdu.name = f"COADD_{cameras[ii].upper()}"
         master_hdu.append(coadd_hdu)
 
         frame_data_all += frame_data
 
-    if len(source_dfs) == 0:
-        log.error("No source data to concatenate. Cannot create master co-added frame.")
-        return None
+    telescope = frame_data_all[0].telescope
 
-    sources_coadd = pandas.concat(source_dfs)
-    master_hdu.append(
-        fits.BinTableHDU(
-            data=Table.from_pandas(sources_coadd),
-            name="SOURCES",
+    sources_coadd: pandas.DataFrame | None = None
+    if len(source_dfs) > 0:
+        sources_coadd = pandas.concat(source_dfs)
+        master_hdu.append(
+            fits.BinTableHDU(
+                data=Table.from_pandas(sources_coadd),
+                name="SOURCES",
+            )
         )
-    )
-
-    wcs_mf: WCS | None = None
-    if "x_mf" in sources_coadd:
-        # Now let's create the master frame WCS. It's easy since we already matched
-        # with Gaia.
-        wcs_data = sources_coadd.loc[:, ["x_mf", "y_mf", "ra_epoch", "dec_epoch"]]
-        wcs_data = wcs_data.dropna()
-
-        skycoords = SkyCoord(
-            ra=wcs_data.ra_epoch,
-            dec=wcs_data.dec_epoch,
-            unit="deg",
-            frame="icrs",
-        )
-        wcs_mf = fit_wcs_from_points((wcs_data.x_mf, wcs_data.y_mf), skycoords)
+    else:
+        if telescope != "spec":
+            log.warning("No source data to concatenate.")
 
     guide_data = get_guide_dataframe(frame_data_all)
     frame_data_t = framedata_to_dataframe(frame_data_all)
-
-    # Initial MF HDU
-    mf_header = create_coadded_frame_header(
-        frame_data_t,
-        sources_coadd,
-        matched=wcs_mf is not None,
-        wcs=wcs_mf,
-        is_master=True,
-    )
-    mf_hdu = fits.ImageHDU(name="MASTER", header=mf_header)
-    master_hdu.insert(1, mf_hdu)
-
-    # Add PA derived from MF WCS.
-    pawcs = round(get_crota2(wcs_mf), 3) if wcs_mf else None
-    mf_hdu.header.insert(
-        "ZEROPT",
-        ("PAWCS", pawcs, "[deg] PA of the IFU from master frame co-added WCS"),
-    )
-
-    # The PA data is incorrect because it was generate from two cameras
-    # with different orientations. Let's recalculate it.
-    guide_pa = guide_data.loc[:, ["frameno", "pa"]]
-    pa_min = pa_max = pa_drift = None
-    pa_coeffs = [None, None]
-    drift_warning = True
-
-    if len(guide_pa) >= 2:
-        pa_coeffs = polyfit_with_sigclip(
-            guide_pa.frameno.to_numpy(numpy.float32),
-            guide_pa.pa.to_numpy(numpy.float32),
-            sigma=3,
-            deg=1,
-        )
-
-        pa_vals = numpy.polyval(pa_coeffs, guide_pa.frameno)
-        pa_min = numpy.round(pa_vals.min(), 6)
-        pa_max = numpy.round(pa_vals.max(), 6)
-        pa_drift = numpy.round(numpy.abs(pa_min - pa_max), 6)
-
-        drift_warning = pa_drift > DRIFT_WARN_THRESHOLD
-
-    mf_hdu.header["PACOEFFA"] = pa_coeffs[0]
-    mf_hdu.header["PACOEFFB"] = pa_coeffs[1]
-    mf_hdu.header["PAMIN"] = (pa_min, "[deg] Min PA from individual master frames")
-    mf_hdu.header["PAMAX"] = (pa_max, "[deg] Max PA from individual master frames")
-    mf_hdu.header["PADRIFT"] = pa_drift
-    mf_hdu.header["WARNPADR"] = drift_warning
 
     master_hdu.append(
         fits.BinTableHDU(
@@ -1382,6 +1368,67 @@ def create_master_coadd(
             name="FRAMEDATA",
         )
     )
+
+    if telescope != "spec" and sources_coadd is not None and "x_mf" in sources_coadd:
+        # Now let's create the master frame WCS. It's easy since we already matched
+        # with Gaia.
+        wcs_data = sources_coadd.loc[:, ["x_mf", "y_mf", "ra_epoch", "dec_epoch"]]
+        wcs_data = wcs_data.dropna()
+
+        skycoords = SkyCoord(
+            ra=wcs_data.ra_epoch,
+            dec=wcs_data.dec_epoch,
+            unit="deg",
+            frame="icrs",
+        )
+        wcs_mf = fit_wcs_from_points((wcs_data.x_mf, wcs_data.y_mf), skycoords)
+
+        # Initial MF HDU
+        mf_header = create_coadded_frame_header(
+            frame_data_t,
+            sources_coadd,
+            matched=wcs_mf is not None,
+            wcs=wcs_mf,
+            is_master=True,
+        )
+        mf_hdu = fits.ImageHDU(name="MASTER", header=mf_header)
+        master_hdu.insert(1, mf_hdu)
+
+        # Add PA derived from MF WCS.
+        pawcs = round(get_crota2(wcs_mf), 3) if wcs_mf else None
+        mf_hdu.header.insert(
+            "ZEROPT",
+            ("PAWCS", pawcs, "[deg] PA of the IFU from master frame co-added WCS"),
+        )
+
+        # The PA data is incorrect because it was generate from two cameras
+        # with different orientations. Let's recalculate it.
+        guide_pa = guide_data.loc[:, ["frameno", "pa"]]
+        pa_min = pa_max = pa_drift = None
+        pa_coeffs = [None, None]
+        drift_warning = True
+
+        if len(guide_pa) >= 2:
+            pa_coeffs = polyfit_with_sigclip(
+                guide_pa.frameno.to_numpy(numpy.float32),
+                guide_pa.pa.to_numpy(numpy.float32),
+                sigma=3,
+                deg=1,
+            )
+
+            pa_vals = numpy.polyval(pa_coeffs, guide_pa.frameno)
+            pa_min = numpy.round(pa_vals.min(), 6)
+            pa_max = numpy.round(pa_vals.max(), 6)
+            pa_drift = numpy.round(numpy.abs(pa_min - pa_max), 6)
+
+            drift_warning = pa_drift > DRIFT_WARN_THRESHOLD
+
+        mf_hdu.header["PACOEFFA"] = pa_coeffs[0]
+        mf_hdu.header["PACOEFFB"] = pa_coeffs[1]
+        mf_hdu.header["PAMIN"] = (pa_min, "[deg] Min PA from individual master frames")
+        mf_hdu.header["PAMAX"] = (pa_max, "[deg] Max PA from individual master frames")
+        mf_hdu.header["PADRIFT"] = pa_drift
+        mf_hdu.header["WARNPADR"] = drift_warning
 
     if outpath is not None:
         # Create the path for the output file.
@@ -1414,6 +1461,7 @@ def create_master_coadd(
 def process_spec_frame(
     file: pathlib.Path | str,
     outpath: str = MASTER_COADD_SPEC_PATH,
+    telescopes: list[str] = ["sci", "spec", "skye", "skyw"],
     log: logging.Logger = llog,
     fail_silent: bool = False,
     **kwargs,
@@ -1427,7 +1475,7 @@ def process_spec_frame(
     specno = int(file.name.split("-")[-1].split(".")[0])
     outpath = outpath.format(specno=specno)
 
-    for telescope in ["sci", "skye", "skyw"]:
+    for telescope in telescopes:
         try:
             frames = get_guider_files_from_spec(file, telescope=telescope)
         except Exception as err:
