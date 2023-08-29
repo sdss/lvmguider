@@ -85,10 +85,11 @@ class FrameData:
     focusdt: float
     proc_header: fits.Header | None = None
     proc_file: pathlib.Path | None = None
-    guide_error: float | None = None
+    astrometry_header: fits.Header | None = None
+    reference_file: pathlib.Path | None = None
     fwhm_median: float | None = None
     fwhm_std: float | None = None
-    guide_mode: str = "guide"
+    guide_mode: str | None = None
     stacked: bool = False
     wcs: WCS | None = None
     wcs_mode: str | None = None
@@ -143,7 +144,7 @@ def create_coadded_frame_header(
     frame_wcs = [
         frame.wcs
         for frame in stacked
-        if frame.wcs is not None and frame.guide_mode == "guide"
+        if frame.wcs is not None and frame.wcs_mode in ["astrometrynet+guide", "guide"]
     ]
     crota2 = numpy.array(list(map(get_crota2, frame_wcs)))
 
@@ -226,31 +227,76 @@ def create_coadded_frame_header(
     return header
 
 
-def reprocess_camera_wcs(
-    wcs: WCS,
-    sources: pandas.DataFrame,
+def get_camera_wcs(
+    camname: str,
+    proc_header: fits.Header,
+    reference_file: str | pathlib.Path | None = None,
+    sources: pandas.DataFrame | None = None,
     db_connection_params: dict[str, Any] = {},
+    force: bool = False,
     log: logging.Logger = llog,
-):
-    """Reprocesses a WCS by matching sources to Gaia positions and recreating the WCS.
+    log_header: str = "",
+) -> tuple[bool, WCS]:
+    """Returns a WCS for a camera.
+
+    Determines whether the WCS in the ``PROC`` extension is reliable or reprocesses
+    the image to generate a new WCS.
 
     Parameters
     ----------
-    wcs
-        A WCS associated with the image. Used to determine the centre of the
-        image and perform a radial query in the database.
+    camname
+        The camera name.
+    proc_header
+        The ``PROC`` header with the original WCS.
+    reference_file
+        The reference file for this frame.
     sources
-        A data frame with extracted sources. The data frame is returned
-        after adding the aperture photometry and estimated zero-points.
-        If the database connection fails or it is otherwise not possible
-        to calculate zero-points, the original data frame is returned.
+        A data frame with extracted sources.
     db_connection_params
         A dictionary of DB connection parameters to pass to `.get_db_connection`.
+    force
+        Reprocesses the WCS even if all the header information indicates it's
+        valid.
+    log
+        The logger instance to use.
+    log_header
+        A prefix to add to the log messages.
+
+    Returns
+    -------
+    wcs_data
+        A tuple with a boolean indicating the WCS was reprocessed and
+        the reprocessed WCS. If no reprocess was done, the WCS is the
+        original one from the ``PROC`` header.
 
     """
 
+    if proc_header is None or "WCSMODE" not in proc_header:
+        log.warning(f"{log_header} missing PROC header or WCSMODE keyword.")
+        return (False, None)
+
+    wcs = WCS(proc_header)
+
+    # Determine whether we should reprocess the frame and recover a new
+    # WCS. This will not be required for future frames.
+
+    if proc_header["WCSMODE"] == "astrometrynet" and not force:
+        return (False, wcs)
+
+    if "GUIDERV" in proc_header and proc_header["GUIDERV"] > "0.4.0" and not force:
+        return (False, wcs)
+
+    if sources is None or reference_file is None:
+        log.warning(f"{log_header} not enough information to reprocess WCS.")
+        return (False, wcs)
+
+    ref_header = fits.getheader(reference_file, "PROC")
+    ref_wcs = WCS(ref_header)
+
+    log.debug(f"{log_header} refining camera WCS.")
+
     # Get RA/Dec of centre of frame.
-    skyc = wcs.pixel_to_world(*XZ_AG_FRAME)
+    skyc = ref_wcs.pixel_to_world(*XZ_AG_FRAME)
 
     if isinstance(skyc, list):
         log.error("Invalid WCS; cannot determine field centre.")
@@ -277,7 +323,7 @@ def reprocess_camera_wcs(
     if gaia_df is None:
         return (False, wcs)
 
-    matches, nmatches = match_with_gaia(wcs, sources, gaia_df, max_separation=5)
+    matches, nmatches = match_with_gaia(ref_wcs, sources, gaia_df, max_separation=5)
 
     if nmatches < 5:
         log.warning("Insufficient number of matches. Cannot reprocess WCS.")
@@ -642,11 +688,12 @@ def framedata_to_dataframe(frame_data: list[FrameData]):
                 exptime=fd.exptime,
                 kmirror_drot=fd.kmirror_drot,
                 focusdt=fd.focusdt,
-                guide_error=fd.guide_error,
                 fwhm_median=fd.fwhm_median,
                 fwhm_std=fd.fwhm_std,
-                guide_mode=fd.guide_mode,
                 stacked=int(fd.stacked),
+                guide_mode=str(fd.guide_mode),
+                proc_file=str(fd.proc_file or ""),
+                reference_file=str(fd.reference_file or ""),
             )
         )
 
@@ -744,74 +791,37 @@ def get_framedata(
             fwhm_median = float(numpy.median(fwhm))
             fwhm_std = float(numpy.std(fwhm))
 
-        # Get the proc- file. Just used to determine
-        # if we were acquiring or guiding.
+        # Get the proc- file.
         proc_file = get_proc_path(file)
+
+        astrometry_header: fits.Header | None = None
+        reference_file: pathlib.Path | None = None
+        guide_mode: str | None = None
+
         if not proc_file.exists():
             log.warning(f"{log_h} missing associated proc- file.")
-            proc_astrometry = None
-            guide_error = None
             proc_file = None
         else:
-            proc_astrometry = fits.getheader(str(proc_file), "ASTROMETRY")
-            guide_error = numpy.hypot(
-                proc_astrometry["OFFRAMEA"],
-                proc_astrometry["OFFDEMEA"],
-            )
+            astrometry_header = fits.getheader(str(proc_file), "ASTROMETRY")
 
-        wcs_mode = None
-        wcs = None
-        wcs_reprocessed: bool = False
-        if proc_header is not None and "WCSMODE" in proc_header:
-            wcs_mode = proc_header["WCSMODE"]
+            if astrometry_header:
+                for ii in range(2):
+                    if camname in astrometry_header[f"REFFILE{ii}"]:
+                        reference_file = astrometry_header[f"REFFILE{ii}"]
+                        break
 
-            wcs = WCS(proc_header)
+                guide_mode = "acquisition" if astrometry_header["ACQUISIT"] else "guide"
 
-            # Determine whether we should reprocess the frame and recover a new
-            # WCS. This will not be required for future frames.
-            if proc_header["WCSMODE"] == "astrometrynet":
-                pass
-            else:
-                if "GUIDERV" in proc_header and proc_header["GUIDERV"] > "0.4.0":
-                    pass
-                elif sources is not None and proc_astrometry is not None:
-                    # This is relevant for early PROC extensions during guiding
-                    # in which the WCS was generated by translating the reference
-                    # frame WCS.
-
-                    # There was a bug that in some cases caused the WCS CRVAL
-                    # to drift as more offsets were accumulated. So let's get
-                    # the reference image WCS and use that.
-                    ref_file: str | None = None
-                    for key in ["REFFILE0", "REFFILE1"]:
-                        if camname in proc_astrometry[key]:
-                            ref_file = proc_astrometry[key]
-                            break
-
-                    if ref_file is None:
-                        log.error(
-                            f"{log_h} cannot find reference file for {file!s}. "
-                            "Cannot refine WCS."
-                        )
-                    else:
-                        ref_header = fits.getheader(ref_file, "PROC")
-                        ref_wcs = WCS(ref_header)
-
-                        log.debug(f"Refining WCS for frame {camname}-{frameno}.")
-                        (reprocess_ok, reprocess_wcs) = reprocess_camera_wcs(
-                            ref_wcs,
-                            sources,
-                            db_connection_params=db_connection_params,
-                            log=log,
-                        )
-                        if reprocess_ok:
-                            wcs = reprocess_wcs
-                            wcs_reprocessed = True
-                        else:
-                            log.warning(f"{log_h} failed reprocessing WCS.")
-                            wcs = None
-                else:
-                    log.warning(f"{log_h} not enough information to reprocess WCS.")
+        wcs_mode = proc_header["WCSMODE"] if proc_header else None
+        (wcs_reprocessed, wcs) = get_camera_wcs(
+            camname,
+            proc_header,
+            reference_file,
+            sources,
+            db_connection_params=db_connection_params,
+            log=log,
+            log_header=log_h,
+        )
 
         # If we have not yet loaded the dark frame, get it and get the
         # normalised dark.
@@ -840,8 +850,8 @@ def get_framedata(
             data -= back.back()
 
         # Decide whether this frame should be stacked.
-        if proc_astrometry:
-            guide_mode = "acquisition" if proc_astrometry["ACQUISIT"] else "guide"
+        if astrometry_header:
+            guide_mode = "acquisition" if astrometry_header["ACQUISIT"] else "guide"
             if guide_mode == "acquisition":
                 stacked = False
             else:
@@ -860,6 +870,8 @@ def get_framedata(
             raw_header=raw_header,
             proc_header=proc_header,
             proc_file=proc_file,
+            astrometry_header=astrometry_header,
+            reference_file=reference_file,
             camera=raw_header["CAMNAME"],
             telescope=raw_header["TELESCOP"],
             date_obs=obs_time,
@@ -870,8 +882,6 @@ def get_framedata(
             focusdt=raw_header["FOCUSDT"],
             fwhm_median=fwhm_median,
             fwhm_std=fwhm_std,
-            guide_error=guide_error,
-            guide_mode=guide_mode,
             stacked=stacked,
             wcs=wcs,
             wcs_mode=wcs_mode,
@@ -885,7 +895,6 @@ def coadd_camera_frames(
     outpath: str | None = COADD_CAMERA_DEFAULT_PATH,
     use_sigmaclip: bool = False,
     sigma: float = 3.0,
-    skip_acquisition_after_guiding: bool = False,
     database_profile: str = "default",
     database_params: dict = {},
     log: logging.Logger | None = None,
@@ -927,11 +936,6 @@ def coadd_camera_frames(
         by default as it uses significant CPU and memory.
     sigma
         The sigma value for co-addition sigma clipping.
-    skip_acquisition_after_guiding
-        Images are co-added starting on the first frame marked as ``'guide'``
-        and until the last frame. If ``skip_acquisition_after_guiding=True``,
-        ``'acquisition'`` images found after the initial acquisition are
-        discarded.
     database_profile
         Profile name to use to connect to the database and query Gaia.
     database_params
@@ -998,21 +1002,13 @@ def coadd_camera_frames(
 
     data_stack: list[ARRAY_2D] = []
     for fd in frame_data:
-        data = fd.data
+        if fd.data is not None and fd.stacked is True:
+            if fd.guide_mode == "acquisition":
+                fd.stacked = False
+            else:
+                data_stack.append(fd.data)
+
         fd.data = None
-
-        if data is None or fd.stacked is False:
-            del data
-            continue
-
-        guide_mode = fd.guide_mode
-        skip_acquisition = len(data_stack) == 0 or skip_acquisition_after_guiding
-        if guide_mode == "acquisition" and skip_acquisition:
-            fd.stacked = False
-        else:
-            data_stack.append(data)
-
-        del data
 
     if len(data_stack) == 0:
         log.error(f"No stack data for {telescope!r}.")
@@ -1094,6 +1090,7 @@ def coadd_camera_frames(
     hdul = fits.HDUList([fits.PrimaryHDU()])
     hdul.append(fits.CompImageHDU(data=coadd, header=header, name="COADD"))
     hdul.append(fits.BinTableHDU(Table.from_pandas(coadd_sources), name="SOURCES"))
+    print(frame_data_df)
     hdul.append(fits.BinTableHDU(Table.from_pandas(frame_data_df), name="FRAMEDATA"))
 
     if outpath is not None:
