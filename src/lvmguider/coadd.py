@@ -87,14 +87,21 @@ class FrameData:
     proc_file: pathlib.Path | None = None
     astrometry_header: fits.Header | None = None
     reference_file: pathlib.Path | None = None
-    fwhm_median: float | None = None
-    fwhm_std: float | None = None
+    fwhm_median: float = numpy.nan
+    fwhm_std: float = numpy.nan
     guide_mode: str | None = None
+    sources: pandas.DataFrame | None = None
     stacked: bool = False
     wcs: WCS | None = None
-    wcs_mode: str | None = None
     wcs_reprocessed: bool = False
+    zp: float = numpy.nan
     data: ARRAY_2D | None = None
+
+    @property
+    def wcs_mode(self):
+        """Returns the origin of the ``PROC`` WCS."""
+
+        return self.proc_header["WCSMODE"] if self.proc_header else None
 
 
 def create_coadded_frame_header(
@@ -124,7 +131,7 @@ def create_coadded_frame_header(
 
     sjd = get_sjd("LCO", frames[0].date_obs.to_datetime())
 
-    fwhm_medians = [ff.fwhm_median for ff in stacked if ff.fwhm_median is not None]
+    fwhm_medians = [ff.fwhm_median for ff in stacked if not numpy.isnan(ff.fwhm_median)]
     fwhm0 = fwhmn = fwhm_median = None
 
     if len(fwhm_medians) > 0:
@@ -227,25 +234,26 @@ def create_coadded_frame_header(
     return header
 
 
-def get_camera_wcs(
-    camname: str,
+def reprocess_camera_data(
+    data: ARRAY_2D,
+    sources: pandas.DataFrame,
     proc_header: fits.Header,
     reference_file: str | pathlib.Path | None = None,
-    sources: pandas.DataFrame | None = None,
     db_connection_params: dict[str, Any] = {},
     force: bool = False,
     log: logging.Logger = llog,
     log_header: str = "",
-) -> tuple[bool, WCS]:
-    """Returns a WCS for a camera.
+) -> tuple[bool, WCS, pandas.DataFrame | None]:
+    """Reprocesses camera data.
 
     Determines whether the WCS in the ``PROC`` extension is reliable or reprocesses
-    the image to generate a new WCS.
+    the image to generate a new WCS. Matches with Gaia sources and calculates
+    zero points.
 
     Parameters
     ----------
-    camname
-        The camera name.
+    data
+        Array with background-subtracted camera data.
     proc_header
         The ``PROC`` header with the original WCS.
     reference_file
@@ -265,33 +273,38 @@ def get_camera_wcs(
     Returns
     -------
     wcs_data
-        A tuple with a boolean indicating the WCS was reprocessed and
-        the reprocessed WCS. If no reprocess was done, the WCS is the
-        original one from the ``PROC`` header.
+        A tuple with a boolean indicating the WCS was reprocessed, the
+        reprocessed WCS, and the Gaia-matched sources data frame. If no
+        reprocess was done, the WCS is the original one from the ``PROC``
+        header.
 
     """
 
-    if proc_header is None or "WCSMODE" not in proc_header:
+    if "WCSMODE" not in proc_header:
         log.warning(f"{log_header} missing PROC header or WCSMODE keyword.")
-        return (False, None)
+        return (False, None, sources)
 
+    wcs_mode = proc_header["WCSMODE"]
     wcs = WCS(proc_header)
 
-    # Determine whether we should reprocess the frame and recover a new
-    # WCS. This will not be required for future frames.
-
-    if proc_header["WCSMODE"] == "astrometrynet" and not force:
-        return (False, wcs)
-
+    # For future versions this should all be done during guiding.
     if "GUIDERV" in proc_header and proc_header["GUIDERV"] > "0.4.0" and not force:
-        return (False, wcs)
+        return (False, wcs, sources)
 
-    if sources is None or reference_file is None:
+    if wcs_mode == "astrometrynet":
+        ref_wcs = WCS(proc_header)
+
+    elif reference_file is None:
         log.warning(f"{log_header} not enough information to reprocess WCS.")
-        return (False, wcs)
+        return (False, wcs, sources)
 
-    ref_header = fits.getheader(reference_file, "PROC")
-    ref_wcs = WCS(ref_header)
+    elif wcs_mode in ["none", "pwi"]:
+        log.warning(f"{log_header} cannot reprocess data for WCSMODE={wcs_mode!r}")
+        return (False, None, sources)
+
+    else:
+        ref_header = fits.getheader(reference_file, "PROC")
+        ref_wcs = WCS(ref_header)
 
     log.debug(f"{log_header} refining camera WCS.")
 
@@ -300,7 +313,7 @@ def get_camera_wcs(
 
     if isinstance(skyc, list):
         log.error("Invalid WCS; cannot determine field centre.")
-        return (False, wcs)
+        return (False, wcs, sources)
 
     # Check if we can use the cached Gaia sources.
     do_query: bool = True
@@ -314,38 +327,36 @@ def get_camera_wcs(
             do_query = False
 
     if do_query:
-        gaia_df = get_gaia_sources(
-            wcs,
-            db_connection_params=db_connection_params,
-            include_lvm_mags=False,
-        )
+        gaia_df = get_gaia_sources(wcs, db_connection_params=db_connection_params)
 
     if gaia_df is None:
-        return (False, wcs)
+        return (False, wcs, sources)
 
     matches, nmatches = match_with_gaia(ref_wcs, sources, gaia_df, max_separation=5)
 
     if nmatches < 5:
-        log.warning("Insufficient number of matches. Cannot reprocess WCS.")
-        return (False, wcs)
+        log.warning(f"{log_header} not enough Gaia matches. Cannot reprocess WCS.")
+        return (False, wcs, sources)
 
     # Concatenate frames.
     matched_sources = pandas.concat([sources, matches], axis=1)
-    matched_sources = matched_sources.loc[:, ["ra_epoch", "dec_epoch", "x", "y"]]
-    matched_sources.dropna(inplace=True)
+    radec_sources = matched_sources.loc[:, ["ra_epoch", "dec_epoch", "x", "y"]]
+    radec_sources.dropna(inplace=True)
 
     skycoords = SkyCoord(
-        ra=matched_sources.ra_epoch,
-        dec=matched_sources.dec_epoch,
+        ra=radec_sources.ra_epoch,
+        dec=radec_sources.dec_epoch,
         unit="deg",
         frame="icrs",
     )
     reprocessd_wcs: WCS = fit_wcs_from_points(
-        (matched_sources.x, matched_sources.y),
+        (radec_sources.x, radec_sources.y),
         skycoords,
     )
 
-    return (True, reprocessd_wcs)
+    matched_sources = estimate_zeropoint(data, matched_sources, log=log)
+
+    return (True, reprocessd_wcs, matched_sources)
 
 
 def get_gaia_sources(
@@ -361,16 +372,13 @@ def get_gaia_sources(
     wcs
         A WCS associated with the image. Used to determine the centre of the
         image and perform a radial query in the database.
-    sources
-        A data frame with extracted sources. The data frame is returned
-        after adding the aperture photometry and estimated zero-points.
-        If the database connection fails or it is otherwise not possible
-        to calculate zero-points, the original data frame is returned.
     include_lvm_mags
         If `True`, match to ``lvm_magnitude`` and return LVM AG passband
         magnitudes and fluxes.
     db_connection_params
         A dictionary of DB connection parameters to pass to `.get_db_connection`.
+    log
+        A log to output messages.
 
     """
 
@@ -419,6 +427,7 @@ def get_gaia_sources(
                 GDR3.c.phot_g_mean_mag,
             )
             .join(GDR3, on=(cte.c.source_id == GDR3.c.source_id))
+            .where(GDR3.c.phot_g_mean_mag < 15)
             .with_cte(cte)
             .dicts()
         )
@@ -433,6 +442,7 @@ def get_gaia_sources(
                 GDR3.c.phot_g_mean_mag,
             )
             .where(peewee.fn.q3c_radial_query(GDR3.c.ra, GDR3.c.dec, ra, dec, CAM_FOV))
+            .where(GDR3.c.phot_g_mean_mag < 15)
             .dicts()
         )
 
@@ -475,6 +485,8 @@ def match_with_gaia(
 
     """
 
+    PIXSCALE = 1.009  # arcsec/pix
+
     # Epoch difference with Gaia DR3.
     GAIA_EPOCH = 2016.0
     epoch = Time.now().jyear
@@ -511,19 +523,22 @@ def match_with_gaia(
     matches = gaia_sources.iloc[ii[valid]]
     matches.index = numpy.arange(len(ii))[valid]
 
+    # Calculate the separation between matched sources. Drop xpix/ypix.
+    dx = matches.xpix - sources.x
+    dy = matches.ypix - sources.y
+    matches["match_sep"] = numpy.hypot(dx, dy) * PIXSCALE
+    matches.drop(columns=["xpix", "ypix"], inplace=True)
+
     return matches, valid.sum()
 
 
 def estimate_zeropoint(
     coadd_image: ARRAY_2D,
     sources: pandas.DataFrame,
-    wcs: WCS,
     gain: float = 5,
-    max_separation: float = 2,
     ap_radius: float = 6,
     ap_bkgann: tuple[float, float] = (6, 10),
     log: logging.Logger | None = None,
-    db_connection_params: dict[str, Any] = {},
 ):
     """Determines the ``lmag`` zeropoint for each source.
 
@@ -534,13 +549,8 @@ def estimate_zeropoint(
         after adding the aperture photometry and estimated zero-points.
         If the database connection fails or it is otherwise not possible
         to calculate zero-points, the original data frame is returned.
-    wcs
-        A WCS associated with the image. Used to determine the centre of the
-        image and perform a radial query in the database.
     gain
         The gain of the detector in e-/ADU.
-    max_separation
-        Maximum separation between detections and matched Gaia sources, in arcsec.
     ap_radius
         The radius to use for aperture photometry, in pixels.
     ap_bkgann
@@ -549,54 +559,16 @@ def estimate_zeropoint(
     log
         An instance of a logger to be used to output messages. If not provided
         defaults to the package log.
-    db_connection_params
-        A dictionary of DB connection parameters to pass to `.get_db_connection`.
+
+    Returns
+    -------
+    dataframe
+        The input data frame with added columns ``ap_flux``, ``ap_fluxerr``,
+        and ``zp``.
 
     """
 
-    # Camera FOV in degrees. Approximate, just for initial radial query.
-    PIXSCALE = 1.009  # arcsec/pix
-
     log = log or llog
-
-    gaia_df = get_gaia_sources(wcs, db_connection_params=db_connection_params, log=log)
-    if gaia_df is None:
-        log.error("Cannot match sources with Gaia DR3.")
-        return (False, sources)
-
-    if len(gaia_df) == 0:
-        log.warning("No Gaia sources found. Cannot estimate zero point.")
-        return (False, sources)
-
-    # Reset index of sources.
-    sources = sources.reset_index(drop=True)
-
-    matches, nmatches = match_with_gaia(
-        wcs,
-        sources,
-        gaia_df,
-        max_separation=max_separation,
-    )
-
-    if nmatches < 5:
-        log.error("Insufficient number of matches. Cannot produce ZPs.")
-        return (False, sources)
-
-    # Concatenate frames.
-    sources = pandas.concat([sources, matches], axis=1)
-
-    # Calculate the separation between matched sources. Drop xpix/ypix.
-    dx = sources.xpix - sources.x
-    dy = sources.ypix - sources.y
-    sources["match_sep"] = numpy.hypot(dx, dy) * PIXSCALE
-    sources.drop(columns=["xpix", "ypix"], inplace=True)
-
-    # Add master frame pixels.
-    xy = sources.loc[:, ["x", "y"]].to_numpy()
-    camera = sources.iloc[0]["camera"]
-    telescope = sources.iloc[0]["telescope"]
-    mf_locs, _ = ag_to_master_frame(f"{telescope}-{camera[0]}", xy)
-    sources.loc[:, ["x_mf", "y_mf"]] = mf_locs
 
     # Do aperture photometry around the detections.
     flux_adu, fluxerr_adu, _ = sep.sum_circle(
@@ -608,6 +580,9 @@ def estimate_zeropoint(
         gain=gain,
     )
 
+    flux_adu = flux_adu.astype(numpy.float32)
+    fluxerr_adu = fluxerr_adu.astype(numpy.float32)
+
     # Calculate zero point. By definition this is the magnitude
     # of an object that produces 1 count per second on the detector.
     # For an arbitrary object producing DT counts per second then
@@ -618,40 +593,80 @@ def estimate_zeropoint(
     sources["ap_fluxerr"] = fluxerr_adu
     sources["zp"] = zp
 
-    return (True, sources)
+    return sources
 
 
 def get_guide_dataframe(frames: list[FrameData]):
     """Creates a data frame with guide information from ``proc-`` files."""
 
-    guide_records: list[dict] = []
-    _processed_proc_files: list[pathlib.Path] = []
+    # For the guide dataframe we want one entry per proc- file. We create a
+    # mapping of frame to astrometry header and lists of sources from the
+    # individual frames. At this point the sources DFs will have been
+    # matched with Gaia and have the MF pixels.
 
+    telescope = frames[0].telescope
+
+    guide_frames: dict[int, dict] = {}
     for frame in frames:
-        proc_file = frame.proc_file
+        frameno = frame.frameno
 
-        if proc_file is None or not proc_file.exists():
+        if (
+            frame.astrometry_header is None
+            or frame.proc_file is None
+            or frame.sources is None
+        ):
             continue
 
-        if proc_file in _processed_proc_files:
+        if frameno not in guide_frames:
+            guide_frames[frameno] = {
+                "frameno": frameno,
+                "frames": [],
+                "header": None,
+                "sources": [],
+                "proc_file": None,
+            }
+
+        guide_frames[frameno]["header"] = frame.astrometry_header
+        guide_frames[frameno]["proc_file"] = frame.proc_file
+        guide_frames[frameno]["sources"].append(frame.sources)
+        guide_frames[frameno]["frames"].append(frame)
+
+    guide_records: list[dict] = []
+
+    for frameno, guide_frame in guide_frames.items():
+        if guide_frame["sources"] == [] or guide_frame["header"] is None:
             continue
 
-        hdul = fits.open(proc_file)
-        if "ASTROMETRY" not in hdul or "SOURCES" not in hdul:
-            continue
+        astrom = guide_frame["header"]
+        proc_file = guide_frame["proc_file"]
 
-        astrom = hdul["ASTROMETRY"].header
+        if "ra_epoch" in guide_frame["sources"][0]:
+            # Generate WCS from sources.
+            sources = pandas.concat(guide_frame["sources"])
 
-        sources = pandas.DataFrame(hdul["SOURCES"].data)
+            matches = sources.loc[:, ["x_mf", "y_mf", "ra_epoch", "dec_epoch"]]
+            matches = matches.dropna()
 
-        wcs = WCS(astrom)
+            skycoords = SkyCoord(
+                ra=matches.ra_epoch,
+                dec=matches.dec_epoch,
+                unit="deg",
+                frame="icrs",
+            )
+            wcs = fit_wcs_from_points((matches.x_mf, matches.y_mf), skycoords)
+
+        else:
+            wcs = WCS(astrom)
+            sources = pandas.DataFrame(fits.getdata(str(proc_file), "SOURCES"))
+
+        fwhm = (0.5 * (sources.xstd + sources.ystd)).dropna().median()
 
         record = dict(
             frameno=get_frameno(astrom["FILE0"]),
-            date=astrom["DATE"] if "DATE" in astrom else numpy.nan,
+            date=astrom["DATE"] if "DATE" in astrom else "",
             n_sources=len(sources),
-            fwhm=frame.fwhm_median or numpy.nan,
-            telescope=frame.telescope,
+            fwhm=fwhm,
+            telescope=telescope,
             ra=astrom["RAMEAS"],
             dec=astrom["DECMEAS"],
             ra_offset=astrom["OFFRAMEA"],
@@ -661,9 +676,8 @@ def get_guide_dataframe(frames: list[FrameData]):
             dec_corr=astrom["DECORR"],
             ax0_corr=astrom["AX0CORR"],
             ax1_corr=astrom["AX1CORR"],
-            mode="acquisition" if astrom["ACQUISIT"] else "guide",
             pa=get_crota2(wcs),
-            wcs_mode=frame.wcs_mode or "",
+            mode="acquisition" if astrom["ACQUISIT"] else "guide",
         )
 
         guide_records.append(record)
@@ -690,6 +704,7 @@ def framedata_to_dataframe(frame_data: list[FrameData]):
                 focusdt=fd.focusdt,
                 fwhm_median=fd.fwhm_median,
                 fwhm_std=fd.fwhm_std,
+                zp=fd.zp,
                 stacked=int(fd.stacked),
                 guide_mode=str(fd.guide_mode),
                 proc_file=str(fd.proc_file or ""),
@@ -781,8 +796,8 @@ def get_framedata(
         if "SOURCES" not in hdul:
             log.warning(f"{log_h} SOURCES extension not found.")
             sources = None
-            fwhm_median = None
-            fwhm_std = None
+            fwhm_median = numpy.nan
+            fwhm_std = numpy.nan
         else:
             sources = pandas.DataFrame(hdul["SOURCES"].data)
             valid = sources.loc[(sources.xfitvalid == 1) & (sources.yfitvalid == 1)]
@@ -811,17 +826,6 @@ def get_framedata(
                         break
 
                 guide_mode = "acquisition" if astrometry_header["ACQUISIT"] else "guide"
-
-        wcs_mode = proc_header["WCSMODE"] if proc_header else None
-        (wcs_reprocessed, wcs) = get_camera_wcs(
-            camname,
-            proc_header,
-            reference_file,
-            sources,
-            db_connection_params=db_connection_params,
-            log=log,
-            log_header=log_h,
-        )
 
         # If we have not yet loaded the dark frame, get it and get the
         # normalised dark.
@@ -860,7 +864,31 @@ def get_framedata(
             guide_mode = "none"
             stacked = False
 
+        # Reprocess camera WCS and match with Gaia.
+        wcs_reprocessed: bool = False
+        wcs: WCS | None = None
+        if proc_header is not None and sources is not None:
+            (wcs_reprocessed, wcs, sources) = reprocess_camera_data(
+                data,
+                sources,
+                proc_header,
+                reference_file,
+                db_connection_params=db_connection_params,
+                log=log,
+                log_header=log_h,
+            )
+
+        # Add MF pixels
+        if sources is not None:
+            xy = sources.loc[:, ["x", "y"]].to_numpy()
+            mf_locs, _ = ag_to_master_frame(f"{telescope}-{camname[0]}", xy)
+            sources.loc[:, ["x_mf", "y_mf"]] = mf_locs
+
         obs_time = Time(raw_header["DATE-OBS"], format="isot")
+
+        zp = numpy.nan
+        if sources is not None and "zp" in sources:
+            zp = sources.zp.dropna().median()
 
         # Add information as a FrameData. We do not include the data itself
         # because it's in data_stack and we don't need it beyond that.
@@ -884,9 +912,11 @@ def get_framedata(
             fwhm_std=fwhm_std,
             stacked=stacked,
             wcs=wcs,
-            wcs_mode=wcs_mode,
             wcs_reprocessed=wcs_reprocessed,
             data=data,
+            sources=sources,
+            guide_mode=guide_mode,
+            zp=zp,
         )
 
 
@@ -1047,6 +1077,13 @@ def coadd_camera_frames(
     coadd_sources["telescope"] = telescope
     coadd_sources["camera"] = camname
 
+    # Add master frame pixels.
+    xy = coadd_sources.loc[:, ["x", "y"]].to_numpy()
+    camera = coadd_sources.iloc[0]["camera"]
+    telescope = coadd_sources.iloc[0]["telescope"]
+    mf_locs, _ = ag_to_master_frame(f"{telescope}-{camera[0]}", xy)
+    coadd_sources.loc[:, ["x_mf", "y_mf"]] = mf_locs
+
     # Get astrometry.net solution.
     camera_solution = solve_locs(
         coadd_sources.loc[:, ["x", "y", "flux"]],
@@ -1056,22 +1093,51 @@ def coadd_camera_frames(
         raise_on_unsolved=False,
     )
 
+    wcs = None
+    matched = False
     if camera_solution.solved is False:
         log.warning("Cannot determine astrometric solution for co-added frame.")
-        wcs = None
-        matched = False
         # TODO: if this fails we could still use kd-tree and Gaia but we need
         #       a better estimate of the RA/Dec of the centre of the camera.
+
     else:
         wcs = camera_solution.wcs
-        matched, coadd_sources = estimate_zeropoint(
-            coadd,
-            coadd_sources,
+
+        gaia_df = get_gaia_sources(
             wcs,
-            gain=gain,
-            log=log,
             db_connection_params=db_connection_params,
+            log=log,
         )
+
+        if gaia_df is None or len(gaia_df) == 0:
+            log.warning("No Gaia sources found. Cannot estimate zero point.")
+
+        else:
+            # Reset index of sources.
+            coadd_sources = coadd_sources.reset_index(drop=True)
+
+            matches, nmatches = match_with_gaia(
+                wcs,
+                coadd_sources,
+                gaia_df,
+                max_separation=2,
+            )
+
+            if nmatches < 5:
+                log.error("Insufficient number of matches. Cannot produce ZPs.")
+
+            else:
+                # Concatenate frames.
+                coadd_sources = pandas.concat([coadd_sources, matches], axis=1)
+
+                coadd_sources = estimate_zeropoint(
+                    coadd,
+                    coadd_sources,
+                    gain=gain,
+                    log=log,
+                )
+
+                matched = True
 
     # Construct the header.
     header = create_coadded_frame_header(
@@ -1090,7 +1156,6 @@ def coadd_camera_frames(
     hdul = fits.HDUList([fits.PrimaryHDU()])
     hdul.append(fits.CompImageHDU(data=coadd, header=header, name="COADD"))
     hdul.append(fits.BinTableHDU(Table.from_pandas(coadd_sources), name="SOURCES"))
-    print(frame_data_df)
     hdul.append(fits.BinTableHDU(Table.from_pandas(frame_data_df), name="FRAMEDATA"))
 
     if outpath is not None:
@@ -1195,6 +1260,8 @@ def create_master_coadd(
     #       trying it, so for now let's do sync.
     ccf_partial = partial(coadd_camera_frames, **coadd_camera_frames_kwargs)
     hduls = map(ccf_partial, camera_files)
+
+    log.debug("Creating master co-added frame.")
 
     # Create master HDU list and concatenate sources. Create MASTER
     # extension but leave empty for now.
