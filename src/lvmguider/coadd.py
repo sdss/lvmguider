@@ -24,6 +24,7 @@ import nptyping as npt
 import numpy
 import pandas
 import peewee
+import seaborn
 import sep
 from astropy.coordinates import SkyCoord
 from astropy.io import fits
@@ -32,6 +33,7 @@ from astropy.table import Table
 from astropy.time import Time
 from astropy.wcs import WCS, FITSFixedWarning
 from astropy.wcs.utils import fit_wcs_from_points
+from matplotlib import pyplot as plt
 from scipy.spatial import KDTree
 
 from sdsstools.time import get_sjd
@@ -1455,6 +1457,8 @@ def create_master_coadd(
         log.info(f"Writing co-added frame to {outpath_full.absolute()!s}")
         master_hdu.writeto(str(outpath_full), overwrite=True)
 
+        generate_qa_from_coadded(outpath_full)
+
     return master_hdu
 
 
@@ -1602,3 +1606,129 @@ def get_files_in_time_range(
         for file in files
         if os.path.getctime(file) > dt0 and os.path.getctime(file) < dt1
     ]
+
+
+def generate_qa_from_coadded(
+    path: pathlib.Path | str,
+    outpath: str | pathlib.Path = "qa/",
+):
+    """Produces QA plots from a master co-added frame."""
+
+    path = pathlib.Path(path).absolute()
+
+    outpath = path.parent / outpath
+    outpath.mkdir(parents=True, exist_ok=True)
+
+    # Extract data
+    hdul = fits.open(path)
+
+    master = hdul["MASTER"].header if "MASTER" in hdul else None
+    coadd_east = hdul["COADD_EAST"].header if "COADD_EAST" in hdul else None
+    coadd_west = hdul["COADD_WEST"].header if "COADD_WEST" in hdul else None
+    guide_data = Table(hdul["GUIDEDATA"].data).to_pandas()
+    frame_data = Table(hdul["FRAMEDATA"].data).to_pandas()
+
+    # Set up seaborn.
+    plt.ioff()
+    seaborn.set_theme(style="darkgrid", palette="deep", font="serif")
+
+    # Plot PA
+    outpath_pa = outpath / (path.stem + "_pa.pdf")
+    plot_position_angle(
+        outpath_pa,
+        master,
+        coadd_east,
+        coadd_west,
+        guide_data,
+        frame_data,
+    )
+
+
+def plot_position_angle(
+    outpath: pathlib.Path,
+    master: fits.Header | None,
+    coadd_east: fits.Header | None,
+    coadd_west: fits.Header | None,
+    guide_data: pandas.DataFrame,
+    frame_data: pandas.DataFrame,
+):
+    """Plots the position angle."""
+
+    fig, axd = plt.subplot_mosaic(
+        [["east", "west"], ["master", "master"]],
+        figsize=(11, 8),
+    )
+    fig.subplots_adjust(left=0.1, right=0.9, hspace=0.3)
+
+    for ax in axd.values():
+        ax.axis("off")
+
+    for coadd in [coadd_east, coadd_west]:
+        if coadd is None:
+            continue
+
+        camera = coadd["CAMNAME"]
+        axis = axd[camera]
+        axis.axis("on")
+
+        camera_data = frame_data.loc[frame_data.camera == camera]
+
+        axis.plot(
+            camera_data.frameno,
+            camera_data.pa,
+            "b-",
+            marker="o",
+            markeredgecolor="w",
+        )
+
+        if "PACOEFFA" in coadd and coadd["PACOEFFA"] is not None:
+            coeffs = [coadd["PACOEFFA"], coadd["PACOEFFB"]]
+            pa_fit = numpy.polyval(coeffs, camera_data.frameno)
+            axis.plot(camera_data.frameno, pa_fit, "r-", zorder=20)
+
+        axis.set_xlabel("Frame number")
+        axis.set_ylabel("PA [deg]")
+
+        pa_drift = (coadd["PADRIFT"] if "PADRIFT" in coadd else None) or numpy.nan
+        axis.set_title(f"{camera.capitalize()} - PA drift {pa_drift:.4f} deg")
+
+        if camera == "west":
+            axis.yaxis.tick_right()
+            axis.yaxis.set_label_position("right")
+
+    if master is not None:
+        axis = axd["master"]  # type:ignore
+        axis.axis("on")
+
+        axis.axhline(
+            y=master["PAWCS"],
+            color="k",
+            linestyle="dashed",
+            alpha=0.5,
+        )
+
+        axis.plot(
+            guide_data.frameno,
+            guide_data.pa,
+            "b-",
+            marker="o",
+            markeredgecolor="w",
+            zorder=10,
+        )
+
+        coeffs = [master["PACOEFFA"], master["PACOEFFB"]]
+        pa_fit = numpy.polyval(coeffs, guide_data.frameno)
+        axis.plot(guide_data.frameno, pa_fit, "r-", zorder=20)
+
+        axis.set_xlabel("Frame number")
+        axis.set_ylabel("PA [deg]")
+
+        pa_drift = master["PADRIFT"]
+        axis.set_title(f"Master - PA drift {pa_drift:.4f} deg")
+
+        axis.plot()
+
+    fig.suptitle("Position angle")
+    fig.savefig(str(outpath))
+
+    plt.close("all")
