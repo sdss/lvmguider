@@ -22,6 +22,7 @@ from matplotlib import pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 from numpy.typing import NDArray
 
+from lvmguider.tools import get_model
 from lvmguider.transformations import ag_to_master_frame
 
 
@@ -29,24 +30,6 @@ __all__ = ["sextractor_quick", "extract_marginal", "extract_sources"]
 
 
 seaborn.set_color_codes("deep")
-
-
-PLACEHOLDER_COLUMNS = {
-    "source_id": numpy.int64,
-    "ra": numpy.float64,
-    "dec": numpy.float64,
-    "pmra": numpy.float32,
-    "pmdec": numpy.float32,
-    "ra_epoch": numpy.float64,
-    "dec_epoch": numpy.float64,
-    "phot_g_mean_mag": numpy.float32,
-    "match_sep": numpy.int8,
-    "ap_flux": numpy.float32,
-    "ap_fluxerr": numpy.float32,
-    "lmag_ab": numpy.float32,
-    "lflux": numpy.float32,
-    "zp": numpy.float32,
-}
 
 
 def sextractor_quick(
@@ -296,20 +279,26 @@ def extract_marginal(
 
     """
 
+    # Create an initial, empty sources DF with all the columns and types.
+    model = get_model("SOURCES")
+    detections = pandas.DataFrame({k: pandas.Series(dtype=v) for k, v in model.items()})
+
     data = data.astype("f8")
 
     sextractor_quick_options.pop("threshold", None)
     sextractor_quick_options.pop("return_background", None)
 
-    detections, back = sextractor_quick(
+    sex_detections, back = sextractor_quick(
         data,
         threshold=threshold,
         return_background=True,
         **sextractor_quick_options,
     )
 
-    assert isinstance(detections, pandas.DataFrame)
+    assert isinstance(sex_detections, pandas.DataFrame)
     assert isinstance(back, numpy.ndarray)
+
+    detections[sex_detections.columns] = sex_detections
 
     if exclude_border:
         detections = detections.loc[
@@ -488,11 +477,7 @@ def _plot_one_page(
     plt.close(figure)
 
 
-def extract_sources(
-    filename: str | pathlib.Path,
-    subtract_dark: bool = True,
-    add_placeholder_columns: bool = True,
-):
+def extract_sources(filename: str | pathlib.Path, subtract_dark: bool = True):
     """High level function that performs dark subtraction and extraction.
 
     Parameters
@@ -502,9 +487,6 @@ def extract_sources(
     subtract_dark
         If a ``PROC`` extension is present and it defines a ``DARKFILE``,
         the data is dark-subtracted before extracting sources.
-    add_placeholder_columns
-        Adds columns for photometry, Gaia matching, etc. that will be filled out
-        later but that will ensure a homogenous data if that does not happen.
 
     Returns
     -------
@@ -545,12 +527,5 @@ def extract_sources(
     xy = sources.loc[:, ["x", "y"]].to_numpy()
     mf_locs, _ = ag_to_master_frame(f"{telescope}-{camname[0]}", xy)
     sources.loc[:, ["x_mf", "y_mf"]] = mf_locs
-
-    if add_placeholder_columns:
-        for column, dt in PLACEHOLDER_COLUMNS.items():
-            if issubclass(dt, numpy.integer):
-                sources[column] = pandas.Series([-1] * len(sources), dtype=dt)
-            else:
-                sources[column] = pandas.Series(dtype=dt)
 
     return sources

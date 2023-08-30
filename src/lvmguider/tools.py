@@ -283,3 +283,13 @@ def get_db_connection(
     conn = peewee.PostgresqlDatabase(database=dbname, password=password, **db_params)
 
     return conn
+
+
+def get_model(key: str):
+    """Returns a key from the guider datamodel."""
+
+    datamodel = read_yaml_file(pathlib.Path(__file__).parent / "etc/datamodel.yml")
+
+    return datamodel[key]
+
+
