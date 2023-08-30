@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import pathlib
+from dataclasses import dataclass
 
 from typing import TYPE_CHECKING, Any, cast
 
@@ -46,6 +47,59 @@ class CriticalGuiderError(Exception):
     """An exception that should stop the guide loop."""
 
     pass
+
+
+@dataclass
+class CameraSolution:
+    """A camera solution, including the determined WCS."""
+
+    camera: str
+    sources: pandas.DataFrame
+    wcs: WCS | None = None
+    solved: bool = False
+    reference_frame: pathlib.Path | None = None
+    solution_mode: str = "none"
+
+
+@dataclass
+class GuiderSolution:
+    """A class to hold an astrometric solution determined by the guider.
+
+    This class abstracts an astrometric solution regardless of whether it was
+    determined using astrometry.net or Gaia sources.
+
+    Parameters
+    ----------
+    guider
+        The `.Guider` instance.
+    solutions
+        A list of `.CameraSolution` instances.
+
+    """
+
+    guider: Guider
+    solutions: list[CameraSolution]
+
+    def __getitem__(self, key: str):
+        """Returns the associated camera solution."""
+
+        if key not in self.cameras:
+            raise KeyError(f"Invalid camera name {key!r}.")
+
+        for solution in self.solutions:
+            if solution.camera == key:
+                return solution
+
+    @property
+    def cameras(self):
+        """Returns a list of cameras."""
+
+        return [cs.camera for cs in self.solutions]
+
+    def all_solved(self):
+        """Returns `True` if all the cameras have solved."""
+
+        return all([cs.solved for cs in self.solutions])
 
 
 class Guider:
