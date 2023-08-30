@@ -14,7 +14,6 @@ import pathlib
 import warnings
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime
 from functools import partial
 from sqlite3 import OperationalError
 
@@ -30,7 +29,7 @@ from astropy.coordinates import SkyCoord
 from astropy.io import fits
 from astropy.stats import sigma_clip
 from astropy.table import Table
-from astropy.time import Time
+from astropy.time import Time, TimezoneInfo
 from astropy.wcs import WCS, FITSFixedWarning
 from astropy.wcs.utils import fit_wcs_from_points
 from matplotlib import pyplot as plt
@@ -328,13 +327,17 @@ def reprocess_camera_data(
         log.warning(f"{log_header} not enough information to reprocess WCS.")
         return (False, wcs, sources)
 
-    elif wcs_mode in ["none", "pwi"]:
-        log.warning(f"{log_header} cannot reprocess data for WCSMODE={wcs_mode!r}")
-        return (False, None, sources)
-
     else:
         ref_header = fits.getheader(reference_file, "PROC")
         ref_wcs = WCS(ref_header)
+
+        if ref_header["WCSMODE"] in ["none", "pwi"]:
+            log.warning(f"{log_header} cannot reprocess data. Reference WCS is empty.")
+            return (False, None, sources)
+
+        if wcs_mode in ["none", "pwi"]:
+            log.warning(f"{log_header} cannot reprocess data for WCSMODE={wcs_mode!r}")
+            return (False, None, sources)
 
     log.debug(f"{log_header} refining camera WCS.")
 
@@ -342,7 +345,7 @@ def reprocess_camera_data(
     skyc = ref_wcs.pixel_to_world(*XZ_AG_FRAME)
 
     if isinstance(skyc, list):
-        log.error("Invalid WCS; cannot determine field centre.")
+        log.error(f"{log_header} invalid WCS; cannot determine field centre.")
         return (False, wcs, sources)
 
     # Check if we can use the cached Gaia sources.
@@ -359,7 +362,7 @@ def reprocess_camera_data(
     if do_query:
         gaia_df = get_gaia_sources(wcs, db_connection_params=db_connection_params)
 
-    if gaia_df is None:
+    if gaia_df is None or len(gaia_df) == 0:
         return (False, wcs, sources)
 
     matches, nmatches = match_with_gaia(ref_wcs, sources, gaia_df, max_separation=5)
@@ -899,7 +902,7 @@ def get_framedata(
         # Reprocess camera WCS and match with Gaia.
         wcs_reprocessed: bool = False
         wcs: WCS | None = None
-        if proc_header is not None and sources is not None:
+        if proc_header is not None and sources is not None and len(sources) > 0:
             (wcs_reprocessed, wcs, sources) = reprocess_camera_data(
                 data,
                 sources,
@@ -1369,7 +1372,12 @@ def create_master_coadd(
         )
     )
 
-    if telescope != "spec" and sources_coadd is not None and "x_mf" in sources_coadd:
+    if (
+        telescope != "spec"
+        and sources_coadd is not None
+        and "x_mf" in sources_coadd
+        and "ra_epoch" in sources_coadd
+    ):
         # Now let's create the master frame WCS. It's easy since we already matched
         # with Gaia.
         wcs_data = sources_coadd.loc[:, ["x_mf", "y_mf", "ra_epoch", "dec_epoch"]]
