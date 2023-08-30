@@ -18,14 +18,13 @@ from typing import TYPE_CHECKING
 import numpy
 import pandas
 from astropy.io import fits
-from astropy.table import Table
 
 from sdsstools.time import get_sjd
 
 from lvmguider import __version__
 from lvmguider.extraction import extract_sources as extract_sources_func
 from lvmguider.maskbits import GuiderStatus
-from lvmguider.tools import elapsed_time, run_in_executor
+from lvmguider.tools import elapsed_time, get_model, run_in_executor, update_fits
 
 
 if TYPE_CHECKING:
@@ -125,31 +124,27 @@ class Cameras:
             else:
                 raise RuntimeError("Run out of retries. Exposing failed.")
 
+        # Dictionary to keep track of changes to the lvm.agcam file.
+        proc_model = get_model("PROC")
+        hdus = {fn: {"PROC": proc_model, "SOURCES": None} for fn in filenames}
+
         # Create a new extension with the dark-subtracted image.
-        with elapsed_time(command, "add PROC extension to raw files"):
-            for fn in filenames:
-                with fits.open(fn, mode="update") as hdul:
-                    camname = hdul["RAW"].header["CAMNAME"].lower()
+        for fn in filenames:
+            camname = fits.getval(fn, "CAMNAME", "RAW")
 
-                    dark_file = self._get_dark_frame(fn, camname)
-                    if dark_file is None:
-                        command.warning(f"No dark frame found for camera {camname}.")
-                        dark_file = ""
+            dark_file = self._get_dark_frame(fn, camname)
+            if dark_file is None:
+                command.warning(f"No dark frame found for camera {camname}.")
+                dark_file = ""
 
-                    proc_header = fits.Header()
-                    proc_header["DARKFILE"] = dark_file
-                    proc_header["GUIDERV"] = (__version__, "Version of lvmguider")
-                    proc_header["WCSMODE"] = ("none", "Source of astrometric solution")
+            header = hdus[fn]["PROC"]
+            header["TELESCOP"][0] = self.telescope
+            header["CAMNAME"][0] = camname
+            header["DARKFILE"][0] = dark_file
+            header["GUIDERV"][0] = __version__
+            header["WCSMODE"][0] = "none"
 
-                    hdul.append(
-                        fits.ImageHDU(
-                            data=None,
-                            header=proc_header,
-                            name="PROC",
-                        )
-                    )
-
-        sources = []
+        sources: list[pandas.DataFrame] = []
         if flavour == "object" and extract_sources:
             try:
                 sources = await asyncio.gather(
@@ -159,18 +154,8 @@ class Cameras:
                 command.warning(f"Failed extracting sources: {err}")
                 extract_sources = False
             else:
-                with elapsed_time(command, "add SOURCE extension to raw files"):
-                    for ifn, fn in enumerate(filenames):
-                        with fits.open(fn, mode="update") as hdul:
-                            camname = hdul["RAW"].header["CAMNAME"].lower()
-                            isources = sources[ifn]
-                            isources["camera"] = camname
-                            hdul.append(
-                                fits.BinTableHDU(
-                                    data=Table.from_pandas(isources),
-                                    name="SOURCES",
-                                )
-                            )
+                for ifn, fn in enumerate(filenames):
+                    hdus[fn]["SOURCES"] = sources[ifn]
 
         if len(sources) > 0:
             all_sources = pandas.concat(sources)
@@ -196,6 +181,11 @@ class Cameras:
 
         if not command.actor.status & GuiderStatus.NON_IDLE:
             command.actor.status |= GuiderStatus.IDLE
+
+        with elapsed_time(command, "updating lvm.agcam file"):
+            await asyncio.gather(
+                *[run_in_executor(update_fits, fn, hdus[fn]) for fn in filenames]
+            )
 
         return (list(filenames), next_seqno, list(sources) if extract_sources else None)
 

@@ -17,7 +17,7 @@ from contextlib import contextmanager
 from functools import partial
 from time import time
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy
 import pandas
@@ -25,6 +25,8 @@ import peewee
 import pgpasslib
 from astropy.io import fits
 from astropy.table import Table
+
+from sdsstools import read_yaml_file
 
 from lvmguider import config, log
 
@@ -293,3 +295,63 @@ def get_model(key: str):
     return datamodel[key]
 
 
+def update_fits(
+    file: str | pathlib.Path,
+    extension_data: dict[str | int, dict[str, Any] | pandas.DataFrame | None],
+):
+    """Updates an existing FITS file by extending a header or table or adding a new HDU.
+
+    Parameters
+    ----------
+    file
+        The FITS file to update.
+    extension_data
+        A dictionary of extension name to data to update. If the extension does not
+        exists a new one will be created. The data can be a Pandas data frame,
+        which will result in a new binary table, or a dictionary to update
+        an image extension. The dictionary may include a ``__data__`` value
+        with the image data. Image extensions are created as ``RICE_1``-compressed
+        extensions.
+
+    """
+
+    file = pathlib.Path(file)
+    if not file.exists():
+        raise FileNotFoundError(f"File {file!s} was not found.")
+
+    with fits.open(str(file), mode="update") as hdul:
+        for key, data in extension_data.copy().items():
+            if data is None:
+                continue
+
+            try:
+                hdu = hdul[key]
+            except (IndexError, KeyError):
+                hdu = None
+
+            extension_name = name = key if isinstance(key, str) else None
+
+            if isinstance(data, pandas.DataFrame):
+                if hdu is not None:
+                    raise NotImplementedError("Cannot replace binary tables.")
+                else:
+                    bintable = fits.BinaryTableHDU(
+                        data=Table.from_pandas(data),
+                        name=name,
+                    )
+                    hdul.append(bintable)
+
+            else:
+                image_data = extension_data.pop("__data__", None)
+                if hdu:
+                    if image_data is not None:
+                        hdu.data = image_data
+                    hdu.header.update(image_data)
+                else:
+                    hdul.append(
+                        fits.CompImageHDU(
+                            data=image_data,
+                            header=data,
+                            name=extension_name,
+                        )
+                    )
