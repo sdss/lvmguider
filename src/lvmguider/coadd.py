@@ -1466,6 +1466,7 @@ def process_spec_frame(
     telescopes: list[str] = ["sci", "spec", "skye", "skyw"],
     log: logging.Logger = llog,
     fail_silent: bool = False,
+    use_time_range: bool | None = None,
     **kwargs,
 ):
     """Processes the guider frames associated with an spectrograph file."""
@@ -1479,13 +1480,17 @@ def process_spec_frame(
 
     for telescope in telescopes:
         try:
-            frames = get_guider_files_from_spec(file, telescope=telescope)
+            frames = get_guider_files_from_spec(
+                file,
+                telescope=telescope,
+                use_time_range=use_time_range,
+            )
         except Exception as err:
             if fail_silent is False:
                 log.error(f"Cannot process {telescope} for {file!s}: {err}")
             continue
 
-        if len(frames) == 0:
+        if len(frames) < 4:
             if fail_silent is False:
                 log.warning(f"No guider frames found for {telescope!r} in {file!s}")
             continue
@@ -1519,6 +1524,7 @@ def get_guider_files_from_spec(
     telescope: str | None = None,
     agcam_path: str | pathlib.Path = "/data/agcam",
     camera: str | None = None,
+    use_time_range: bool | None = None,
 ):
     """Returns the AG files taken during a spectrograph exposure.
 
@@ -1538,6 +1544,13 @@ def get_guider_files_from_spec(
     camera
         The camera, east or west, for which to select frames. If not provided
         selects both cameras.
+    use_time_range
+        By default (``time_time_range=None``) the function will check the
+        ``G{telescope}FR0`` and ``G{telescope}FRN`` keywords to determine the
+        range of guider frames. If those keywords are not present, the AG
+        files that were last modified in the range of the integration will
+        be found. With `True`, the last modification range method will always
+        be used.
 
     Returns
     -------
@@ -1565,11 +1578,10 @@ def get_guider_files_from_spec(
     if not agcam_path.exists():
         raise FileExistsError(f"Cannot find agcam path {agcam_path!s}")
 
-    # frame0 = header.get(f"G{telescope.upper()}FR0", None)
-    # frame1 = header.get(f"G{telescope.upper()}FRN", None)
-    frame0 = frame1 = None
+    frame0 = header.get(f"G{telescope.upper()}FR0", None)
+    frame1 = header.get(f"G{telescope.upper()}FRN", None)
 
-    if frame0 is None or frame1 is None:
+    if use_time_range is True or (frame0 is None or frame1 is None):
         time0 = Time(header["INTSTART"])
         time1 = Time(header["INTEND"])
         files = get_files_in_time_range(
