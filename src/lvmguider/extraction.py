@@ -548,8 +548,8 @@ def extract_sources(
 
     if add_placeholder_columns:
         for column, dt in PLACEHOLDER_COLUMNS.items():
-            if issubclass(dt, numpy.integer)
-                sources[column] = pandas.Series([-1]*len(sources), dtype=dt)
+            if issubclass(dt, numpy.integer):
+                sources[column] = pandas.Series([-1] * len(sources), dtype=dt)
             else:
                 sources[column] = pandas.Series(dtype=dt)
 
