@@ -1127,9 +1127,7 @@ def coadd_camera_frames(
 
         # Add master frame pixels.
         xy = coadd_sources.loc[:, ["x", "y"]].to_numpy()
-        camera = coadd_sources.iloc[0]["camera"]
-        telescope = coadd_sources.iloc[0]["telescope"]
-        mf_locs, _ = ag_to_master_frame(f"{telescope}-{camera[0]}", xy)
+        mf_locs, _ = ag_to_master_frame(f"{telescope}-{camname[0]}", xy)
         coadd_sources.loc[:, ["x_mf", "y_mf"]] = mf_locs
 
         # Get astrometry.net solution.
@@ -1567,8 +1565,9 @@ def get_guider_files_from_spec(
     if not agcam_path.exists():
         raise FileExistsError(f"Cannot find agcam path {agcam_path!s}")
 
-    frame0 = header.get(f"G{telescope.upper()}FR0", None)
-    frame1 = header.get(f"G{telescope.upper()}FRN", None)
+    # frame0 = header.get(f"G{telescope.upper()}FR0", None)
+    # frame1 = header.get(f"G{telescope.upper()}FRN", None)
+    frame0 = frame1 = None
 
     if frame0 is None or frame1 is None:
         time0 = Time(header["INTSTART"])
@@ -1640,6 +1639,15 @@ def generate_qa_from_coadded(
         coadd_east,
         coadd_west,
         guide_data,
+        frame_data,
+    )
+
+    # Plot transparency
+    outpath_pa = outpath / (path.stem + "_zp.pdf")
+    plot_transparency(
+        outpath_pa,
+        coadd_east,
+        coadd_west,
         frame_data,
     )
 
@@ -1729,6 +1737,49 @@ def plot_position_angle(
         axis.plot()
 
     fig.suptitle("Position angle")
+    fig.savefig(str(outpath))
+
+    plt.close("all")
+
+
+def plot_transparency(
+    outpath: pathlib.Path,
+    coadd_east: fits.Header | None,
+    coadd_west: fits.Header | None,
+    frame_data: pandas.DataFrame,
+):
+    """Plots the transparency."""
+
+    fig, axd = plt.subplot_mosaic([["east"], ["west"]], figsize=(11, 8))
+    fig.subplots_adjust(left=0.1, right=0.9, hspace=0.3)
+
+    for ax in axd.values():
+        ax.axis("off")
+
+    for coadd in [coadd_east, coadd_west]:
+        if coadd is None:
+            continue
+
+        camera = coadd["CAMNAME"]
+        axis = axd[camera]
+        axis.axis("on")
+
+        camera_data = frame_data.loc[frame_data.camera == camera]
+
+        axis.plot(
+            camera_data.frameno,
+            camera_data.zp,
+            "b-",
+            marker="o",
+            markeredgecolor="w",
+        )
+
+        axis.set_xlabel("Frame number")
+        axis.set_ylabel("ZP [mag]")
+
+        axis.set_title(f"{camera.capitalize()} - ZP {coadd['ZEROPT']} mag")
+
+    fig.suptitle("Zero point")
     fig.savefig(str(outpath))
 
     plt.close("all")
