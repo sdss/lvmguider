@@ -31,6 +31,24 @@ __all__ = ["sextractor_quick", "extract_marginal", "extract_sources"]
 seaborn.set_color_codes("deep")
 
 
+PLACEHOLDER_COLUMNS = {
+    "source_id": numpy.int64,
+    "ra": numpy.float64,
+    "dec": numpy.float64,
+    "pmra": numpy.float32,
+    "pmdec": numpy.float32,
+    "ra_epoch": numpy.float64,
+    "dec_epoch": numpy.float64,
+    "phot_g_mean_mag": numpy.float32,
+    "match_sep": numpy.int8,
+    "ap_flux": numpy.float32,
+    "ap_fluxerr": numpy.float32,
+    "lmag_ab": numpy.float32,
+    "lflux": numpy.float32,
+    "zp": numpy.float32,
+}
+
+
 def sextractor_quick(
     data: NDArray,
     threshold: float = 5.0,
@@ -470,7 +488,11 @@ def _plot_one_page(
     plt.close(figure)
 
 
-def extract_sources(filename: str | pathlib.Path, subtract_dark: bool = True):
+def extract_sources(
+    filename: str | pathlib.Path,
+    subtract_dark: bool = True,
+    add_placeholder_columns: bool = True,
+):
     """High level function that performs dark subtraction and extraction.
 
     Parameters
@@ -480,6 +502,9 @@ def extract_sources(filename: str | pathlib.Path, subtract_dark: bool = True):
     subtract_dark
         If a ``PROC`` extension is present and it defines a ``DARKFILE``,
         the data is dark-subtracted before extracting sources.
+    add_placeholder_columns
+        Adds columns for photometry, Gaia matching, etc. that will be filled out
+        later but that will ensure a homogenous data if that does not happen.
 
     Returns
     -------
@@ -520,5 +545,12 @@ def extract_sources(filename: str | pathlib.Path, subtract_dark: bool = True):
     xy = sources.loc[:, ["x", "y"]].to_numpy()
     mf_locs, _ = ag_to_master_frame(f"{telescope}-{camname[0]}", xy)
     sources.loc[:, ["x_mf", "y_mf"]] = mf_locs
+
+    if add_placeholder_columns:
+        for column, dt in PLACEHOLDER_COLUMNS.items():
+            if issubclass(dt, numpy.integer)
+                sources[column] = pandas.Series([-1]*len(sources), dtype=dt)
+            else:
+                sources[column] = pandas.Series(dtype=dt)
 
     return sources
