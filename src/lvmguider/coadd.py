@@ -1609,13 +1609,14 @@ def get_files_in_time_range(
 
     files = path.glob(pattern)
 
-    dt0 = datetime.timestamp(time0.to_datetime())
-    dt1 = datetime.timestamp(time1.to_datetime())
+    tz = TimezoneInfo()
+    dt0 = time0.to_datetime(tz).timestamp()
+    dt1 = time1.to_datetime(tz).timestamp()
 
     return [
         file
         for file in files
-        if os.path.getctime(file) > dt0 and os.path.getctime(file) < dt1
+        if os.path.getmtime(file) > dt0 and os.path.getmtime(file) < dt1
     ]
 
 
