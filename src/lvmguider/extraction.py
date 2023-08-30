@@ -15,14 +15,17 @@ import numpy
 import pandas
 import seaborn
 import sep
+from astropy.io import fits
 from astropy.modeling.fitting import LevMarLSQFitter
 from astropy.modeling.models import Gaussian1D
 from matplotlib import pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 from numpy.typing import NDArray
 
+from lvmguider.transformations import ag_to_master_frame
 
-__all__ = ["sextractor_quick"]
+
+__all__ = ["sextractor_quick", "extract_marginal", "extract_sources"]
 
 
 seaborn.set_color_codes("deep")
@@ -465,3 +468,57 @@ def _plot_one_page(
 
     pdf.savefig(figure)
     plt.close(figure)
+
+
+def extract_sources(filename: str | pathlib.Path, subtract_dark: bool = True):
+    """High level function that performs dark subtraction and extraction.
+
+    Parameters
+    ----------
+    filename
+        The file from which to extract sources.
+    subtract_dark
+        If a ``PROC`` extension is present and it defines a ``DARKFILE``,
+        the data is dark-subtracted before extracting sources.
+
+    Returns
+    -------
+    sources
+        A data frame with the extracted sources along with their master frame
+        coordinates. Note that in SExtractor fashion, all the pixel coordinates
+        assume that the centre of the lower left pixel is ``(1, 1)``.
+
+    """
+
+    hdus = fits.open(filename)
+
+    # Initially use raw data.
+    data = hdus["RAW"].data / hdus["RAW"].header["EXPTIME"]
+
+    if subtract_dark and "PROC" in hdus:
+        darkfile = hdus["PROC"].header["DARKFILE"]
+        if darkfile and pathlib.Path(darkfile).exists():
+            dark_data = fits.getdata(darkfile).astype(numpy.float32)
+            dark_exptime = fits.getheader(darkfile, "RAW")["EXPTIME"]
+
+            data = data - (dark_data / dark_exptime)
+
+    sources = extract_marginal(
+        data,
+        box_size=31,
+        threshold=3.0,
+        max_detections=50,
+        sextractor_quick_options={"minarea": 5},
+    )
+
+    camname = hdus["RAW"].header["CAMNAME"]
+    telescope = hdus["RAW"].header["TELESCOP"]
+
+    sources["camera"] = camname
+    sources["telescope"] = telescope
+
+    xy = sources.loc[:, ["x", "y"]].to_numpy()
+    mf_locs, _ = ag_to_master_frame(f"{telescope}-{camname[0]}", xy)
+    sources.loc[:, ["x_mf", "y_mf"]] = mf_locs
+
+    return sources

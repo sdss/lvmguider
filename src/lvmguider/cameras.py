@@ -23,7 +23,7 @@ from astropy.table import Table
 from sdsstools.time import get_sjd
 
 from lvmguider import __version__
-from lvmguider.extraction import extract_marginal
+from lvmguider.extraction import extract_sources as extract_sources_func
 from lvmguider.maskbits import GuiderStatus
 from lvmguider.tools import elapsed_time, run_in_executor
 
@@ -153,7 +153,7 @@ class Cameras:
         if flavour == "object" and extract_sources:
             try:
                 sources = await asyncio.gather(
-                    *[self.extract_sources(fn) for fn in filenames]
+                    *[run_in_executor(extract_sources_func, fn) for fn in filenames]
                 )
             except Exception as err:
                 command.warning(f"Failed extracting sources: {err}")
@@ -198,31 +198,6 @@ class Cameras:
             command.actor.status |= GuiderStatus.IDLE
 
         return (list(filenames), next_seqno, list(sources) if extract_sources else None)
-
-    async def extract_sources(self, filename: str, subtract_dark: bool = True):
-        """Extracts sources from a file."""
-
-        hdus = fits.open(filename)
-
-        # Initially use raw data.
-        data = hdus["RAW"].data / hdus["RAW"].header["EXPTIME"]
-
-        if subtract_dark and "PROC" in hdus:
-            darkfile = hdus["PROC"].header["DARKFILE"]
-            if darkfile and pathlib.Path(darkfile).exists():
-                dark_data = fits.getdata(darkfile).astype(numpy.float32)
-                dark_exptime = fits.getheader(darkfile, "RAW")["EXPTIME"]
-
-                data = data - (dark_data / dark_exptime)
-
-        return await run_in_executor(
-            extract_marginal,
-            data,
-            box_size=31,
-            threshold=3.0,
-            max_detections=50,
-            sextractor_quick_options={"minarea": 5},
-        )
 
     def reset_seqno(self):
         """Resets the seqno.

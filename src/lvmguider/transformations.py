@@ -24,7 +24,7 @@ from astropy.wcs.utils import fit_wcs_from_points
 from scipy.spatial import KDTree
 
 from lvmguider.astrometrynet import AstrometrySolution, astrometrynet_quick
-from lvmguider.extraction import extract_marginal
+from lvmguider.extraction import extract_sources
 
 
 # Prevent astropy from downloading data.
@@ -394,13 +394,7 @@ def solve_camera(
                 solve_locs_kwargs=solve_locs_kwargs,
             )
     else:
-        hdul = fits.open(file)
-        if "PROC" in hdul:
-            data = hdul["PROC"].data
-        else:
-            data = hdul["RAW"].data
-        sources = extract_marginal(data)
-        sources["camera"] = camname
+        sources = extract_sources(file)
 
     solve_locs_kwargs_cam = solve_locs_kwargs.copy()
     if "output_root" not in solve_locs_kwargs_cam:
