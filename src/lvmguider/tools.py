@@ -25,7 +25,6 @@ import pandas
 import peewee
 import pgpasslib
 import sep
-from astropy.coordinates import SkyCoord
 from astropy.io import fits
 from astropy.table import Table
 from psycopg2 import OperationalError
@@ -40,9 +39,6 @@ if TYPE_CHECKING:
     from astropy.wcs import WCS
 
     from lvmguider.actor import GuiderCommand
-
-
-GAIA_CACHE: tuple[SkyCoord, pandas.DataFrame] | None = None
 
 
 async def run_in_executor(fn, *args, catch_warnings=False, executor="thread", **kwargs):
@@ -348,8 +344,6 @@ def get_gaia_sources(
 
     """
 
-    global GAIA_CACHE
-
     XZ_AG_FRAME = config["xz_ag_frame"]
 
     # A bit larger than reality to account for WCS imprecision.
@@ -366,9 +360,6 @@ def get_gaia_sources(
     skyc = wcs.pixel_to_world(*XZ_AG_FRAME)
     ra: float = skyc.ra.deg
     dec: float = skyc.dec.deg
-
-    if GAIA_CACHE and GAIA_CACHE[0].separation(skyc).arcsec.value < 5 and use_cache:
-        return GAIA_CACHE[1]
 
     # Query lvm_magnitude and gaia_dr3_source in a radial query around RA/Dec.
 
@@ -421,8 +412,6 @@ def get_gaia_sources(
         data = query.execute(conn)
 
     df = pandas.DataFrame.from_records(data)
-
-    GAIA_CACHE = (skyc, df.copy())
 
     return df
 
