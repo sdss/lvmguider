@@ -140,7 +140,8 @@ class Cameras:
             header = hdus[fn]["PROC"]
             header["TELESCOP"][0] = self.telescope
             header["CAMNAME"][0] = camname
-            header["DARKFILE"][0] = dark_file
+            header["DARKFILE"][0] = os.path.basename(dark_file)
+            header["DIRNAME"][0] = os.path.dirname(os.path.abspath(fn))
             header["GUIDERV"][0] = __version__
             header["WCSMODE"][0] = "none"
 
