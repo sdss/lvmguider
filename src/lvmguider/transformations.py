@@ -11,7 +11,6 @@ from __future__ import annotations
 import pathlib
 from datetime import datetime
 
-import nptyping as npt
 import numpy
 import pandas
 from astropy.coordinates import EarthLocation, SkyCoord
@@ -21,21 +20,15 @@ from astropy.wcs import WCS
 from astropy.wcs.utils import fit_wcs_from_points
 from scipy.spatial import KDTree
 
+from lvmguider import config
 from lvmguider.astrometrynet import AstrometrySolution, astrometrynet_quick
 from lvmguider.extraction import extract_sources
+from lvmguider.types import ARRAY_1D_F32, ARRAY_2D_F32
 
 
 # Prevent astropy from downloading data.
 conf.auto_download = False
 conf.iers_degraded_accuracy = "ignore"
-
-# Middle of an AG frame or full frame
-XZ_FULL_FRAME = (2500.0, 1000.0)
-XZ_AG_FRAME = (800.0, 550.0)
-
-# Array typing
-ARRAY_2D_F32 = npt.NDArray[npt.Shape["*, *"], npt.Float32]
-ARRAY_1D_F32 = npt.NDArray[npt.Shape["*"], npt.Float32]
 
 
 def ag_to_master_frame(
@@ -227,13 +220,13 @@ def solve_locs(
     radius = 5  # Search radius in degrees
 
     if full_frame:
-        midX, midZ = XZ_FULL_FRAME  # Middle of Master Frame
+        midX, midZ = config["xz_full_frame"]  # Middle of Master Frame
         index_paths_default = {
             5200: "/data/astrometrynet/5200",
             4100: "/data/astrometrynet/4100",
         }
     else:
-        midX, midZ = XZ_AG_FRAME  # Middle of AG camera Frame
+        midX, midZ = config["xz_ag_frame"]  # Middle of AG camera Frame
         index_paths_default = {5200: "/data/astrometrynet/5200"}
 
     index_paths = index_paths or index_paths_default

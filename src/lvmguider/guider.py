@@ -10,11 +10,9 @@ from __future__ import annotations
 
 import asyncio
 import pathlib
-from dataclasses import dataclass, field
 
 from typing import TYPE_CHECKING
 
-import nptyping as npt
 import numpy
 import pandas
 from astropy.coordinates import EarthLocation
@@ -24,6 +22,7 @@ from astropy.time import Time
 from simple_pid import PID
 
 from lvmguider import __version__
+from lvmguider.dataclasses import CameraSolution, GuiderSolution
 from lvmguider.maskbits import GuiderStatus
 from lvmguider.tools import (
     elapsed_time,
@@ -36,137 +35,27 @@ from lvmguider.tools import (
     update_fits,
 )
 from lvmguider.transformations import (
-    XZ_FULL_FRAME,
     delta_radec2mot_axis,
     get_crota2,
     match_with_gaia,
     solve_camera_with_astrometrynet,
     wcs_from_gaia,
 )
+from lvmguider.types import ARRAY_2D_F64
 
 
 if TYPE_CHECKING:
-    from astropy.wcs import WCS
-
     from lvmguider.actor import GuiderCommand
     from lvmguider.astrometrynet import AstrometrySolution
 
 
-# Array types
-ARRAY_2D_U16 = npt.NDArray[npt.Shape["*, *"], npt.UInt16]
-ARRAY_2D_F32 = npt.NDArray[npt.Shape["*, *"], npt.Float32]
+__all__ = ["Guider", "CriticalGuiderError"]
 
 
 class CriticalGuiderError(Exception):
     """An exception that should stop the guide loop."""
 
     pass
-
-
-@dataclass
-class CameraSolution:
-    """A camera solution, including the determined WCS."""
-
-    frameno: int
-    camera: str
-    path: pathlib.Path
-    sources: pandas.DataFrame
-    wcs: WCS | None = None
-    matched: bool = False
-    zero_point: float = numpy.nan
-    pa: float = numpy.nan
-    ref_frame: pathlib.Path | None = None
-    solution_mode: str = "none"
-
-    def post_init(self):
-        if numpy.isnan(self.pa) and self.wcs is not None:
-            self.pa = get_crota2(self.wcs)
-
-    @property
-    def solved(self):
-        """Was the frame solved?"""
-
-        return self.wcs is not None
-
-
-@dataclass
-class GuiderSolution:
-    """A class to hold an astrometric solution determined by the guider.
-
-    This class abstracts an astrometric solution regardless of whether it was
-    determined using astrometry.net or Gaia sources.
-
-    """
-
-    frameno: int
-    solutions: list[CameraSolution]
-    guide_pixel: npt.NDArray[npt.Shape[2], npt.Float32]
-    mf_wcs: WCS | None = None
-    pa: float = numpy.nan
-    ra_off: float = numpy.nan
-    dec_off: float = numpy.nan
-    axis0_off: float = numpy.nan
-    axis1_off: float = numpy.nan
-    pa_off: float = numpy.nan
-    correction_applied: bool = False
-    correction: list[float] = field(default_factory=lambda: [0.0, 0.0])
-
-    def post_init(self):
-        self.sources = pandas.concat([cs.sources for cs in self.solutions], axis=0)
-
-        zps = self.sources.loc[:, "zp"].copy().dropna()
-        self.zero_point = zps.median()
-
-        if numpy.isnan(self.pa) and self.mf_wcs is not None:
-            self.pa = get_crota2(self.mf_wcs)
-
-    def __getitem__(self, key: str):
-        """Returns the associated camera solution."""
-
-        for solution in self.solutions:
-            if solution.camera == key:
-                return solution
-
-        raise KeyError(f"Invalid camera name {key!r}.")
-
-    @property
-    def pointing(self) -> npt.NDArray[npt.Shape[2], npt.Float64]:
-        """Returns the telescope pointing."""
-
-        if not self.mf_wcs:
-            return numpy.array([numpy.nan, numpy.nan])
-
-        skyc = self.mf_wcs.pixel_to_world(*XZ_FULL_FRAME)
-        return numpy.array([skyc.ra.deg, skyc.dec.deg])
-
-    @property
-    def solved(self):
-        """Was the frame solved?"""
-
-        return self.mf_wcs is not None
-
-    @property
-    def cameras(self):
-        """Returns a list of cameras."""
-
-        return [cs.camera for cs in self.solutions]
-
-    @property
-    def separation(self):
-        """Returns the separation between field centre and telescope pointing."""
-
-        return numpy.hypot(self.ra_off, self.dec_off)
-
-    @property
-    def n_cameras_solved(self):
-        """Returns the number of cameras solved."""
-
-        return len([cs for cs in self.solutions if cs.solved])
-
-    def all_cameras_solved(self):
-        """Returns `True` if all the cameras have solved."""
-
-        return all([cs.solved for cs in self.solutions])
 
 
 class Guider:
@@ -195,7 +84,7 @@ class Guider:
         self.cameras = command.actor.cameras
 
         self.field_centre = field_centre
-        self.pixel = pixel or XZ_FULL_FRAME
+        self.pixel = pixel or self.config["xz_full_frame"]
 
         self.config = command.actor.config
         self.guide_tolerance = self.config["guide_tolerance"]
@@ -232,7 +121,7 @@ class Guider:
         """Sets the master frame pixel coordinates ``(x, z)`` on which to guide."""
 
         if pixel_x is None or pixel_z is None:
-            new_pixel = XZ_FULL_FRAME
+            new_pixel = self.config["xz_full_frame"]
         else:
             new_pixel = (pixel_x, pixel_z)
 
@@ -325,7 +214,7 @@ class Guider:
         guider_solution = GuiderSolution(
             frameno,
             camera_solutions,
-            guide_pixel=numpy.array(XZ_FULL_FRAME),
+            guide_pixel=numpy.array(self.config["xz_full_frame"]),
         )
 
         if guider_solution.n_cameras_solved == 0:
@@ -547,7 +436,7 @@ class Guider:
 
     def calculate_telescope_offset(
         self,
-        pointing: npt.NDArray[npt.Shape[2], npt.Float64],
+        pointing: ARRAY_2D_F64,
     ) -> tuple[tuple[float, float], tuple[float, float]]:
         """Determines the offset to send to the telescope to acquire the field centre.
 

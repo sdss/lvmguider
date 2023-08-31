@@ -20,7 +20,6 @@ from time import time
 
 from typing import TYPE_CHECKING, Any
 
-import nptyping as npt
 import numpy
 import pandas
 import peewee
@@ -34,7 +33,7 @@ from psycopg2 import OperationalError
 from sdsstools import read_yaml_file
 
 from lvmguider import config, log
-from lvmguider.transformations import XZ_AG_FRAME
+from lvmguider.types import ARRAY_2D_F32
 
 
 if TYPE_CHECKING:
@@ -44,11 +43,6 @@ if TYPE_CHECKING:
 
 
 GAIA_CACHE: tuple[SkyCoord, pandas.DataFrame] | None = None
-
-
-# Array types
-ARRAY_2D_U16 = npt.NDArray[npt.Shape["*, *"], npt.UInt16]
-ARRAY_2D_F32 = npt.NDArray[npt.Shape["*, *"], npt.Float32]
 
 
 async def run_in_executor(fn, *args, catch_warnings=False, executor="thread", **kwargs):
@@ -355,6 +349,8 @@ def get_gaia_sources(
     """
 
     global GAIA_CACHE
+
+    XZ_AG_FRAME = config["xz_ag_frame"]
 
     # A bit larger than reality to account for WCS imprecision.
     CAM_FOV = max(XZ_AG_FRAME) / 3600 * 1.2
