@@ -281,6 +281,9 @@ def update_fits(
 
     """
 
+    if extension_data is not None:
+        extension_data = extension_data.copy()
+
     file = pathlib.Path(file)
     if not file.exists():
         raise FileNotFoundError(f"File {file!s} was not found.")
@@ -298,7 +301,7 @@ def update_fits(
             extension_name = name = key if isinstance(key, str) else None
 
             if isinstance(data, pandas.DataFrame):
-                bintable = fits.BinaryTableHDU(data=Table.from_pandas(data), name=name)
+                bintable = fits.BinTableHDU(data=Table.from_pandas(data), name=name)
                 if hdu is not None:
                     hdul[key] = bintable
                 else:
@@ -314,7 +317,7 @@ def update_fits(
                     hdul.append(
                         fits.CompImageHDU(
                             data=image_data,
-                            header=data,
+                            header=fits.Header([(k, *v) for k, v in data.items()]),
                             name=extension_name,
                         )
                     )
