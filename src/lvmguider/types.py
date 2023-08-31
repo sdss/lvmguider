@@ -14,6 +14,6 @@ import nptyping as npt
 # Array types
 ARRAY_2D_U16 = npt.NDArray[npt.Shape["*, *"], npt.UInt16]
 ARRAY_2D_F32 = npt.NDArray[npt.Shape["*, *"], npt.Float32]
-ARRAY_2D_F64 = npt.NDArray[npt.Shape[2], npt.Float64]
+ARRAY_2D_F64 = npt.NDArray[npt.Shape["*, *"], npt.Float64]
 
 ARRAY_1D_F32 = npt.NDArray[npt.Shape["*"], npt.Float32]

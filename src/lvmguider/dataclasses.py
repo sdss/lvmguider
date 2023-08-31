@@ -112,7 +112,7 @@ class GuiderSolution:
 
     frameno: int
     solutions: list[CameraSolution]
-    guide_pixel: npt.NDArray[npt.Shape[2], npt.Float32]
+    guide_pixel: npt.NDArray[npt.Shape["2"], npt.Float32]
     mf_wcs: WCS | None = None
     pa: float = numpy.nan
     ra_off: float = numpy.nan
@@ -142,7 +142,7 @@ class GuiderSolution:
         raise KeyError(f"Invalid camera name {key!r}.")
 
     @property
-    def pointing(self) -> npt.NDArray[npt.Shape[2], npt.Float64]:
+    def pointing(self) -> npt.NDArray[npt.Shape["2"], npt.Float64]:
         """Returns the telescope pointing."""
 
         if not self.mf_wcs:
