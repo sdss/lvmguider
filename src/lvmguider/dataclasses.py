@@ -44,7 +44,7 @@ class CameraSolution:
     ref_frame: pathlib.Path | None = None
     wcs_mode: str = "none"
 
-    def post_init(self):
+    def __post_init__(self):
         if numpy.isnan(self.pa) and self.wcs is not None:
             self.pa = get_crota2(self.wcs)
 
@@ -123,7 +123,7 @@ class GuiderSolution:
     correction_applied: bool = False
     correction: list[float] = field(default_factory=lambda: [0.0, 0.0, 0.0])
 
-    def post_init(self):
+    def __post_init__(self):
         self.sources = pandas.concat([cs.sources for cs in self.solutions], axis=0)
 
         zps = self.sources.loc[:, "zp"].copy().dropna()
