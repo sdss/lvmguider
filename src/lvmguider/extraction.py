@@ -22,6 +22,8 @@ from matplotlib import pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 from numpy.typing import NDArray
 
+from lvmguider.tools import dataframe_from_model
+
 
 __all__ = ["sextractor_quick", "extract_marginal", "extract_sources"]
 
@@ -277,11 +279,8 @@ def extract_marginal(
 
     """
 
-    from lvmguider.tools import get_model
-
     # Create an initial, empty sources DF with all the columns and types.
-    model = get_model("SOURCES")
-    detections = pandas.DataFrame({k: pandas.Series(dtype=v) for k, v in model.items()})
+    detections = dataframe_from_model("SOURCES")
 
     data = data.astype("f8")
 
