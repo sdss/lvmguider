@@ -10,37 +10,51 @@ from __future__ import annotations
 
 import asyncio
 import pathlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING
 
+import nptyping as npt
 import numpy
 import pandas
 from astropy.coordinates import EarthLocation
 from astropy.io import fits
 from astropy.table import Table
 from astropy.time import Time
-from astropy.wcs import WCS
 from simple_pid import PID
-
-from sdsstools.time import get_sjd
 
 from lvmguider import __version__
 from lvmguider.maskbits import GuiderStatus
-from lvmguider.tools import elapsed_time, get_frameno, get_proc_path, run_in_executor
-
-from .transformations import (
+from lvmguider.tools import (
+    elapsed_time,
+    estimate_zeropoint,
+    get_dark_subtrcted_data,
+    get_frameno,
+    get_guider_path,
+    get_model,
+    run_in_executor,
+    update_fits,
+)
+from lvmguider.transformations import (
     XZ_FULL_FRAME,
-    calculate_guide_offset,
     delta_radec2mot_axis,
-    solve_camera,
-    wcs_from_single_cameras,
+    get_crota2,
+    match_with_gaia,
+    solve_camera_with_astrometrynet,
+    wcs_from_gaia,
 )
 
 
 if TYPE_CHECKING:
+    from astropy.wcs import WCS
+
     from lvmguider.actor import GuiderCommand
     from lvmguider.astrometrynet import AstrometrySolution
+
+
+# Array types
+ARRAY_2D_U16 = npt.NDArray[npt.Shape["*, *"], npt.UInt16]
+ARRAY_2D_F32 = npt.NDArray[npt.Shape["*, *"], npt.Float32]
 
 
 class CriticalGuiderError(Exception):
@@ -53,12 +67,26 @@ class CriticalGuiderError(Exception):
 class CameraSolution:
     """A camera solution, including the determined WCS."""
 
+    frameno: int
     camera: str
+    path: pathlib.Path
     sources: pandas.DataFrame
     wcs: WCS | None = None
-    solved: bool = False
-    reference_frame: pathlib.Path | None = None
+    matched: bool = False
+    zero_point: float = numpy.nan
+    pa: float = numpy.nan
+    ref_frame: pathlib.Path | None = None
     solution_mode: str = "none"
+
+    def post_init(self):
+        if numpy.isnan(self.pa) and self.wcs is not None:
+            self.pa = get_crota2(self.wcs)
+
+    @property
+    def solved(self):
+        """Was the frame solved?"""
+
+        return self.wcs is not None
 
 
 @dataclass
@@ -68,27 +96,54 @@ class GuiderSolution:
     This class abstracts an astrometric solution regardless of whether it was
     determined using astrometry.net or Gaia sources.
 
-    Parameters
-    ----------
-    guider
-        The `.Guider` instance.
-    solutions
-        A list of `.CameraSolution` instances.
-
     """
 
-    guider: Guider
+    frameno: int
     solutions: list[CameraSolution]
+    guide_pixel: npt.NDArray[npt.Shape[2], npt.Float32]
+    mf_wcs: WCS | None = None
+    pa: float = numpy.nan
+    ra_off: float = numpy.nan
+    dec_off: float = numpy.nan
+    axis0_off: float = numpy.nan
+    axis1_off: float = numpy.nan
+    pa_off: float = numpy.nan
+    correction_applied: bool = False
+    correction: list[float] = field(default_factory=lambda: [0.0, 0.0])
+
+    def post_init(self):
+        self.sources = pandas.concat([cs.sources for cs in self.solutions], axis=0)
+
+        zps = self.sources.loc[:, "zp"].copy().dropna()
+        self.zero_point = zps.median()
+
+        if numpy.isnan(self.pa) and self.mf_wcs is not None:
+            self.pa = get_crota2(self.mf_wcs)
 
     def __getitem__(self, key: str):
         """Returns the associated camera solution."""
 
-        if key not in self.cameras:
-            raise KeyError(f"Invalid camera name {key!r}.")
-
         for solution in self.solutions:
             if solution.camera == key:
                 return solution
+
+        raise KeyError(f"Invalid camera name {key!r}.")
+
+    @property
+    def pointing(self) -> npt.NDArray[npt.Shape[2], npt.Float64]:
+        """Returns the telescope pointing."""
+
+        if not self.mf_wcs:
+            return numpy.array([numpy.nan, numpy.nan])
+
+        skyc = self.mf_wcs.pixel_to_world(*XZ_FULL_FRAME)
+        return numpy.array([skyc.ra.deg, skyc.dec.deg])
+
+    @property
+    def solved(self):
+        """Was the frame solved?"""
+
+        return self.mf_wcs is not None
 
     @property
     def cameras(self):
@@ -96,7 +151,19 @@ class GuiderSolution:
 
         return [cs.camera for cs in self.solutions]
 
-    def all_solved(self):
+    @property
+    def separation(self):
+        """Returns the separation between field centre and telescope pointing."""
+
+        return numpy.hypot(self.ra_off, self.dec_off)
+
+    @property
+    def n_cameras_solved(self):
+        """Returns the number of cameras solved."""
+
+        return len([cs for cs in self.solutions if cs.solved])
+
+    def all_cameras_solved(self):
         """Returns `True` if all the cameras have solved."""
 
         return all([cs.solved for cs in self.solutions])
@@ -131,82 +198,35 @@ class Guider:
         self.pixel = pixel or XZ_FULL_FRAME
 
         self.config = command.actor.config
-
-        self._mode: str = "auto"
+        self.guide_tolerance = self.config["guide_tolerance"]
 
         # Use negative values because we apply the correction in the
         # same direction as the measured offset between pointing and
         # reference position.
-        self.pid_ra = PID(
-            Kp=-self.config["pid"]["ra"]["Kp"],
-            Ki=-self.config["pid"]["ra"]["Ki"],
-            Kd=-self.config["pid"]["ra"]["Kd"],
+        self.pid_ax0 = PID(
+            Kp=-self.config["pid"]["ax0"]["Kp"],
+            Ki=-self.config["pid"]["ax0"]["Ki"],
+            Kd=-self.config["pid"]["ax0"]["Kd"],
         )
 
-        self.pid_dec = PID(
-            Kp=-self.config["pid"]["dec"]["Kp"],
-            Ki=-self.config["pid"]["dec"]["Ki"],
-            Kd=-self.config["pid"]["dec"]["Kd"],
+        self.pid_ax1 = PID(
+            Kp=-self.config["pid"]["ax1"]["Kp"],
+            Ki=-self.config["pid"]["ax1"]["Ki"],
+            Kd=-self.config["pid"]["ax1"]["Kd"],
         )
-
-        self.use_reference_frames: bool = False
-        self.reference_frames: dict[str, pathlib.Path] = {}
-        self.reference_sources: pandas.DataFrame | None = None
-        self.reference_wcs: dict[str, WCS] = {}
 
         self.site = EarthLocation(**self.config["site"])
 
-    def set_reference_frames(
-        self,
-        frameno: int | None = None,
-        mf_wcs: WCS | None = None,
-    ):
-        """Sets the reference images to be used for guiding."""
+        self.solutions: dict[int, GuiderSolution] = {}
 
-        # Reset to not using reference frames.
-        if frameno is None:
-            self.use_reference_frames = False
-            self.reference_frames = {}
-            self.reference_sources = None
-            self.reference_wcs = {}
-            return
+    @property
+    def last(self):
+        """Returns the last solution."""
 
-        # Gets images that match frameno.
-        sjd = get_sjd("LCO")
-        agcam_dir = pathlib.Path(f"/data/agcam/{sjd}")
-        files = list(agcam_dir.glob(f"lvm.{self.telescope}.agcam.*_{frameno:08d}.*"))
+        if len(self.solutions) == 0:
+            return None
 
-        if len(files) == 0:
-            raise FileNotFoundError(f"No files found for frame number {frameno}.")
-
-        if self.telescope != "spec" and len(files) == 1:
-            self.command.warning(f"Only one file found for frame number {frameno}.")
-
-        sources: list[pandas.DataFrame] = []
-        for file_ in files:
-            try:
-                header_raw = fits.getheader(file_, "RAW")
-                header_proc = fits.getheader(file_, "PROC")
-                file_sources = Table.read(file_, "SOURCES").to_pandas()
-            except Exception as err:
-                raise ValueError(f"Failed retrieving sources from file {file_}: {err}")
-
-            camname: str = header_raw["CAMNAME"]
-            sources.append(file_sources)
-
-            self.reference_frames[camname] = file_
-            self.reference_wcs[camname] = WCS(header_proc)
-
-        if mf_wcs is None:
-            proc_path = get_proc_path(files[0])
-            if not proc_path.exists():
-                raise CriticalGuiderError("Cannot retrieve reference frame master WCS.")
-            self.reference_wcs = WCS(fits.getheader(str(proc_path), "ASTROMETRY"))
-        else:
-            self.reference_wcs["master"] = mf_wcs
-
-        self.reference_sources = pandas.concat(sources)
-        self.use_reference_frames = True
+        return self.solutions[max(self.solutions)]
 
     def set_pixel(self, pixel_x: float | None = None, pixel_z: float | None = None):
         """Sets the master frame pixel coordinates ``(x, z)`` on which to guide."""
@@ -216,19 +236,20 @@ class Guider:
         else:
             new_pixel = (pixel_x, pixel_z)
 
-        if self.pixel != new_pixel and self._mode == "auto":
-            # In auto mode, if we change the current pixel, we start drifting
-            # towards a new target position.
-            self.command.actor.status |= GuiderStatus.DRIFTING
+        if self.pixel != new_pixel:
+            self.reset_to_acquisition()
             self.pixel = new_pixel
-            self.set_reference_frames()
 
         return self.pixel
 
-    def reset_acquisition(self):
+    def is_guiding(self):
+        """Are we guiding?"""
+
+        return self.command.actor.status & GuiderStatus.GUIDING
+
+    def reset_to_acquisition(self):
         """Reset the flags for acquisition mode."""
 
-        self.set_reference_frames()
         self.command.actor._status &= ~GuiderStatus.GUIDING
         self.command.actor._status |= GuiderStatus.ACQUIRING
         self.command.actor.status |= GuiderStatus.DRIFTING
@@ -236,61 +257,49 @@ class Guider:
     async def guide_one(
         self,
         exposure_time: float = 5.0,
-        mode: str = "auto",
+        force_astrometry_net: bool = False,
         guide_tolerance: float | None = None,
         apply_correction: bool = True,
-        use_motor_offsets: bool = True,
     ):
         """Performs one guide iteration.
 
         This is the main routine that executes one acquisition or guide iteration.
-        When ``mode='auto'``, the code will do an acquisition step unless
-        ``use_reference_frames=True``. At the end of the acquisition step, if
-        the measured offset is smaller than ``guide_tolerance``, it will set
-        ``use_reference_frames`` and the following iterations will be performed
-        using the guide mechanism.
+        Two algorithms are implemented to determine astrometric solution of each
+        camera. Initially ``astrometry.net`` is used to produce a WCS based on the
+        detected sources. Once the global position of the telescope is within
+        ``guide_tolerance``, the last guider solution is used as a reference and
+        new frames are matched using a nearest neighbours k-d tree.
 
-        During acquisition, in order, it does the following:
+        The list of steps include:
 
         - Expose the cameras. Subtract dark frame.
         - Extract sources.
-        - Create a master frame based on the camera(s)-to-IFU metrology.
-        - Solve the frame using astrometry.net.
-        - Determine the offsets for a given pixel on the master frame. By default
-          the central pixel is used, which corresponds to guiding at the central
-          fibre in the IFU, but a different location can be used to guide, for example,
-          on one of the spec mask holes.
+        - Solve each camera frame using astrometry.net or k-d tree matching.
+          Generate a WCS for the camera solution.
+        - Query Gaia DR3 to select sources in the FoV of the camera position.
+        - Perform aperture photometry on the camera sources and determine the
+          LVM magnitude zero point for matched Gaia sources.
+        - Determine the offsets in RA, Dec, and PA.
         - Send PID-corrected offsets to the telescopes.
-
-        Guiding is similar but instead of solving a new master frame WCS, the
-        extracted sources are compared with the list of sources from the reference
-        frame, and associated using nearest-neighbours. From there, an offset is
-        derived and sent to the telescope.
 
         Parameters
         ----------
         exposure_time
             The exposure time, in seconds.
-        mode
-            Either ``'auto'``, ``'guide'``, or ``'acquire'``. In auto mode acquisition
-            will be performed until the measured offset is smaller than
-            ``guide_tolerance``. The other two modes force continuous acquisition
-            or guiding.
+        force_astrometry_net
+            When `True`, skips the k-d tree matching algorithm and always solves
+            cameras using ``astrometry.net``.
         guide_tolerance
             The separation between field RA/Dec and measured pointing at which
             to consider than acquisition has been completed and guiding begins.
+            If `None`, defaults to the configuration file value.
         apply_corrections
-            Whether to apply the measured corrections. If `False`, only measures.
-        use_motor_offsets
-            If `True`, applies the corrections as motor axis offsets.
-        use_individual_images
-            If `True`, the WCS for the master frame in acquisition is derived from
-            the individual WCS of the AG frames.
+            Whether to apply the measured corrections. If `False`, outputs the
+            measurements but does not command the telescope.
 
         """
 
-        if self.use_reference_frames and self.reference_sources is None:
-            raise CriticalGuiderError("No reference sources defined.")
+        self.guide_tolerance = guide_tolerance or self.guide_tolerance
 
         filenames, frameno, sources = await self.cameras.expose(
             self.command,
@@ -306,119 +315,92 @@ class Guider:
         default_guide_tolerance: float = self.config.get("guide_tolerance", 5)
         guide_tolerance = guide_tolerance or default_guide_tolerance
 
-        if mode == "auto":
-            is_acquisition = bool(
-                not self.use_reference_frames
-                or self.command.actor.status & GuiderStatus.DRIFTING
-            )
-        elif mode == "guide":
-            is_acquisition = False
-        elif mode == "acquire":
-            is_acquisition = True
+        camera_solutions: list[CameraSolution] = await asyncio.gather(
+            *[
+                self.solve_camera(filename, force_astrometry_net=force_astrometry_net)
+                for filename in filenames
+            ]
+        )
+
+        guider_solution = GuiderSolution(
+            frameno,
+            camera_solutions,
+            guide_pixel=numpy.array(XZ_FULL_FRAME),
+        )
+
+        if guider_solution.n_cameras_solved == 0:
+            self.command.error("No astrometric solutions found.")
+
         else:
-            raise CriticalGuiderError(f"Invalid mode {mode}.")
-
-        self._mode = mode
-
-        if is_acquisition:
             try:
-                ra_p, dec_p, wcs = await self.determine_pointing(
-                    filenames,
-                    pixel=self.pixel,
-                )
+                mf_wcs = wcs_from_gaia(guider_solution.sources)
+                guider_solution.mf_wcs = mf_wcs
+                guider_solution.pa = get_crota2(mf_wcs)
 
-                # Offset is field centre - current pointing.
-                pnt = (ra_p, dec_p)
-                offset_radec, offset_motax, sep = self.calculate_telescope_offset(pnt)
+            except RuntimeError as err:
+                self.command.error(f"Failed generating master frame WCS: {err}")
 
-            except Exception as err:
-                raise RuntimeError(f"Failed determining telescope pointing: {err}")
+        pointing = guider_solution.pointing
+        offset_radec, offset_motax = self.calculate_telescope_offset(pointing)
 
-        else:
-            offset_radec, sep = await self.calculate_guide_offset(sources, filenames)
+        guider_solution.ra_off = offset_radec[0]
+        guider_solution.dec_off = offset_radec[1]
+        guider_solution.axis0_off = offset_motax[0]
+        guider_solution.axis1_off = offset_motax[1]
 
-            if numpy.any(numpy.isnan(offset_radec)) or numpy.isnan(sep):
-                self.reset_acquisition()
-                raise ValueError(
-                    "Invalid values found in guide measurement. "
-                    "Reverting to acquisition."
-                )
-
-            wcs = self.reference_wcs["master"]
-
-            # Pointing from the reference frame.
-            pixel = self.pixel or XZ_FULL_FRAME
-            ref_pointing = wcs.pixel_to_world(*pixel)
-            ra_ref = ref_pointing.ra.deg
-            dec_ref = ref_pointing.dec.deg
-
-            # Calculate current pointing. Note to future José: that although the
-            # offset is measured as going from measured to reference sources here
-            # we need to add it because that offset is the result of moving the
-            # telescope and not the sky (just draw it).
-            cos_dec = numpy.cos(numpy.radians(dec_ref))
-            ra_p = numpy.round(ra_ref + offset_radec[0] / 3600 / cos_dec, 6)
-            dec_p = numpy.round(dec_ref + offset_radec[1] / 3600.0, 6)
-
-            # Where we really want to point.
-            fra, fdec = self.field_centre
-
-            # Calculate offset in motor axes.
-            saz_diff_d, sel_diff_d = delta_radec2mot_axis(
-                fra,
-                fdec,
-                ra_p,
-                dec_p,
-                site=self.site,
+        for camera_solution in guider_solution.solutions:
+            self.command.debug(
+                camera_solution={
+                    "frameno": frameno,
+                    "camera": camera_solution.camera,
+                    "solved": camera_solution.solved,
+                    "solution_mode": camera_solution.solution_mode,
+                    "pa": camera_solution.pa,
+                    "zero_point": camera_solution.zero_point,
+                }
             )
-            offset_motax = (saz_diff_d, sel_diff_d)
 
         self.command.info(
             measured_pointing={
                 "frameno": frameno,
-                "ra": ra_p,
-                "dec": dec_p,
+                "ra": numpy.round(pointing[0], 6),
+                "dec": numpy.round(pointing[1], 6),
                 "radec_offset": list(numpy.round(offset_radec, 3)),
                 "motax_offset": list(numpy.round(offset_motax, 3)),
-                "separation": sep,
-                "mode": "guide" if self.use_reference_frames else "acquisition",
+                "separation": guider_solution.separation,
+                "pa": guider_solution.pa,
+                "zero_point": guider_solution.zero_point,
             }
         )
 
-        if not is_acquisition:
-            if self.command.actor.status & GuiderStatus.DRIFTING:
-                raise ValueError("Guider is drifting. Reverting to acquisition.")
+        self.solutions[frameno] = guider_solution
 
-            if (sep > guide_tolerance) and mode == "auto":
-                self.reset_acquisition()
-                raise ValueError(
-                    "Guide measured offset exceeds guide tolerance. "
-                    "Skipping correction and reverting to acquisition."
-                )
+        if not guider_solution.solved:
+            await self.update_fits(guider_solution)
+            return
 
-        # Calculate the correction.
-        corr_radec = numpy.array(offset_radec)  # In RA/Dec
+        # Calculate the correction and apply PID loop.
         corr_motax = numpy.array(offset_motax)  # In motor axes
+        corr_motax[0] = self.pid_ax0(corr_motax[0])
+        corr_motax[1] = self.pid_ax1(corr_motax[1])
 
-        # Apply PID
-        if use_motor_offsets:
-            corr_motax[0] = self.pid_ra(corr_motax[0])
-            corr_motax[1] = self.pid_dec(corr_motax[1])
-        else:
-            corr_radec[0] = self.pid_ra(corr_radec[0])
-            corr_radec[1] = self.pid_dec(corr_radec[1])
-
-        applied_radec = applied_motax = numpy.array([0.0, 0.0])
+        applied_motax = numpy.array([0.0, 0.0])
         try:
             if apply_correction:
                 self.command.actor.status &= ~GuiderStatus.PROCESSING
                 self.command.actor.status |= GuiderStatus.CORRECTING
 
-                applied_radec, applied_motax = await self.offset_telescope(
+                mode = "acquisition" if not self.is_guiding() else "guide"
+                timeout = self.config["offset"]["timeout"][mode]
+
+                _, applied_motax = await self.offset_telescope(
                     *corr_motax,
-                    use_motor_axes=use_motor_offsets,
+                    use_motor_axes=True,
                     max_correction=self.config.get("max_correction", 3600),
+                    timeout=timeout,
                 )
+
+                guider_solution.correction_applied = True
 
         finally:
             self.command.actor.status &= ~GuiderStatus.CORRECTING
@@ -426,112 +408,147 @@ class Guider:
             self.command.info(
                 correction_applied={
                     "frameno": frameno,
-                    "radec_applied": list(numpy.round(applied_radec, 3)),
                     "motax_applied": list(numpy.round(applied_motax, 3)),
                 }
             )
 
-            # Should we start guiding?
-            if (
-                mode == "auto"
-                and not self.use_reference_frames
-                and sep < guide_tolerance
-            ):
+            guider_solution.correction = applied_motax.tolist()
+
+            if guider_solution.separation < self.guide_tolerance:
                 self.command.info("Guide tolerance reached. Starting to guide.")
-                self.set_reference_frames(frameno, mf_wcs=wcs)
                 self.command.actor._status &= ~GuiderStatus.ACQUIRING
                 self.command.actor._status &= ~GuiderStatus.DRIFTING
                 self.command.actor.status |= GuiderStatus.GUIDING
+            else:
+                if self.is_guiding():
+                    self.command.warning(
+                        "Measured offset exceeds guide tolerance. "
+                        "Reverting to acquisition."
+                    )
 
-            asyncio.create_task(
-                self.write_proc_file(
-                    filenames=filenames,
-                    wcs=wcs,
-                    ra_p=ra_p,
-                    dec_p=dec_p,
-                    offset_radec=tuple(offset_radec),
-                    corr_radec=tuple(numpy.round(applied_radec, 3)),
-                    corr_motax=tuple(numpy.round(applied_motax, 3)),
-                    sources=list(sources),
-                    is_acquisition=is_acquisition,
-                )
+                self.reset_to_acquisition()
+
+            await self.update_fits(guider_solution)
+
+    async def solve_camera(
+        self,
+        file: str | pathlib.Path,
+        force_astrometry_net: bool = False,
+    ):
+        """Astrometrically solves a single camera using astrometry.net or k-d tree."""
+
+        file = pathlib.Path(file)
+        frameno = get_frameno(file)
+        hdul = fits.open(str(file))
+
+        data, dark_sub = get_dark_subtrcted_data(file)
+        if not dark_sub:
+            self.command.debug(f"No dark frame found for {file!s}. Fitting background.")
+
+        camname = hdul["RAW"].header["CAMNAME"]
+
+        sources = pandas.DataFrame(hdul["SOURCES"].data)
+        ra: float = hdul["RAW"].header["RA"]
+        dec: float = hdul["RAW"].header["DEC"]
+
+        last_solution: CameraSolution | None = None
+        solution_mode = "astrometrynet"
+
+        matched_sources = sources.copy()
+
+        # First determine the algorithm we are going to use. Check the last
+        # solution for this camera and see if it was good enough to use as reference.
+        if (
+            self.is_guiding()
+            and not force_astrometry_net
+            and self.last
+            and self.last.solved
+            and self.last.separation < self.guide_tolerance
+            and camname in self.last.cameras
+        ):
+            last_cs = self.last[camname]
+            if (
+                last_cs.ref_frame
+                and get_frameno(last_cs.ref_frame) in self.solutions
+                and last_cs.solved
+            ):
+                solution_mode = "gaia"
+
+        camera_solution = CameraSolution(
+            frameno,
+            camname,
+            file,
+            sources=sources,
+            solution_mode=solution_mode,
+        )
+
+        if solution_mode == "astrometrynet":
+            # Basename path for the astrometry.net outputs.
+            basename = file.name.replace(".fits.gz", "").replace(".fits", "")
+            astrometrynet_output_root = str(file.parent / "astrometry" / basename)
+
+            solution: AstrometrySolution = await run_in_executor(
+                solve_camera_with_astrometrynet,
+                sources,
+                ra=ra,
+                dec=dec,
+                solve_locs_kwargs_cam={"output_root": astrometrynet_output_root},
             )
 
-            # Guide step was successful, remove any FAILED flags.
-            self.command.actor.status &= ~GuiderStatus.FAILED
+            # Now match with Gaia.
+            if solution.solved:
+                matched_sources, _ = match_with_gaia(solution.wcs, sources, concat=True)
+                camera_solution.sources = matched_sources
+                camera_solution.matched = True
 
-    async def determine_pointing(
-        self,
-        filenames: list[str],
-        pixel: tuple[float, float] | None = None,
-    ) -> tuple[float, float, WCS]:
-        """Returns the pointing of a telescope based on AG frames.
+                camera_solution.wcs = solution.wcs
+                camera_solution.pa = get_crota2(solution.wcs)
 
-        Parameters
-        ----------
-        filenames
-            A list of two AG frames (one for ``spec``) to be used to determine the
-            pointing by calling `.solve_from_files`.
-        pixel
-            The ``(x,y)`` pixel of the master frame to use to determine the pointing.
-            Default to the central pixel.
+        else:
+            # This is now solution_mode="gaia".
 
-        Returns
-        -------
-        pointing
-            An tuple with the RA,Dec pointing of the telescope, in degrees.
+            # Find the reference file we want to compare with.
+            assert last_solution is not None
+            assert last_solution.ref_frame is not None
 
-        """
+            ref_solution = self.solutions[get_frameno(last_solution.ref_frame)]
+            ref_wcs = ref_solution[camname].wcs
 
-        telescope = self.telescope
+            # Here we match with Gaia first, then use those matches to
+            # define the WCS.
+            matched_sources, nmatches = match_with_gaia(
+                ref_wcs,
+                sources,
+                concat=True,
+                max_separation=5,
+            )
 
-        pixel = pixel or XZ_FULL_FRAME
+            camera_solution.sources = matched_sources
+            camera_solution.matched = True
 
-        solutions: list[dict[str, AstrometrySolution]] = await asyncio.gather(
-            *[run_in_executor(solve_camera, file, telescope) for file in filenames]
-        )
+            if nmatches < 5:
+                self.command.warning(
+                    "Insufficient number of Gaia matches. "
+                    "Cannot generate astrometric solution."
+                )
+            else:
+                wcs = wcs_from_gaia(matched_sources)
+                camera_solution.wcs = wcs
+                camera_solution.pa = get_crota2(wcs)
 
-        # Convert to dictionary of camera name to astrometric solution.
-        camera_solutions = {k: v for d in solutions for k, v in d.items()}
+        # Get zero-point. This is safe even if it did not solve.
+        zp = estimate_zeropoint(data, camera_solution.sources)
+        camera_solution.sources.update(zp)
 
-        wcs = await run_in_executor(
-            wcs_from_single_cameras,
-            camera_solutions,
-            telescope,
-        )
+        if camera_solution.solved is False:
+            self.command.warning(f"Camera {camname!r} failed to solve.")
 
-        for fn, camname in enumerate(camera_solutions):
-            wcs_camera = camera_solutions[camname].wcs
-            if camera_solutions[camname].solved is False:
-                self.command.warning(f"Camera {camname} did not solve.")
-            elif wcs_camera is not None:
-                file = filenames[fn]
-
-                # Update proc header with astrometry.net WCS.
-                with elapsed_time(self.command, "update astrometry in PROC raw frames"):
-                    with fits.open(str(file), mode="update") as hdul:
-                        if "PROC" in hdul:
-                            proc = hdul["PROC"]
-                        else:
-                            proc = fits.ImageHDU(name="PROC")
-                            hdul.append(proc)
-
-                        proc.header.update(wcs_camera.to_header())
-                        proc.header["WCSMODE"] = "astrometrynet"
-
-        if wcs is None:
-            raise ValueError(f"Cannot determine pointing for telescope {telescope}.")
-
-        pointing: Any = wcs.pixel_to_world(*pixel)
-
-        wcs = cast(WCS, wcs)
-
-        return (numpy.round(pointing.ra.deg, 6), numpy.round(pointing.dec.deg, 6), wcs)
+        return camera_solution
 
     def calculate_telescope_offset(
         self,
-        pointing: tuple[float, float],
-    ) -> tuple[tuple[float, float], tuple[float, float], float]:
+        pointing: npt.NDArray[npt.Shape[2], npt.Float64],
+    ) -> tuple[tuple[float, float], tuple[float, float]]:
         """Determines the offset to send to the telescope to acquire the field centre.
 
         Parameters
@@ -543,35 +560,20 @@ class Guider:
         Returns
         -------
         offset
-            A tuple of ra/dec offsets to acquire the desired field centre, in arcsec.
-        angle
-            The angle between pointing and field centre, in arcsec.
+            A tuples of ra/dec and motor axis offsets to acquire the
+            desired field centre, in arcsec.
 
         """
 
         pra, pdec = pointing
         fra, fdec = self.field_centre
 
-        # TODO: do this with proper spherical trigonometry! But won't matter much
-        # if angle is small.
-
         mid_dec = (pdec + fdec) / 2
 
         ra_off: float = (fra - pra) * numpy.cos(numpy.radians(mid_dec))
         dec_off: float = fdec - pdec
-
-        fdec_c = numpy.radians(90 - fdec)
-        pdec_c = numpy.radians(90 - pdec)
-        ra_diff_rad = numpy.radians(fra - pra)
-
-        cos_dec = numpy.cos(fdec_c) * numpy.cos(pdec_c)
-        sin_dec_cos_ra = numpy.sin(fdec_c) * numpy.sin(pdec_c) * numpy.cos(ra_diff_rad)
-        cos_sep = cos_dec + sin_dec_cos_ra
-        sep = numpy.degrees(numpy.arccos(cos_sep))
-
         ra_arcsec = numpy.round(ra_off * 3600, 3)
         dec_arcsec = numpy.round(dec_off * 3600, 3)
-        sep_arcsec = numpy.round(sep * 3600, 3)
 
         saz_diff_d, sel_diff_d = delta_radec2mot_axis(
             fra,
@@ -581,12 +583,13 @@ class Guider:
             site=self.site,
         )
 
-        return ((ra_arcsec, dec_arcsec), (saz_diff_d, sel_diff_d), sep_arcsec)
+        return ((ra_arcsec, dec_arcsec), (saz_diff_d, sel_diff_d))
 
     async def offset_telescope(
         self,
         off0: float,
         off1: float,
+        timeout: float = 10,
         use_motor_axes: bool = False,
         max_correction: float | None = None,
     ):
@@ -598,6 +601,8 @@ class Guider:
             Offset in the first axis, in arcsec.
         off1
             Offset in the second axis, in arcsec.
+        timeout
+            Timeout for the offset.
         use_motor_axes
             Whether to apply the corrections as motor axes offsets.
         max_correction
@@ -607,9 +612,8 @@ class Guider:
         Returns
         -------
         applied_radec
-            The applied correction in RA and Dec in arcsec. If the correction
-            is actually applied as motor offsets, this value is estimated from
-            them.
+            The applied correction in RA and Dec in arcsec. Zero if the correction
+            is applied as RA/Dec.
         applied_motax
             The applied correction in motor axes in arcsec. Zero if the correction
             is applied as RA/Dec.
@@ -638,9 +642,7 @@ class Guider:
         # By default lvmpwi requires an axis error < 0.4 to consider an offset done.
         # That's a bit overzealous in mid- to high-wind conditions. We apply a more
         # relaxed axis error and a timeout.
-        mode = "guide" if self.use_reference_frames else "acquisition"
         axis_error = self.config["offset"]["axis_error"]
-        timeout = self.config["offset"]["timeout"][mode]
         cmd_str += f" --axis_error {axis_error} --timeout {timeout}"
 
         cmd = await self.command.send_command(pwi, cmd_str)
@@ -650,175 +652,95 @@ class Guider:
 
         return applied_radec, applied_motax
 
-    async def calculate_guide_offset(
-        self,
-        sources: list[pandas.DataFrame],
-        filenames: list[str] = [],
-    ):
-        """Determines the guide offset by matching sources to reference images.
+    async def update_fits(self, guider_solution: GuiderSolution):
+        """Updates the ``lvm.agcam`` files and creates the ``lvm.guider`` file."""
 
-        Parameters
-        ----------
-        sources
-            A Pandas DataFrame with the sources to match to the reference frame.
-            Must contain a column ``camera`` with the camera associated with each
-            source.
-        filenames
-            The filenames from which the sources have been extracted. They will
-            be used to update the WCS of their ``PROC`` headers.
+        def nan_or_none(value: float, precision: int | None = None):
+            if numpy.isnan(value):
+                return None
+            if precision is not None:
+                return numpy.round(value, precision)
+            return value
 
-        Returns
-        -------
-        offset
-            A tuple of RA and Dec offsets, in arcsec.
-        separation
-            The absolute separation between the reference frame and the
-            new set of sources, in arcsec.
+        # Update lvm.agcam PROC and SOURCES extensions.
+        coros = []
+        for solution in guider_solution.solutions:
+            file = solution.path.absolute()
+            pa = numpy.round(solution.pa, 4)
+            zeropt = numpy.round(solution.zero_point, 3)
+            reffile = solution.ref_frame.name if solution.ref_frame else None
 
-        """
+            wcs_cards = {}
+            if solution.wcs is not None:
+                cards = solution.wcs.cards
+                for card in cards:
+                    wcs_cards[card.keyword] = (card.value, card.comment)
 
-        if self.reference_sources is None or "master" not in self.reference_wcs:
-            raise CriticalGuiderError("Missing reference frame data. Cannot guide.")
+            proc_update = {
+                "PROC": {
+                    "PA": pa if not numpy.isnan(pa) else None,
+                    "ZEROPT": zeropt if not numpy.isnan(zeropt) else None,
+                    "REFFILE": reffile,
+                    "WCSMODE": solution.solution_mode,
+                    **wcs_cards,
+                },
+                "SOURCES": solution.sources,
+            }
 
-        offset_xy, offset_radec, sep_arcsec, _ = await run_in_executor(
-            calculate_guide_offset,
-            pandas.concat(sources),
-            self.telescope,
-            self.reference_sources,
-            self.reference_wcs["master"],
-        )
+            coros.append(run_in_executor(update_fits, file, proc_update))
 
-        # Update proc- header with new astrometry.
-        with elapsed_time(self.command, "update astrometry in PROC raw frames"):
-            for file_ in filenames:
-                with fits.open(str(file_), mode="update") as hdul:
-                    camname = hdul["RAW"].header["CAMNAME"]
-                    wcs = self.reference_wcs.get(camname, None)
-                    if wcs is None:
-                        self.command.warning(f"No WCS for reference frame {file_!s}.")
-                        continue
+        gheader = fits.Header(get_model("GUIDERDATA"))
 
-                    wcs = self.reference_wcs[camname].deepcopy()
-                    wcs.wcs.crpix -= numpy.array(offset_xy)
-                    if "PROC" in hdul:
-                        proc = hdul["PROC"]
-                    else:
-                        proc = fits.ImageHDU()
-                    proc.header.update(wcs.to_header())
-                    proc.header["WCSMODE"] = "astrometrynet+guide"
+        gheader["GUIDERV"] = __version__
+        gheader["TELESCOP"] = self.telescope
+        gheader["GUIDMODE"] = "acquisition" if self.is_guiding() else "guide"
+        gheader["DATE"] = Time.now().isot
+        gheader["FRAMENO"] = guider_solution.frameno
 
-        # Rounding.
-        offset_radec = tuple(numpy.round(offset_radec, 3))
-        sep_arcsec = float(numpy.round(sep_arcsec, 3))
+        if "east" in guider_solution.cameras:
+            gheader["FILEEAST"] = guider_solution["east"].path.name
 
-        # Typing.
-        offset_radec = cast(tuple[float, float], offset_radec)
-        sep_arcsec = cast(float, sep_arcsec)
+        if "west" in guider_solution.cameras:
+            gheader["FILEWEST"] = guider_solution["west"].path.name
 
-        return offset_radec, sep_arcsec
+        gheader["DIRNAME"] = str(guider_solution.solutions[0].path.parent)
 
-    async def write_proc_file(
-        self,
-        filenames: list[str],
-        wcs: WCS | None,
-        ra_p: float,
-        dec_p: float,
-        offset_radec: tuple[float, float],
-        corr_radec: tuple[float, float],
-        corr_motax: tuple[float, float],
-        sources: list[pandas.DataFrame],
-        is_acquisition=True,
-    ):
-        """Writes a ``proc-`` image with the astrometric info and applied corrections.
+        gheader["RAFIELD"] = numpy.round(self.field_centre[0], 6)
+        gheader["DECFIELD"] = numpy.round(self.field_centre[1], 6)
+        gheader["RAMEAS"] = nan_or_none(guider_solution.pointing[0], 6)
+        gheader["DECMEAS"] = nan_or_none(guider_solution.pointing[1], 6)
+        gheader["PAMEAS"] = nan_or_none(guider_solution.pa, 4)
+        gheader["OFFRAMEA"] = nan_or_none(guider_solution.ra_off, 3)
+        gheader["OFFDEMEA"] = nan_or_none(guider_solution.dec_off, 3)
+        gheader["OFFA0MEA"] = nan_or_none(guider_solution.axis0_off, 3)
+        gheader["OFFA1MEA"] = nan_or_none(guider_solution.axis1_off, 3)
+        gheader["OFFPAMEA"] = nan_or_none(guider_solution.pa_off, 3)
+        gheader["CORRAPPL"] = guider_solution.correction_applied
+        gheader["RACORR"] = 0.0
+        gheader["DECORR"] = 0.0
+        gheader["PACORR"] = 0.0
+        gheader["AX0CORR"] = nan_or_none(guider_solution.correction[0], 3)
+        gheader["AX1CORR"] = nan_or_none(guider_solution.correction[1], 3)
+        gheader["AX0KP"] = self.pid_ax0.Kp
+        gheader["AX0KI"] = self.pid_ax0.Ki
+        gheader["AX0KD"] = self.pid_ax0.Kd
+        gheader["AX1KP"] = self.pid_ax1.Kp
+        gheader["AX1KI"] = self.pid_ax1.Ki
+        gheader["AX1KD"] = self.pid_ax1.Kd
+        gheader["ZEROPT"] = nan_or_none(guider_solution.zero_point, 3)
 
-        Parameters
-        ----------
-        filenames
-            A list of the paths of the individual AG frames used for the solution.
-        wcs
-            The master frame WCS. If ``is_acquisition=False``, this is the WCS of
-            the master frame in the reference image.
-        ra_p
-            RA of the pointing
-        dec_p
-            Dec of the pointing.
-        offset_radec
-            Measured offset, in arcsec, in the RA/Dec direction.
-        offset_motax
-            Measured offset, in arcsec, in the motor axes direction.
-        corr_radec
-            Correction applied, in arcsec, in the RA/Dec direction.
-        corr_motax
-            Correction applied, in arcsec, in the motor axes direction.
-        sources
-            A list of the extracted sources in each AG frame.
-        is_acquisition
-            `True` if this was an acquisition step. `False` if guiding.
-
-        """
-
-        proc_path = get_proc_path(filenames[0])
-
-        astro_hdu = fits.ImageHDU(name="ASTROMETRY")
-        astro_hdr = astro_hdu.header
-
-        astro_hdr["GUIDERV"] = (__version__, "Version of lvmguider")
-        astro_hdr["TELESCOP"] = (self.telescope, "Telescope that took the images")
-        astro_hdr["ACQUISIT"] = (is_acquisition, "Acquisition or guiding?")
-        astro_hdr["DATE"] = (Time.now().isot, "Date of file creation")
-        astro_hdr["FRAMENO"] = (get_frameno(filenames[0]), "Frame number")
-
-        for fn, file_ in enumerate(filenames):
-            astro_hdr[f"FILE{fn}"] = (str(file_), f"AG frame {fn}")
-
-        ref_frames = list(self.reference_frames.values())
-        for fn in range(2):
-            if len(ref_frames) >= fn + 1:
-                file_ = str(ref_frames[fn])
-            else:
-                file_ = ""
-            astro_hdr[f"REFFILE{fn}"] = (file_, f"AG reference frame {fn}")
-
-        astro_hdr["RAFIELD"] = (self.field_centre[0], "[deg] Field RA")
-        astro_hdr["DECFIELD"] = (self.field_centre[1], "[deg] Field Dec")
-        astro_hdr["RAMEAS"] = (ra_p, "[deg] Measured RA position")
-        astro_hdr["DECMEAS"] = (dec_p, "[deg] Measured Dec position")
-        astro_hdr["OFFRAMEA"] = (offset_radec[0], "[arcsec] RA measured offset")
-        astro_hdr["OFFDEMEA"] = (offset_radec[1], "[arcsec] Dec measured offset")
-        astro_hdr["RACORR"] = (corr_radec[0], "[arcsec] RA applied correction")
-        astro_hdr["DECORR"] = (corr_radec[1], "[arcsec] Dec applied correction")
-        astro_hdr["AX0CORR"] = (corr_motax[0], "[arcsec] Motor axis 0 applied offset")
-        astro_hdr["AX1CORR"] = (corr_motax[1], "[arcsec] Motor axis 1 applied offset")
-        astro_hdr["RAKP"] = (self.pid_ra.Kp, "RA PID K term")
-        astro_hdr["RAKI"] = (self.pid_ra.Ki, "RA PID I term")
-        astro_hdr["RAKD"] = (self.pid_ra.Kd, "RA PID D term")
-        astro_hdr["DECKP"] = (self.pid_dec.Kp, "Dec PID K term")
-        astro_hdr["DECKI"] = (self.pid_dec.Ki, "Dec PID I term")
-        astro_hdr["DECKD"] = (self.pid_dec.Kd, "Dec PID D term")
-
-        if wcs is not None:
-            astro_hdr += wcs.copy().to_header()
-
-        if not is_acquisition:
-            # Update WCS from the reference one using measured offsets.
-            try:
-                cos_dec = numpy.cos(numpy.radians(astro_hdr["CRVAL2"]))
-                crval1 = astro_hdr["CRVAL1"] - offset_radec[0] / 3600 * cos_dec
-                crval2 = astro_hdr["CRVAL2"] - offset_radec[1] / 3600
-
-                astro_hdr["CRVAL1"] = crval1
-                astro_hdr["CRVAL2"] = crval2
-            except Exception as err:
-                self.command.warning(f"Failed updating master frame WCS: {err}")
-
-        proc_hdu = fits.HDUList([fits.PrimaryHDU(), astro_hdu])
-        proc_hdu.append(
+        guider_hdul = fits.HDUList([fits.PrimaryHDU()])
+        guider_hdul.append(fits.ImageHDU(data=None, header=gheader, name="GUIDERDATA"))
+        guider_hdul.append(
             fits.BinTableHDU(
-                data=Table.from_pandas(pandas.concat(sources)),
+                data=Table.from_pandas(guider_solution.sources),
                 name="SOURCES",
             )
         )
-        proc_hdu.writeto(str(proc_path))
 
-        self.command.info(proc_path=str(proc_path))
-        return proc_path
+        guider_path = get_guider_path(guider_solution.solutions[0].path)
+
+        coros.append(run_in_executor(guider_hdul.writeto, str(guider_path)))
+
+        with elapsed_time(self.command, "update PROC HDU and create lvm.guider file"):
+            await asyncio.gather(*coros)

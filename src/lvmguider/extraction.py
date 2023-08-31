@@ -22,9 +22,6 @@ from matplotlib import pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 from numpy.typing import NDArray
 
-from lvmguider.tools import get_model
-from lvmguider.transformations import ag_to_master_frame
-
 
 __all__ = ["sextractor_quick", "extract_marginal", "extract_sources"]
 
@@ -81,6 +78,7 @@ def sextractor_quick(
         df = df.loc[filter]
 
     df = df.loc[df.tnpix > minarea]
+    df = df.reset_index(drop=True)
 
     if return_background:
         return df, background
@@ -279,6 +277,8 @@ def extract_marginal(
 
     """
 
+    from lvmguider.tools import get_model
+
     # Create an initial, empty sources DF with all the columns and types.
     model = get_model("SOURCES")
     detections = pandas.DataFrame({k: pandas.Series(dtype=v) for k, v in model.items()})
@@ -299,6 +299,7 @@ def extract_marginal(
     assert isinstance(back, numpy.ndarray)
 
     detections[sex_detections.columns] = sex_detections
+    detections.loc[:, "valid"] = 0
 
     if exclude_border:
         detections = detections.loc[
@@ -314,12 +315,6 @@ def extract_marginal(
         detections = detections.head(max_detections)
 
     if len(detections) == 0:
-        # Add new columns. If there are no detections at least the columns will exist
-        # on an empty data frame and the overall shape won't change.
-        cols = ["x1", "xstd", "xrms", "y1", "ystd", "yrms", "xfitvalid", "yfitvalid"]
-        detections[cols] = numpy.nan
-        detections["valid"] = 0
-
         return detections
 
     back = sep.Background(data)
@@ -343,13 +338,13 @@ def extract_marginal(
             axis=1,
         )
 
-        detections = pandas.concat([detections, fit_df], axis=1)
+        detections.loc[:, fit_df.columns] = fit_df
 
     valid = (detections.xfitvalid == 1) & (detections.yfitvalid == 1)
-    detections["valid"] = valid.to_numpy(int)
+    detections.loc[:, "valid"] = valid
 
     # Calculate FWHM as average of xstd and ystd.
-    detections["fwhm"] = 0.5 * (detections.xstd + detections.ystd)
+    detections.loc[:, "fwhm"] = 0.5 * (detections.xstd + detections.ystd)
 
     assert sub is not None
 
@@ -496,6 +491,8 @@ def extract_sources(filename: str | pathlib.Path, subtract_dark: bool = True):
         assume that the centre of the lower left pixel is ``(1, 1)``.
 
     """
+
+    from lvmguider.transformations import ag_to_master_frame
 
     hdus = fits.open(filename)
 

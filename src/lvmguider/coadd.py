@@ -16,7 +16,6 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
 from functools import partial
-from sqlite3 import OperationalError
 
 from typing import Any, cast
 
@@ -32,6 +31,7 @@ from astropy.table import Table
 from astropy.time import Time
 from astropy.wcs import WCS, FITSFixedWarning
 from astropy.wcs.utils import fit_wcs_from_points
+from psycopg2 import OperationalError
 from scipy.spatial import KDTree
 
 from sdsstools.time import get_sjd

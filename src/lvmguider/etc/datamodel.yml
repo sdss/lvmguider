@@ -3,6 +3,9 @@ PROC:
   CAMNAME: [null, 'Camera that took the image']
   DARKFILE: [null, 'Associated dark frame']
   GUIDERV: [null, 'Version of lvmguider']
+  PA: [null, '[deg] Position angle from WCS']
+  ZEROPT: [null, '[mag] Zero point of the LVM magnitude']
+  REFFILE: [null, 'Reference file for astrometric solution']
   WCSMODE: ['none', 'Source of astrometric solution']
 
 SOURCES:
@@ -40,11 +43,11 @@ SOURCES:
   x1: 'f8'
   xstd: 'f8'
   xrms: 'f8'
-  xfitvalid: 'f8'
+  xfitvalid: 'Int8'
   y1: 'f8'
   ystd: 'f8'
   yrms: 'f8'
-  yfitvalid: 'f8'
+  yfitvalid: 'Int8'
   valid: 'Int8'
   fwhm: 'f8'
   telescope: 'U4'
@@ -65,3 +68,36 @@ SOURCES:
   ap_flux: 'f4'
   ap_fluxerr: 'f4'
   zp: 'f8'
+
+GUIDERDATA:
+  GUIDERV: [null, 'Version of lvmguider']
+  TELESCOP: [null, 'Telescope that took the images']
+  GUIDMODE: ['acquition', 'Acquisition or guiding?']
+  DATE: [null, 'Date of file creation']
+  FRAMENO: [null, 'Frame number']
+  FILEEAST: [null, 'AG east camera file']
+  FILEWEST: [null, 'AG west camera file']
+  DIRNAME: [null, 'Original file path']
+  RAFIELD: [null, '[deg] Field RA']
+  DECFIELD: [null, '[deg] Field Dec']
+  RAMEAS: [null, '[deg] Measured RA position']
+  DECMEAS: [null, '[deg] Measured Dec position']
+  PAMEAS: [null, '[deg] Position angle from master frame WCS']
+  OFFRAMEA: [null, '[arcsec] RA measured offset']
+  OFFDEMEA: [null, '[arcsec] Dec measured offset']
+  OFFA0MEA: [null, '[arcsec] Motor axis 0 measured offset']
+  OFFA1MEA: [null, '[arcsec] Motor axis 1 measured offset']
+  OFFPAMEA: [null, '[arcsec] PA measured offset']
+  CORRAPPL: [True, 'Was the correction sent to the telescope?']
+  RACORR: [0.0, '[arcsec] RA applied correction']
+  DECORR: [0.0, '[arcsec] Dec applied correction']
+  PACORR: [0.0, '[arcsec] PA applied correction']
+  AX0CORR: [null, '[arcsec] Motor axis 0 applied offset']
+  AX1CORR: [null, '[arcsec] Motor axis 1 applied offset']
+  AX0KP: [null, 'Axis 0 PID K term']
+  AX0KI: [null, 'Axis 0 PID I term']
+  AX0KD: [null, 'Axis 0 PID D term']
+  AX1KP: [null, 'Axis 1 PID K term']
+  AX1KI: [null, 'Axis 1 PID I term']
+  AX1KD: [null, 'Axis 1 PID D term']
+  ZEROPT: [null, '[mag] Zero point of the LVM magnitude']

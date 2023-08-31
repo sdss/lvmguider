@@ -1,10 +1,10 @@
 ---
 pid:
-  ra:
+  ax0:
     Kp: 0.7
     Ki: 0.0
     Kd: 0.0
-  dec:
+  ax1:
     Kp: 0.7
     Ki: 0.0
     Kd: 0.0
