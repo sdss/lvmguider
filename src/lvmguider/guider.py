@@ -204,6 +204,7 @@ class Guider:
         default_guide_tolerance: float = self.config.get("guide_tolerance", 5)
         guide_tolerance = guide_tolerance or default_guide_tolerance
 
+        # Get astrometric solutions for individual cameras.
         camera_solutions: list[CameraSolution] = await asyncio.gather(
             *[
                 self.solve_camera(filename, force_astrometry_net=force_astrometry_net)
@@ -211,6 +212,7 @@ class Guider:
             ]
         )
 
+        # Initial guider solution.
         guider_solution = GuiderSolution(
             frameno,
             camera_solutions,
@@ -243,7 +245,7 @@ class Guider:
                     "frameno": frameno,
                     "camera": camera_solution.camera,
                     "solved": camera_solution.solved,
-                    "solution_mode": camera_solution.solution_mode,
+                    "wcs_mode": camera_solution.wcs_mode,
                     "pa": camera_solution.pa,
                     "zero_point": camera_solution.zero_point,
                 }
@@ -341,7 +343,7 @@ class Guider:
         dec: float = hdul["RAW"].header["DEC"]
 
         last_solution: CameraSolution | None = None
-        solution_mode = "astrometrynet"
+        wcs_mode = "astrometrynet"
 
         matched_sources = sources.copy()
 
@@ -361,17 +363,17 @@ class Guider:
                 and get_frameno(last_cs.ref_frame) in self.solutions
                 and last_cs.solved
             ):
-                solution_mode = "gaia"
+                wcs_mode = "gaia"
 
         camera_solution = CameraSolution(
             frameno,
             camname,
             file,
             sources=sources,
-            solution_mode=solution_mode,
+            wcs_mode=wcs_mode,
         )
 
-        if solution_mode == "astrometrynet":
+        if wcs_mode == "astrometrynet":
             # Basename path for the astrometry.net outputs.
             basename = file.name.replace(".fits.gz", "").replace(".fits", "")
             astrometrynet_output_root = str(file.parent / "astrometry" / basename)
@@ -394,7 +396,7 @@ class Guider:
                 camera_solution.pa = get_crota2(solution.wcs)
 
         else:
-            # This is now solution_mode="gaia".
+            # This is now wcs_mode="gaia".
 
             # Find the reference file we want to compare with.
             assert last_solution is not None
@@ -570,7 +572,7 @@ class Guider:
                     "PA": pa if not numpy.isnan(pa) else None,
                     "ZEROPT": zeropt if not numpy.isnan(zeropt) else None,
                     "REFFILE": reffile,
-                    "WCSMODE": solution.solution_mode,
+                    "WCSMODE": solution.wcs_mode,
                     **wcs_cards,
                 },
                 "SOURCES": solution.sources,
@@ -596,6 +598,9 @@ class Guider:
 
         gheader["RAFIELD"] = numpy.round(self.field_centre[0], 6)
         gheader["DECFIELD"] = numpy.round(self.field_centre[1], 6)
+        gheader["XMFPIX"] = self.pixel[0]
+        gheader["ZMFPIX"] = self.pixel[1]
+        gheader["SOLVED"] = guider_solution.solved
         gheader["RAMEAS"] = nan_or_none(guider_solution.pointing[0], 6)
         gheader["DECMEAS"] = nan_or_none(guider_solution.pointing[1], 6)
         gheader["PAMEAS"] = nan_or_none(guider_solution.pa, 4)
@@ -617,6 +622,9 @@ class Guider:
         gheader["AX1KI"] = self.pid_ax1.Ki
         gheader["AX1KD"] = self.pid_ax1.Kd
         gheader["ZEROPT"] = nan_or_none(guider_solution.zero_point, 3)
+
+        if guider_solution.mf_wcs:
+            gheader.extend(guider_solution.mf_wcs.to_header())
 
         guider_hdul = fits.HDUList([fits.PrimaryHDU()])
         guider_hdul.append(fits.ImageHDU(data=None, header=gheader, name="GUIDERDATA"))
