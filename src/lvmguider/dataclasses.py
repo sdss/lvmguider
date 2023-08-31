@@ -243,11 +243,21 @@ class FrameData:
     focusdt: float
     proc_header: fits.Header | None = None
     proc_file: pathlib.Path | None = None
-    guide_error: float | None = None
-    fwhm_median: float | None = None
-    fwhm_std: float | None = None
-    guide_mode: str = "guide"
+    astrometry_header: fits.Header | None = None
+    reference_file: pathlib.Path | None = None
+    fwhm_median: float = numpy.nan
+    fwhm_std: float = numpy.nan
+    guide_mode: str | None = None
+    sources: pandas.DataFrame | None = None
     stacked: bool = False
     wcs: WCS | None = None
-    wcs_mode: str | None = None
+    wcs_reprocessed: bool = False
+    pa: float = numpy.nan
+    zp: float = numpy.nan
     data: ARRAY_2D_F32 | None = None
+
+    @property
+    def wcs_mode(self):
+        """Returns the origin of the ``PROC`` WCS."""
+
+        return self.proc_header["WCSMODE"] if self.proc_header else None

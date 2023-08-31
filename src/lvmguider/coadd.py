@@ -25,9 +25,10 @@ from astropy.coordinates import SkyCoord
 from astropy.io import fits
 from astropy.stats import sigma_clip
 from astropy.table import Table
-from astropy.time import Time
+from astropy.time import Time, TimezoneInfo
 from astropy.wcs import WCS
 from astropy.wcs.utils import fit_wcs_from_points
+from matplotlib import pyplot as plt
 from psycopg2 import OperationalError
 from scipy.spatial import KDTree
 
@@ -207,7 +208,12 @@ def create_coadded_frame_header(
     return header
 
 
-def polyfit_with_sigclip(x: ARRAY_1D, y: ARRAY_2D, sigma: int = 3, deg: int = 1):
+def polyfit_with_sigclip(
+    x: ARRAY_1D_F32,
+    y: ARRAY_1D_F32,
+    sigma: int = 3,
+    deg: int = 1,
+):
     """Fits a polynomial to data after sigma-clipping the dependent variable."""
 
     valid = ~sigma_clip(y, sigma=sigma, masked=True).mask  # type:ignore
@@ -216,7 +222,7 @@ def polyfit_with_sigclip(x: ARRAY_1D, y: ARRAY_2D, sigma: int = 3, deg: int = 1)
 
 
 def reprocess_camera_data(
-    data: ARRAY_2D,
+    data: ARRAY_2D_F32,
     sources: pandas.DataFrame,
     proc_header: fits.Header,
     reference_file: str | pathlib.Path | None = None,
@@ -1034,7 +1040,7 @@ def coadd_camera_frames(
 
         fd.data = None
 
-    coadd: ARRAY_2D | None = None
+    coadd: ARRAY_2D_F32 | None = None
 
     if len(data_stack) == 0:
         if telescope == "spec":
