@@ -9,33 +9,26 @@
 from __future__ import annotations
 
 import pathlib
-import warnings
 from datetime import datetime
 
-import nptyping as npt
 import numpy
 import pandas
 from astropy.coordinates import EarthLocation, SkyCoord
-from astropy.io import fits
 from astropy.time import Time
 from astropy.utils.iers import conf
 from astropy.wcs import WCS
 from astropy.wcs.utils import fit_wcs_from_points
 from scipy.spatial import KDTree
 
+from lvmguider import config
 from lvmguider.astrometrynet import AstrometrySolution, astrometrynet_quick
-from lvmguider.extraction import extract_marginal
+from lvmguider.extraction import extract_sources
+from lvmguider.types import ARRAY_1D_F32, ARRAY_2D_F32
 
 
 # Prevent astropy from downloading data.
 conf.auto_download = False
 conf.iers_degraded_accuracy = "ignore"
-
-# Middle of an AG frame or full frame
-XZ_FULL_FRAME = (2500.0, 1000.0)
-XZ_AG_FRAME = (800.0, 550.0)
-
-ARRAY_2D_F32 = npt.NDArray[npt.Shape["*, *"], npt.Float32]
 
 
 def ag_to_master_frame(
@@ -112,6 +105,59 @@ def ag_to_master_frame(
     return (rsLoc.T, (th, Sx, Sz))
 
 
+def master_frame_to_ag(camera: str, locs: numpy.ndarray):
+    """Transforms the star locations from the master frame
+    to the internal pixel locations in the AG frame.
+
+    Adapted from Tom Herbst.
+
+    Parameters
+    ----------
+    camera:
+        Which AG camera: ``skyw-e``, ``skyw-w``, ``sci-c``, ``sci-e``, ``sci-w``,
+        ``skye-e``, ``skye-w``, or ``spec-e``.
+    locs
+        Numpy 2D array of (x, y) star locations.
+    Returns
+    -------
+    ag_loc
+        Array of corresponding star locations in the AG frame.
+
+    """
+
+    camera = camera.lower()
+
+    met_data = {
+        "skyw-w": [-89.85, -76.53, 430.64],
+        "skyw-e": [90.16, 3512.90, 433.74],
+        "sci-w": [-89.84, -28.26, 415.33],
+        "sci-e": [89.98, 3512.74, 447.25],
+        "spec-e": [89.60, 3193.11, 504.26],
+        "skye-w": [-90.69, -79.54, 436.38],
+        "skye-e": [89.71, 3476.00, 457.13],
+        "sci-c": [-89.995, 1707.4, 426.62],
+    }
+
+    # Pull out correct best-fit rotation and shift
+    bF = met_data[camera]
+    th, Sx, Sz = (numpy.radians(bF[0]), bF[1], bF[2])
+
+    # Rotation matrix
+    M = numpy.array(([numpy.cos(th), -numpy.sin(th)], [numpy.sin(th), numpy.cos(th)]))
+
+    # 2xnPts rotation offset
+    rOff = numpy.tile(numpy.array([[800.0, 550.0]]).transpose(), (1, locs.shape[0]))
+
+    # Make 2xnPts Sx,Sz offset matrix
+    off = numpy.tile(numpy.array([[Sx, Sz]]).transpose(), (1, locs.shape[0]))
+
+    # Transform MF --> AG. See Single_Sensor_Solve doc
+    rsLoc = numpy.dot(M, (locs.T - rOff - off)) + rOff
+
+    # Return calculated positions (need to transpose for standard layout)
+    return rsLoc.T
+
+
 def solve_locs(
     locs: pandas.DataFrame,
     ra: float,
@@ -174,13 +220,13 @@ def solve_locs(
     radius = 5  # Search radius in degrees
 
     if full_frame:
-        midX, midZ = XZ_FULL_FRAME  # Middle of Master Frame
+        midX, midZ = config["xz_full_frame"]  # Middle of Master Frame
         index_paths_default = {
             5200: "/data/astrometrynet/5200",
             4100: "/data/astrometrynet/4100",
         }
     else:
-        midX, midZ = XZ_AG_FRAME  # Middle of AG camera Frame
+        midX, midZ = config["xz_ag_frame"]  # Middle of AG camera Frame
         index_paths_default = {5200: "/data/astrometrynet/5200"}
 
     index_paths = index_paths or index_paths_default
@@ -345,329 +391,52 @@ def delta_radec2mot_axis(
     return saz_diff_arcsec, sel_diff_arcsec
 
 
-def solve_camera(
-    file: str | pathlib.Path,
-    telescope: str | None = None,
-    reextract_sources: bool = False,
+def solve_camera_with_astrometrynet(
+    input: pandas.DataFrame | pathlib.Path | str,
+    ra: float,
+    dec: float,
     solve_locs_kwargs: dict | None = None,
-) -> dict[str, AstrometrySolution]:
-    """Astrometrically solves a single camera, potentially extracting sources.
+) -> AstrometrySolution:
+    """Astrometrically solves a single camera using ``astrometry.net``.
 
     Parameters
     ----------
-    file
-        The AG FITS file to solve.
-    telescope
-        The telescope to which the exposure is associated. If `None`, it
-        is determined from the header.
-    reextract_sources
-        Runs the source extraction algorithm again. If `False`, extraction is only
-        done if a ``SOURCES`` extensions is not found in the files.
+    input
+        The input data. This is normally a Pandas data frame, the result of
+        running `.extract_sources` on an image. It can also be a path to
+        a file, in which case sources will be extracted here.
+    ra,dec
+        An initial guess of the RA and Dec of the centre of the camera.
     solve_locs_kwargs
         A dictionary of kwargs to pass to `.solve_locs`.
 
     Returns
     -------
-    solutions
-       A dictionary of camera name to astrometric solution.
+    solution
+       An object containing the astrometric solution.
 
     """
 
     solve_locs_kwargs = solve_locs_kwargs if solve_locs_kwargs is not None else {}
 
-    file = pathlib.Path(file).absolute()
-    header = fits.getheader(file, "RAW")
-    camname: str = header["CAMNAME"].lower()
-    ra: float = header["RA"]
-    dec: float = header["DEC"]
-    telescope = telescope or header["TELESCOP"].lower()
+    if isinstance(input, (str, pathlib.Path)):
+        input = extract_sources(input)
 
-    if reextract_sources is False:
-        try:
-            sources = pandas.DataFrame(fits.getdata(file, "SOURCES"))
-        except KeyError:
-            warnings.warn("SOURCES ext not found. Extracting sources", UserWarning)
-            return solve_camera(
-                file,
-                telescope=telescope,
-                reextract_sources=True,
-                solve_locs_kwargs=solve_locs_kwargs,
-            )
-    else:
-        hdul = fits.open(file)
-        if "PROC" in hdul:
-            data = hdul["PROC"].data
-        else:
-            data = hdul["RAW"].data
-        sources = extract_marginal(data)
-        sources["camera"] = camname
+    sources = input.copy()
 
-    solve_locs_kwargs_cam = solve_locs_kwargs.copy()
-    if "output_root" not in solve_locs_kwargs_cam:
-        # Generate root path for astrometry files.
-        basename = file.name.replace(".fits.gz", "").replace(".fits", "")
-        output_root = str(file.parent / "astrometry" / basename)
-        solve_locs_kwargs_cam["output_root"] = output_root
+    locs_i = sources.loc[:, ["x", "y", "flux"]].copy()
+    locs_i.loc[:, ["x", "y"]] -= 0.5  # We want centre of pixel to be (0.5, 0.5)
 
     camera_solution = solve_locs(
-        sources.loc[:, ["x", "y", "flux"]],
+        locs_i,
         ra,
         dec,
         full_frame=False,
         raise_on_unsolved=False,
-        **solve_locs_kwargs_cam,
+        **solve_locs_kwargs.copy(),
     )
 
-    if camera_solution.solved and camera_solution.stars is not None:
-        camera = f"{telescope}-{camname[0]}"
-        xy = camera_solution.stars.loc[:, ["field_x", "field_y"]].to_numpy()
-        mf_locs, _ = ag_to_master_frame(camera, xy)
-        camera_solution.stars.loc[:, ["x_master", "y_master"]] = mf_locs
-
-    return {camname: camera_solution}
-
-
-def wcs_from_single_cameras(
-    solutions: dict[str, AstrometrySolution],
-    telescope: str,
-) -> WCS:
-    """Determines the telescope pointing using individual AG frames.
-
-    The main difference between this function and `.solve_from_files` is
-    that here we solve each AG frame independently with astrometry.net and
-    then use those solutions to generate a master frame WCS.
-
-    Parameters
-    ----------
-    camera_solutions
-        A dictionary of the astrometric solutions for each camera.
-    telescope
-        The telescope to which the exposures are associated.
-
-    Returns
-    -------
-    wcs
-        The wcs of the master frame astrometric solution.
-
-    """
-
-    nsolved = len([sol for sol in solutions.values() if sol.solved])
-    if nsolved == 0:
-        raise ValueError("No solutions found.")
-
-    # Check for repeat images, in which East and West are almost identical. In
-    # this case the coordinates of their central pixels will also be very close,
-    # instead of being about a degree apart.
-    wcs_east = solutions["east"].wcs if "east" in solutions else None
-    wcs_west = solutions["west"].wcs if "west" in solutions else None
-    if telescope != "spec" and wcs_east is not None and wcs_west is not None:
-        east_cen = wcs_east.pixel_to_world(*XZ_AG_FRAME)
-        west_cen = wcs_west.pixel_to_world(*XZ_AG_FRAME)
-        ew_separation = east_cen.separation(west_cen).arcsec
-        if ew_separation < 3000:
-            raise ValueError("Found potential double image.")
-
-    # Build a master frame WCS from the individual WCS solutions. We use astropy's
-    # fit_wcs_from_points routine, where we use the coordinates of the stars
-    # identified by astrometry.net and their corresponding xy pixels on the master
-    # frame (as determined above with ag_to_master_frame).
-    all_stars = pandas.concat(
-        [ss.stars for ss in solutions.values() if ss.stars is not None]
-    )
-    if len(all_stars) == 0:
-        raise ValueError("No solved fields found.")
-
-    skycoords = SkyCoord(
-        ra=all_stars.index_ra,
-        dec=all_stars.index_dec,
-        unit="deg",
-        frame="icrs",
-    )
-    wcs = fit_wcs_from_points((all_stars.x_master, all_stars.y_master), skycoords)
-
-    return wcs
-
-
-def master_frame_to_ag(camera: str, locs: numpy.ndarray):
-    """Transforms the star locations from the master frame
-    to the internal pixel locations in the AG frame.
-
-    Adapted from Tom Herbst.
-
-    Parameters
-    ----------
-    camera:
-        Which AG camera: ``skyw-e``, ``skyw-w``, ``sci-c``, ``sci-e``, ``sci-w``,
-        ``skye-e``, ``skye-w``, or ``spec-e``.
-    locs
-        Numpy 2D array of (x, y) star locations.
-    Returns
-    -------
-    ag_loc
-        Array of corresponding star locations in the AG frame.
-
-    """
-
-    camera = camera.lower()
-
-    met_data = {
-        "skyw-w": [-89.85, -76.53, 430.64],
-        "skyw-e": [90.16, 3512.90, 433.74],
-        "sci-w": [-89.84, -28.26, 415.33],
-        "sci-e": [89.98, 3512.74, 447.25],
-        "spec-e": [89.60, 3193.11, 504.26],
-        "skye-w": [-90.69, -79.54, 436.38],
-        "skye-e": [89.71, 3476.00, 457.13],
-        "sci-c": [-89.995, 1707.4, 426.62],
-    }
-
-    # Pull out correct best-fit rotation and shift
-    bF = met_data[camera]
-    th, Sx, Sz = (numpy.radians(bF[0]), bF[1], bF[2])
-
-    # Rotation matrix
-    M = numpy.array(([numpy.cos(th), -numpy.sin(th)], [numpy.sin(th), numpy.cos(th)]))
-
-    # 2xnPts rotation offset
-    rOff = numpy.tile(numpy.array([[800.0, 550.0]]).transpose(), (1, locs.shape[0]))
-
-    # Make 2xnPts Sx,Sz offset matrix
-    off = numpy.tile(numpy.array([[Sx, Sz]]).transpose(), (1, locs.shape[0]))
-
-    # Transform MF --> AG. See Single_Sensor_Solve doc
-    rsLoc = numpy.dot(M, (locs.T - rOff - off)) + rOff
-
-    # Return calculated positions (need to transpose for standard layout)
-    return rsLoc.T
-
-
-def calculate_guide_offset(
-    sources: pandas.DataFrame,
-    telescope: str,
-    reference_sources: pandas.DataFrame,
-    reference_wcs: WCS,
-    max_separation: float = 5,
-) -> tuple[tuple[float, float], tuple[float, float], float, pandas.DataFrame]:
-    """Determines the guide offset by matching sources to reference images.
-
-    Parameters
-    ----------
-    sources
-        A list of sources extracted from the AG frames. Must contain a column
-        ``camera`` with the camera associated with each source.
-    telescope
-        The telescope associated with these images.
-    reference_sources
-        As ``sources``, a list of extracted detections from the reference frames.
-    reference_wcs
-        The WCS of the master frame corresponding to the reference images.
-    max_separation
-        Maximum separation between reference and test sources, in pixels.
-
-    Returns
-    -------
-    offset_pix
-        A tuple of x/y pixel offsets, in arcsec. This is the offset to
-        go from the measured sources to reference sources.
-    offset_radec
-        A tuple of RA and Dec offsets, in arcsec.
-    separation
-        The absolute separation between the reference frame and the
-        new set of sources, in arcsec.
-    matches
-        A Pandas data frame with the matches between test and reference sources.
-
-    """
-
-    sources["camera"] = sources["camera"].astype(str)
-    reference_sources["camera"] = reference_sources["camera"].astype(str)
-
-    matches: pandas.DataFrame | None = None
-
-    cameras = sources["camera"].unique()
-    for camera in cameras:
-        cam_ref_sources = reference_sources.loc[reference_sources["camera"] == camera]
-        cam_sources = sources.loc[sources["camera"] == camera]
-
-        if len(cam_ref_sources) == 0 or len(cam_sources) == 0:
-            continue
-
-        # Create a KDTree with the reference pixels.
-        tree = KDTree(cam_ref_sources.loc[:, ["x", "y"]].to_numpy())
-
-        # Find nearest neighbours
-        dd, ii = tree.query(cam_sources.loc[:, ["x", "y"]].to_numpy())
-
-        # Select valid matches.
-        valid = dd < max_separation
-
-        # Get the valid xy in the test and reference source lists.
-        cam_matches = cam_sources.loc[valid, ["x", "y"]]
-        cam_ref_matches = cam_ref_sources.iloc[ii[valid]]
-        cam_ref_matches = cam_ref_matches.loc[:, ["x", "y"]]
-
-        # Calculate MF coordinates for test and references pixels.
-        camname = f"{telescope}-{camera[0]}"
-        cam_matches_mf, _ = ag_to_master_frame(camname, cam_matches.to_numpy())
-        cam_ref_matches_mf, _ = ag_to_master_frame(camname, cam_ref_matches.to_numpy())
-
-        # Build a DF with the MF coordinates. Add the camera name and concatenate
-        # to build a main DF with all the matches for both cameras.
-
-        matches_array = numpy.hstack(
-            (
-                cam_matches,
-                cam_ref_matches,
-                cam_matches_mf,
-                cam_ref_matches_mf,
-            )
-        )
-
-        matches_df = pandas.DataFrame(
-            matches_array,
-            columns=[
-                "x",
-                "y",
-                "xref",
-                "yref",
-                "x_mf",
-                "y_mf",
-                "xref_mf",
-                "yref_mf",
-            ],
-        )
-        matches_df["camera"] = camname
-
-        if matches is None:
-            matches = matches_df
-        else:
-            matches = pandas.concat([matches, matches_df])
-
-    if matches is None:
-        raise ValueError("No matches found.")
-
-    # Determine offsets in xy.
-    offset_x = matches.xref_mf - matches.x_mf
-    offset_y = matches.yref_mf - matches.y_mf
-
-    # Rotate to align with RA/Dec
-    PC = reference_wcs.wcs.pc if reference_wcs.wcs.has_pc() else reference_wcs.wcs.cd
-    offset_ra_d, offset_dec_d = PC @ numpy.array([offset_x, offset_y])
-
-    # To arcsec.
-    offset_ra_arcsec = numpy.mean(offset_ra_d * 3600)
-    offset_dec_arcsec = numpy.mean(offset_dec_d * 3600)
-
-    # Calculate separation. This is somewhat approximate but good enough
-    # for small angles.
-    sep_arcsec = numpy.sqrt(offset_ra_arcsec**2 + offset_dec_arcsec**2)
-
-    return (
-        (float(numpy.mean(offset_x)), float(numpy.mean(offset_y))),
-        (offset_ra_arcsec, offset_dec_arcsec),
-        sep_arcsec,
-        matches,
-    )
+    return camera_solution
 
 
 def get_crota2(wcs: WCS):
@@ -686,3 +455,115 @@ def get_crota2(wcs: WCS):
 
     crota2 = numpy.degrees(numpy.arctan2(-cd[0, 1], cd[1, 1]))
     return crota2 if crota2 > 0 else crota2 + 360
+
+
+def match_with_gaia(
+    wcs: WCS,
+    sources: pandas.DataFrame,
+    gaia_sources: pandas.DataFrame | None = None,
+    max_separation: float = 2,
+    concat: bool = False,
+) -> tuple[pandas.DataFrame, int]:
+    """Match detections to Gaia sources using nearest neighbours.
+
+    Parameters
+    ----------
+    wcs
+        The WCS associated with the detections. Used to determine pixels on the
+        image frame.
+    sources
+        A data frame with extracted sources.
+    gaia_sources
+        A data frame with Gaia sources to be matched. If `None`, Gaia sources
+        will be queried from the database.
+    max_separation
+        Maximum separation between detections and matched Gaia sources, in arcsec.
+    concat
+        If `True`, the returned data frame is the input ``sources`` concatenated
+        with the match information.
+
+    Returns
+    -------
+    matches
+        A tuple with the matched data frame and the number of matches.
+
+    """
+
+    from lvmguider.tools import get_gaia_sources
+
+    PIXSCALE = 1.009  # arcsec/pix
+
+    # Epoch difference with Gaia DR3.
+    GAIA_EPOCH = 2016.0
+    epoch = Time.now().jyear
+    epoch_diff = epoch - GAIA_EPOCH
+
+    if gaia_sources is None:
+        gaia_sources = get_gaia_sources(wcs)
+
+    sources = sources.copy()
+    gaia_sources = gaia_sources.copy()
+
+    # Match detections with Gaia sources. Take into account proper motions.
+    ra_gaia: ARRAY_1D_F32 = gaia_sources.ra.to_numpy(numpy.float32)
+    dec_gaia: ARRAY_1D_F32 = gaia_sources.dec.to_numpy(numpy.float32)
+    pmra: ARRAY_1D_F32 = gaia_sources.pmra.to_numpy(numpy.float32)
+    pmdec: ARRAY_1D_F32 = gaia_sources.pmdec.to_numpy(numpy.float32)
+
+    pmra_gaia = numpy.nan_to_num(pmra) / 1000 / 3600  # deg/yr
+    pmdec_gaia = numpy.nan_to_num(pmdec) / 1000 / 3600
+
+    ra_epoch = ra_gaia + pmra_gaia / numpy.cos(numpy.radians(dec_gaia)) * epoch_diff
+    dec_epoch = dec_gaia + pmdec_gaia * epoch_diff
+
+    gaia_sources["ra_epoch"] = ra_epoch
+    gaia_sources["dec_epoch"] = dec_epoch
+
+    # Calculate x/y pixels of the Gaia detections. We use origin 0 but the
+    # sep/SExtractor x/y in sources assume that the centre of the lower left
+    # pixel is (1,1) so we adjust the returned pixel values.
+    xpix, ypix = wcs.wcs_world2pix(ra_epoch, dec_epoch, 0)
+    gaia_sources["xpix"] = xpix + 0.5
+    gaia_sources["ypix"] = ypix + 0.5
+
+    tree = KDTree(gaia_sources.loc[:, ["xpix", "ypix"]].to_numpy())
+    dd, ii = tree.query(sources.loc[:, ["x", "y"]].to_numpy())
+    valid = dd < max_separation
+
+    # Get Gaia rows for the valid matches. Change their indices to those
+    # of their matching sources (which are 0..len(sources)-1 since we reindexed).
+    matches: pandas.DataFrame = gaia_sources.iloc[ii[valid]]
+    assert isinstance(matches, pandas.DataFrame)
+
+    matches.index = pandas.Index(numpy.arange(len(ii))[valid])
+    matches.drop(columns=["xpix", "ypix"], inplace=True)
+
+    dx = matches.xpix - sources.x
+    dy = matches.ypix - sources.y
+    matches["match_sep"] = numpy.hypot(dx, dy) * PIXSCALE
+
+    if concat:
+        sources.loc[matches.index, matches.columns] = matches
+        return sources, valid.sum()
+
+    return matches, valid.sum()
+
+
+def wcs_from_gaia(sources: pandas.DataFrame) -> WCS:
+    """Creates a WCS from Gaia-matched sources."""
+
+    # Get useful columns. Drop NaNs.
+    matched_sources = sources.loc[:, ["ra_epoch", "dec_epoch", "x", "y"]]
+    matched_sources.dropna(inplace=True)
+
+    if len(matched_sources) < 5:
+        raise RuntimeError("Insufficient number of Gaia matches.")
+
+    skycoords = SkyCoord(
+        ra=matched_sources.ra_epoch,
+        dec=matched_sources.dec_epoch,
+        unit="deg",
+        frame="icrs",
+    )
+
+    return fit_wcs_from_points((matched_sources.x, matched_sources.y), skycoords)

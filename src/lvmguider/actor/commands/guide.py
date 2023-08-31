@@ -47,18 +47,6 @@ def is_stopping(command: GuiderCommand):
     help="The pixel of the master frame to use as pointing reference.",
 )
 @click.option(
-    "--mode",
-    type=str,
-    default="auto",
-    help="The guiding mode: auto, acquire, guide.",
-)
-@click.option(
-    "--reference-frame",
-    type=int,
-    help="The sequence number of the AG frames to use for guiding. "
-    "Implies --mode guide.",
-)
-@click.option(
     "--guide-tolerance",
     type=float,
     help="The acquisition tolerance, in arcsec, after which guiding will be started.",
@@ -71,13 +59,6 @@ def is_stopping(command: GuiderCommand):
     help="Whether apply the measured corrections.",
 )
 @click.option(
-    "--use-motor-offsets/--no-use-motor-offsets",
-    is_flag=True,
-    default=True,
-    show_default=True,
-    help="Whether to apply corrections as motor offsets.",
-)
-@click.option(
     "--one",
     is_flag=True,
     help="Do one single iteration and exit.",
@@ -88,11 +69,8 @@ async def guide(
     dec: float,
     exposure_time: float = 5.0,
     reference_pixel: tuple[float, float] | None = None,
-    mode: str = "auto",
-    reference_frame: int | None = None,
     guide_tolerance: float | None = None,
     apply_corrections: bool = True,
-    use_motor_offsets: bool = True,
     one: bool = False,
 ):
     """Starts the guide loop."""
@@ -103,27 +81,8 @@ async def guide(
     guider = Guider(command, (ra, dec), pixel=reference_pixel)
     command.actor.guider = guider
 
-    if reference_frame is not None:
-        mode = "guide"
-        guider.set_reference_frames(reference_frame)
-
-    if mode not in ["auto", "guide", "acquire"]:
-        return command.fail("Invalid mode. Use mode auto, guide, or acquire.")
-
-    if mode == "guide" and reference_frame is None:
-        return command.fail("--mode guide requires using --reference-frame.")
-
     if actor.status & GuiderStatus.NON_IDLE:
         return command.finish("Guider is not idle. Stop the guide loop.")
-
-    if mode == "auto" or mode == "acquire":
-        actor.status = GuiderStatus.ACQUIRING
-    else:
-        actor.status = GuiderStatus.GUIDING
-
-    # If we are in auto mode, we consider we are drifting until we switch to guiding.
-    if mode == "auto":
-        actor.status |= GuiderStatus.DRIFTING
 
     # Force the cameras to check the last image.
     command.actor.cameras.reset_seqno()
@@ -133,10 +92,8 @@ async def guide(
             actor.guide_task = asyncio.create_task(
                 guider.guide_one(
                     exposure_time,
-                    mode=mode,
                     guide_tolerance=guide_tolerance,
                     apply_correction=apply_corrections,
-                    use_motor_offsets=use_motor_offsets,
                 )
             )
             await actor.guide_task

@@ -15,6 +15,7 @@ import numpy
 import pandas
 import seaborn
 import sep
+from astropy.io import fits
 from astropy.modeling.fitting import LevMarLSQFitter
 from astropy.modeling.models import Gaussian1D
 from matplotlib import pyplot as plt
@@ -22,7 +23,7 @@ from matplotlib.backends.backend_pdf import PdfPages
 from numpy.typing import NDArray
 
 
-__all__ = ["sextractor_quick"]
+__all__ = ["sextractor_quick", "extract_marginal", "extract_sources"]
 
 
 seaborn.set_color_codes("deep")
@@ -77,6 +78,7 @@ def sextractor_quick(
         df = df.loc[filter]
 
     df = df.loc[df.tnpix > minarea]
+    df = df.reset_index(drop=True)
 
     if return_background:
         return df, background
@@ -275,20 +277,29 @@ def extract_marginal(
 
     """
 
+    from lvmguider.tools import get_model
+
+    # Create an initial, empty sources DF with all the columns and types.
+    model = get_model("SOURCES")
+    detections = pandas.DataFrame({k: pandas.Series(dtype=v) for k, v in model.items()})
+
     data = data.astype("f8")
 
     sextractor_quick_options.pop("threshold", None)
     sextractor_quick_options.pop("return_background", None)
 
-    detections, back = sextractor_quick(
+    sex_detections, back = sextractor_quick(
         data,
         threshold=threshold,
         return_background=True,
         **sextractor_quick_options,
     )
 
-    assert isinstance(detections, pandas.DataFrame)
+    assert isinstance(sex_detections, pandas.DataFrame)
     assert isinstance(back, numpy.ndarray)
+
+    detections[sex_detections.columns] = sex_detections
+    detections.loc[:, "valid"] = 0
 
     if exclude_border:
         detections = detections.loc[
@@ -304,12 +315,6 @@ def extract_marginal(
         detections = detections.head(max_detections)
 
     if len(detections) == 0:
-        # Add new columns. If there are no detections at least the columns will exist
-        # on an empty data frame and the overall shape won't change.
-        cols = ["x1", "xstd", "xrms", "y1", "ystd", "yrms", "xfitvalid", "yfitvalid"]
-        detections[cols] = numpy.nan
-        detections["valid"] = 0
-
         return detections
 
     back = sep.Background(data)
@@ -333,13 +338,13 @@ def extract_marginal(
             axis=1,
         )
 
-        detections = pandas.concat([detections, fit_df], axis=1)
+        detections.loc[:, fit_df.columns] = fit_df
 
     valid = (detections.xfitvalid == 1) & (detections.yfitvalid == 1)
-    detections["valid"] = valid.to_numpy(int)
+    detections.loc[:, "valid"] = valid
 
     # Calculate FWHM as average of xstd and ystd.
-    detections["fwhm"] = 0.5 * (detections.xstd + detections.ystd)
+    detections.loc[:, "fwhm"] = 0.5 * (detections.xstd + detections.ystd)
 
     assert sub is not None
 
@@ -465,3 +470,59 @@ def _plot_one_page(
 
     pdf.savefig(figure)
     plt.close(figure)
+
+
+def extract_sources(filename: str | pathlib.Path, subtract_dark: bool = True):
+    """High level function that performs dark subtraction and extraction.
+
+    Parameters
+    ----------
+    filename
+        The file from which to extract sources.
+    subtract_dark
+        If a ``PROC`` extension is present and it defines a ``DARKFILE``,
+        the data is dark-subtracted before extracting sources.
+
+    Returns
+    -------
+    sources
+        A data frame with the extracted sources along with their master frame
+        coordinates. Note that in SExtractor fashion, all the pixel coordinates
+        assume that the centre of the lower left pixel is ``(1, 1)``.
+
+    """
+
+    from lvmguider.transformations import ag_to_master_frame
+
+    hdus = fits.open(filename)
+
+    # Initially use raw data.
+    data = hdus["RAW"].data / hdus["RAW"].header["EXPTIME"]
+
+    if subtract_dark and "PROC" in hdus:
+        darkfile = hdus["PROC"].header["DARKFILE"]
+        if darkfile and pathlib.Path(darkfile).exists():
+            dark_data = fits.getdata(darkfile).astype(numpy.float32)
+            dark_exptime = fits.getheader(darkfile, "RAW")["EXPTIME"]
+
+            data = data - (dark_data / dark_exptime)
+
+    sources = extract_marginal(
+        data,
+        box_size=31,
+        threshold=3.0,
+        max_detections=50,
+        sextractor_quick_options={"minarea": 5},
+    )
+
+    camname = hdus["RAW"].header["CAMNAME"]
+    telescope = hdus["RAW"].header["TELESCOP"]
+
+    sources["camera"] = camname
+    sources["telescope"] = telescope
+
+    xy = sources.loc[:, ["x", "y"]].to_numpy()
+    mf_locs, _ = ag_to_master_frame(f"{telescope}-{camname[0]}", xy)
+    sources.loc[:, ["x_mf", "y_mf"]] = mf_locs
+
+    return sources

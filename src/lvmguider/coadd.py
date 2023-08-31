@@ -11,15 +11,11 @@ from __future__ import annotations
 import logging
 import os.path
 import pathlib
-import warnings
 from collections import defaultdict
-from dataclasses import dataclass
 from functools import partial
-from sqlite3 import OperationalError
 
 from typing import Any
 
-import nptyping as npt
 import numpy
 import pandas
 import peewee
@@ -29,29 +25,22 @@ from astropy.coordinates import SkyCoord
 from astropy.io import fits
 from astropy.stats import sigma_clip
 from astropy.table import Table
-from astropy.time import Time, TimezoneInfo
-from astropy.wcs import WCS, FITSFixedWarning
+from astropy.time import Time
+from astropy.wcs import WCS
 from astropy.wcs.utils import fit_wcs_from_points
-from matplotlib import pyplot as plt
+from psycopg2 import OperationalError
 from scipy.spatial import KDTree
 
 from sdsstools.time import get_sjd
 
 from lvmguider import config
 from lvmguider import log as llog
+from lvmguider.dataclasses import FrameData
 from lvmguider.extraction import extract_marginal
 from lvmguider.tools import get_db_connection, get_frameno, get_proc_path
-from lvmguider.transformations import (
-    XZ_AG_FRAME,
-    ag_to_master_frame,
-    get_crota2,
-    solve_locs,
-)
+from lvmguider.transformations import ag_to_master_frame, get_crota2, solve_locs
+from lvmguider.types import ARRAY_1D_F32, ARRAY_2D_F32, ARRAY_2D_U16
 
-
-ARRAY_2D_UINT = npt.NDArray[npt.Shape["*, *"], npt.UInt16]
-ARRAY_2D = npt.NDArray[npt.Shape["*, *"], npt.Float32]
-ARRAY_1D = npt.NDArray[npt.Shape["*"], npt.Float32]
 
 COADD_CAMERA_DEFAULT_PATH = (
     "coadds/lvm.{telescope}.agcam.{camname}.coadd_{frameno0:08d}_{frameno1:08d}.fits"
@@ -65,45 +54,8 @@ DRIFT_WARN_THRESHOLD: float = 0.1
 
 _GAIA_CACHE: tuple[SkyCoord, pandas.DataFrame] | None = None
 
-
-warnings.simplefilter("ignore", category=FITSFixedWarning)
-
-
-@dataclass
-class FrameData:
-    """Data associated with a frame."""
-
-    file: pathlib.Path
-    raw_header: fits.Header
-    frameno: int
-    date_obs: Time
-    sjd: int
-    camera: str
-    telescope: str
-    exptime: float
-    image_type: str
-    kmirror_drot: float
-    focusdt: float
-    proc_header: fits.Header | None = None
-    proc_file: pathlib.Path | None = None
-    astrometry_header: fits.Header | None = None
-    reference_file: pathlib.Path | None = None
-    fwhm_median: float = numpy.nan
-    fwhm_std: float = numpy.nan
-    guide_mode: str | None = None
-    sources: pandas.DataFrame | None = None
-    stacked: bool = False
-    wcs: WCS | None = None
-    wcs_reprocessed: bool = False
-    pa: float = numpy.nan
-    zp: float = numpy.nan
-    data: ARRAY_2D | None = None
-
-    @property
-    def wcs_mode(self):
-        """Returns the origin of the ``PROC`` WCS."""
-
-        return self.proc_header["WCSMODE"] if self.proc_header else None
+XZ_AG_FRAME = config["xz_ag_frame"]
+XZ_FULL_FRAME = config["xz_full_frame"]
 
 
 def create_coadded_frame_header(
@@ -526,10 +478,10 @@ def match_with_gaia(
     epoch_diff = epoch - GAIA_EPOCH
 
     # Match detections with Gaia sources. Take into account proper motions.
-    ra_gaia: ARRAY_1D = gaia_sources.ra.to_numpy(numpy.float32)
-    dec_gaia: ARRAY_1D = gaia_sources.dec.to_numpy(numpy.float32)
-    pmra: ARRAY_1D = gaia_sources.pmra.to_numpy(numpy.float32)
-    pmdec: ARRAY_1D = gaia_sources.pmdec.to_numpy(numpy.float32)
+    ra_gaia: ARRAY_1D_F32 = gaia_sources.ra.to_numpy(numpy.float32)
+    dec_gaia: ARRAY_1D_F32 = gaia_sources.dec.to_numpy(numpy.float32)
+    pmra: ARRAY_1D_F32 = gaia_sources.pmra.to_numpy(numpy.float32)
+    pmdec: ARRAY_1D_F32 = gaia_sources.pmdec.to_numpy(numpy.float32)
 
     pmra_gaia = numpy.nan_to_num(pmra) / 1000 / 3600  # deg/yr
     pmdec_gaia = numpy.nan_to_num(pmdec) / 1000 / 3600
@@ -566,7 +518,7 @@ def match_with_gaia(
 
 
 def estimate_zeropoint(
-    coadd_image: ARRAY_2D,
+    coadd_image: ARRAY_2D_F32,
     sources: pandas.DataFrame,
     gain: float = 5,
     ap_radius: float = 6,
@@ -864,11 +816,11 @@ def get_framedata(
 
         # If we have not yet loaded the dark frame, get it and get the
         # normalised dark.
-        dark: ARRAY_2D | None = None
+        dark: ARRAY_2D_F32 | None = None
         if proc_header and proc_header.get("DARKFILE", None):
             hdul_dark = fits.open(str(proc_header["DARKFILE"]))
 
-            dark_data: ARRAY_2D_UINT = hdul_dark["RAW"].data.astype(numpy.float32)
+            dark_data: ARRAY_2D_U16 = hdul_dark["RAW"].data.astype(numpy.float32)
             dark_exptime: float = hdul_dark["RAW"].header["EXPTIME"]
 
             dark = dark_data / dark_exptime
@@ -877,7 +829,7 @@ def get_framedata(
 
         # Get the frame data and exposure time. Calculate the counts per second.
         exptime = float(hdul["RAW"].header["EXPTIME"])
-        data: ARRAY_2D = hdul["RAW"].data.astype(numpy.float32) / exptime
+        data: ARRAY_2D_F32 = hdul["RAW"].data.astype(numpy.float32) / exptime
 
         # If we have a dark frame, subtract it now. If not fit a
         # background model and subtract that.
@@ -1072,7 +1024,7 @@ def coadd_camera_frames(
 
     frame_data = list(map(get_framedata_partial, paths))
 
-    data_stack: list[ARRAY_2D] = []
+    data_stack: list[ARRAY_2D_F32] = []
     for fd in frame_data:
         if fd.data is not None and fd.stacked is True:
             if fd.guide_mode == "acquisition":

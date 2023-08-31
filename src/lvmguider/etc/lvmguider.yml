@@ -1,16 +1,19 @@
 ---
 pid:
-  ra:
+  ax0:
     Kp: 0.7
     Ki: 0.0
     Kd: 0.0
-  dec:
+  ax1:
     Kp: 0.7
     Ki: 0.0
     Kd: 0.0
 
 max_correction: 3600
 guide_tolerance: 3
+
+xz_full_frame: [2500.0, 1000.0]
+xz_ag_frame: [800.0, 550.0]
 
 offset:
   axis_error: 1.0
