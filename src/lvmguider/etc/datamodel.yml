@@ -2,6 +2,7 @@ PROC:
   TELESCOP: [null, 'Telescope that took the image']
   CAMNAME: [null, 'Camera that took the image']
   DARKFILE: [null, 'Associated dark frame']
+  DIRNAME: [null, 'Original file path']
   GUIDERV: [null, 'Version of lvmguider']
   PA: [null, '[deg] Position angle from WCS']
   ZEROPT: [null, '[mag] Zero point of the LVM magnitude']
@@ -57,17 +58,17 @@ SOURCES:
   source_id: 'Int64'
   ra: 'f8'
   dec: 'f8'
-  pmra: 'f8'
-  pmdec: 'f8'
-  phot_g_mean_mag: 'f8'
+  pmra: 'f4'
+  pmdec: 'f4'
+  phot_g_mean_mag: 'f4'
   ra_epoch: 'f4'
   dec_epoch: 'f4'
-  lmag_ab: 'f8'
-  lflux: 'f8'
-  match_sep: 'f8'
+  lmag_ab: 'f4'
+  lflux: 'f4'
+  match_sep: 'f4'
   ap_flux: 'f4'
   ap_fluxerr: 'f4'
-  zp: 'f8'
+  zp: 'f4'
 
 GUIDERDATA:
   GUIDERV: [null, 'Version of lvmguider']
