@@ -83,11 +83,11 @@ class Guider:
         self.telescope = command.actor.telescope
         self.cameras = command.actor.cameras
 
-        self.field_centre = field_centre
-        self.pixel = pixel or self.config["xz_full_frame"]
-
         self.config = command.actor.config
         self.guide_tolerance = self.config["guide_tolerance"]
+
+        self.field_centre = field_centre
+        self.pixel = pixel or self.config["xz_full_frame"]
 
         # Use negative values because we apply the correction in the
         # same direction as the measured offset between pointing and
@@ -383,7 +383,7 @@ class Guider:
                 sources,
                 ra=ra,
                 dec=dec,
-                solve_locs_kwargs_cam={"output_root": astrometrynet_output_root},
+                solve_locs_kwargs={"output_root": astrometrynet_output_root},
             )
 
             # Now match with Gaia.
@@ -580,11 +580,12 @@ class Guider:
 
             coros.append(run_in_executor(update_fits, file, proc_update))
 
-        gheader = fits.Header(get_model("GUIDERDATA"))
+        model = get_model("GUIDERDATA")
+        gheader = fits.Header([(k, *v) for k, v in model.items()])
 
         gheader["GUIDERV"] = __version__
         gheader["TELESCOP"] = self.telescope
-        gheader["GUIDMODE"] = "acquisition" if self.is_guiding() else "guide"
+        gheader["GUIDMODE"] = "guide" if self.is_guiding() else "acquisition"
         gheader["DATE"] = Time.now().isot
         gheader["FRAMENO"] = guider_solution.frameno
 
