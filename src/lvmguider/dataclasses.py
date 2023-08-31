@@ -15,10 +15,13 @@ import nptyping as npt
 import numpy
 import pandas
 from astropy.io import fits
+from astropy.table import Table
 from astropy.time import Time
 from astropy.wcs import WCS
+from packaging.version import Version
 
 from lvmguider import config
+from lvmguider.tools import get_frameno
 from lvmguider.transformations import get_crota2
 from lvmguider.types import ARRAY_2D_F32
 
@@ -39,7 +42,7 @@ class CameraSolution:
     zero_point: float = numpy.nan
     pa: float = numpy.nan
     ref_frame: pathlib.Path | None = None
-    solution_mode: str = "none"
+    wcs_mode: str = "none"
 
     def post_init(self):
         if numpy.isnan(self.pa) and self.wcs is not None:
@@ -50,6 +53,52 @@ class CameraSolution:
         """Was the frame solved?"""
 
         return self.wcs is not None
+
+    @classmethod
+    def open(cls, file: str | pathlib.Path):
+        """Creates an instance from an ``lvm.agcam`` file."""
+
+        file = pathlib.Path(file)
+        hdul = fits.open(str(file))
+
+        if "PROC" not in hdul:
+            raise ValueError("HDU list does not have a PROC extension.")
+
+        if "SOURCES" not in hdul:
+            raise ValueError("HDU list does not have a SOURCES extension.")
+
+        raw = hdul["RAW"].header
+        proc = hdul["PROC"].header
+
+        if "GUIDERV" not in proc:
+            raise ValueError("Guider version not found.")
+
+        guiderv = Version(proc["GUIDERV"])
+        if guiderv < Version("0.4.0a0"):
+            raise ValueError(
+                "The file was generated with an unsupported version of lvmguider."
+            )
+
+        sources = Table(hdul["SOURCES"].data).to_pandas()
+
+        wcs_mode = proc["WCSMODE"]
+        wcs = WCS(proc) if wcs_mode != "none" else None
+
+        ref_file = proc["REFFILE"]
+        ref_frame = pathlib.Path(ref_file) if ref_file is not None else None
+
+        return CameraSolution(
+            get_frameno(file),
+            raw["CAMNAME"],
+            file.absolute(),
+            sources,
+            wcs=wcs,
+            wcs_mode=wcs_mode,
+            matched=len(sources.ra.dropna()) > 0,
+            pa=proc["PA"] or numpy.nan,
+            zero_point=proc["ZEROPT"] or numpy.nan,
+            ref_frame=ref_frame,
+        )
 
 
 @dataclass
@@ -72,7 +121,7 @@ class GuiderSolution:
     axis1_off: float = numpy.nan
     pa_off: float = numpy.nan
     correction_applied: bool = False
-    correction: list[float] = field(default_factory=lambda: [0.0, 0.0])
+    correction: list[float] = field(default_factory=lambda: [0.0, 0.0, 0.0])
 
     def post_init(self):
         self.sources = pandas.concat([cs.sources for cs in self.solutions], axis=0)
@@ -130,6 +179,51 @@ class GuiderSolution:
         """Returns `True` if all the cameras have solved."""
 
         return all([cs.solved for cs in self.solutions])
+
+    @classmethod
+    def open(cls, file: str | pathlib.Path, dirname: str | pathlib.Path | None = None):
+        """Creates an instance from an ``lvm.guider`` file."""
+
+        file = pathlib.Path(file)
+        hdul = fits.open(str(file))
+
+        guider_data = hdul["GUIDERDATA"].header
+
+        if "GUIDERV" not in guider_data:
+            raise ValueError("Guider version not found.")
+
+        guiderv = Version(guider_data["GUIDERV"])
+        if guiderv < Version("0.4.0a0"):
+            raise ValueError(
+                "The file was generated with an unsupported version of lvmguider."
+            )
+
+        mf_wcs = WCS(guider_data) if guider_data["SOLVED"] else None
+
+        solutions: list[CameraSolution] = []
+        for key in ["FILEEAST", "FILEWEST"]:
+            if guider_data[key] is not None:
+                dirname = pathlib.Path(dirname or guider_data["DIRNAME"])
+                solutions.append(CameraSolution.open(dirname / guider_data[key]))
+
+        return GuiderSolution(
+            get_frameno(file),
+            solutions,
+            numpy.array([guider_data["XMFPIX"], guider_data["ZMFPIX"]]),
+            mf_wcs=mf_wcs,
+            pa=guider_data,
+            ra_off=guider_data["OFFRAMEA"] or numpy.nan,
+            dec_off=guider_data["OFFDEMEA"] or numpy.nan,
+            pa_off=guider_data["OFFPAMEA"] or numpy.nan,
+            axis0_off=guider_data["OFFA0MEA"] or numpy.nan,
+            axis1_off=guider_data["OFFA1MEA"] or numpy.nan,
+            correction_applied=guider_data["CORRAPPL"],
+            correction=[
+                guider_data["AX0CORR"],
+                guider_data["AX1CORR"],
+                guider_data["PACORR"],
+            ],
+        )
 
 
 @dataclass
