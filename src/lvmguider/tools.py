@@ -314,6 +314,7 @@ def update_fits(
                 hdu = fits.ImageHDU(data=data, header=header, name=name)
 
             hdul.append(hdu)
+            hdul.close()
             return
 
         hdu.data = data
