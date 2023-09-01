@@ -536,11 +536,12 @@ def match_with_gaia(
     assert isinstance(matches, pandas.DataFrame)
 
     matches.index = pandas.Index(numpy.arange(len(ii))[valid])
-    matches.drop(columns=["xpix", "ypix"], inplace=True)
 
     dx = matches.xpix - sources.x
     dy = matches.ypix - sources.y
     matches["match_sep"] = numpy.hypot(dx, dy) * PIXSCALE
+
+    matches.drop(columns=["xpix", "ypix"], inplace=True)
 
     if concat:
         sources.loc[matches.index, matches.columns] = matches

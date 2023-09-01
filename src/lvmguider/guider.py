@@ -45,6 +45,8 @@ from lvmguider.types import ARRAY_2D_F64
 
 
 if TYPE_CHECKING:
+    from astropy.wcs import WCS
+
     from lvmguider.actor import GuiderCommand
     from lvmguider.astrometrynet import AstrometrySolution
 
@@ -246,8 +248,8 @@ class Guider:
                     "camera": camera_solution.camera,
                     "solved": camera_solution.solved,
                     "wcs_mode": camera_solution.wcs_mode,
-                    "pa": camera_solution.pa,
-                    "zero_point": camera_solution.zero_point,
+                    "pa": numpy.round(camera_solution.pa, 4),
+                    "zero_point": numpy.round(camera_solution.zero_point, 3),
                 }
             )
 
@@ -258,9 +260,9 @@ class Guider:
                 "dec": numpy.round(pointing[1], 6),
                 "radec_offset": list(numpy.round(offset_radec, 3)),
                 "motax_offset": list(numpy.round(offset_motax, 3)),
-                "separation": guider_solution.separation,
-                "pa": guider_solution.pa,
-                "zero_point": guider_solution.zero_point,
+                "separation": numpy.round(guider_solution.separation, 3),
+                "pa": numpy.round(guider_solution.pa, 4),
+                "zero_point": numpy.round(guider_solution.zero_point, 3),
             }
         )
 
@@ -365,13 +367,9 @@ class Guider:
             ):
                 wcs_mode = "gaia"
 
-        camera_solution = CameraSolution(
-            frameno,
-            camname,
-            file,
-            sources=sources,
-            wcs_mode=wcs_mode,
-        )
+        wcs: WCS | None = None
+        matched: bool = False
+        ref_frame: pathlib.Path | None = None
 
         if wcs_mode == "astrometrynet":
             # Basename path for the astrometry.net outputs.
@@ -389,11 +387,10 @@ class Guider:
             # Now match with Gaia.
             if solution.solved:
                 matched_sources, _ = match_with_gaia(solution.wcs, sources, concat=True)
-                camera_solution.sources = matched_sources
-                camera_solution.matched = True
+                sources = matched_sources
+                matched = True
 
-                camera_solution.wcs = solution.wcs
-                camera_solution.pa = get_crota2(solution.wcs)
+                wcs = solution.wcs
 
         else:
             # This is now wcs_mode="gaia".
@@ -402,7 +399,8 @@ class Guider:
             assert last_solution is not None
             assert last_solution.ref_frame is not None
 
-            ref_solution = self.solutions[get_frameno(last_solution.ref_frame)]
+            ref_frame = last_solution.ref_frame
+            ref_solution = self.solutions[get_frameno(ref_frame)]
             ref_wcs = ref_solution[camname].wcs
 
             # Here we match with Gaia first, then use those matches to
@@ -414,8 +412,8 @@ class Guider:
                 max_separation=5,
             )
 
-            camera_solution.sources = matched_sources
-            camera_solution.matched = True
+            sources = matched_sources
+            matched = True
 
             if nmatches < 5:
                 self.command.warning(
@@ -424,12 +422,23 @@ class Guider:
                 )
             else:
                 wcs = wcs_from_gaia(matched_sources)
-                camera_solution.wcs = wcs
-                camera_solution.pa = get_crota2(wcs)
+                wcs = wcs
 
         # Get zero-point. This is safe even if it did not solve.
-        zp = estimate_zeropoint(data, camera_solution.sources)
-        camera_solution.sources.update(zp)
+        zp = estimate_zeropoint(data, sources)
+        sources.update(zp)
+
+        camera_solution = CameraSolution(
+            frameno,
+            camname,
+            file,
+            sources=sources,
+            wcs_mode=wcs_mode,
+            wcs=wcs,
+            matched=matched,
+            ref_frame=ref_frame,
+            zero_point=zp.zp.median(),
+        )
 
         if camera_solution.solved is False:
             self.command.warning(f"Camera {camname!r} failed to solve.")
@@ -563,7 +572,7 @@ class Guider:
 
             wcs_cards = {}
             if solution.wcs is not None:
-                cards = solution.wcs.cards
+                cards = solution.wcs.to_header().cards
                 for card in cards:
                     wcs_cards[card.keyword] = (card.value, card.comment)
 

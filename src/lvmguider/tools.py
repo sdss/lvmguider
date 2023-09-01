@@ -349,7 +349,6 @@ def get_gaia_sources(
     wcs: WCS,
     db_connection_params: dict[str, Any] = {},
     include_lvm_mags: bool = True,
-    use_cache: bool = True,
 ):
     """Returns a data frame with Gaia source information from a WCS.
 
@@ -363,9 +362,6 @@ def get_gaia_sources(
         magnitudes and fluxes.
     db_connection_params
         A dictionary of DB connection parameters to pass to `.get_db_connection`.
-    use_cache
-        If `True` and the query centre is within 5 arcsec of the previous query,
-        returns the same results without querying the database.
 
     """
 
@@ -511,10 +507,14 @@ def get_dark_subtrcted_data(file: pathlib.Path | str) -> tuple[ARRAY_2D_F32, boo
     data: ARRAY_2D_F32 = hdul["RAW"].data.copy().astype("f4") / exptime
 
     # Get data and subtract dark or fit background.
+    dirname = hdul["PROC"].header["DIRNAME"]
     dark_file = hdul["PROC"].header["DARKFILE"]
-    if dark_file != "" and os.path.exists(dark_file):
-        dark: ARRAY_2D_F32 = fits.getdata(dark_file, "RAW").astype("f4")
-        dark_exptime: float = fits.getval(dark_file, "EXPTIME", "RAW")
+
+    dark_path = pathlib.Path(dirname) / dark_file
+
+    if dark_file != "" and dark_path.exists():
+        dark: ARRAY_2D_F32 = fits.getdata(str(dark_path), "RAW").astype("f4")
+        dark_exptime: float = fits.getval(str(dark_path), "EXPTIME", "RAW")
         data = data - dark / dark_exptime
 
         dark_sub = True
