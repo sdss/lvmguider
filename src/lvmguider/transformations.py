@@ -550,11 +550,11 @@ def match_with_gaia(
     return matches, valid.sum()
 
 
-def wcs_from_gaia(sources: pandas.DataFrame) -> WCS:
+def wcs_from_gaia(sources: pandas.DataFrame, xy_cols: list[str] = ["x", "y"]) -> WCS:
     """Creates a WCS from Gaia-matched sources."""
 
     # Get useful columns. Drop NaNs.
-    matched_sources = sources.loc[:, ["ra_epoch", "dec_epoch", "x", "y"]]
+    matched_sources = sources.loc[:, ["ra_epoch", "dec_epoch", *xy_cols]]
     matched_sources.dropna(inplace=True)
 
     if len(matched_sources) < 5:
@@ -567,4 +567,7 @@ def wcs_from_gaia(sources: pandas.DataFrame) -> WCS:
         frame="icrs",
     )
 
-    return fit_wcs_from_points((matched_sources.x, matched_sources.y), skycoords)
+    return fit_wcs_from_points(
+        (matched_sources[xy_cols[0]], matched_sources[xy_cols[1]]),
+        skycoords,
+    )

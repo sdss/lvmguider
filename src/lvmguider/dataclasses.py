@@ -143,12 +143,12 @@ class GuiderSolution:
 
     @property
     def pointing(self) -> npt.NDArray[npt.Shape["2"], npt.Float64]:
-        """Returns the telescope pointing."""
+        """Returns the telescope pointing at the master frame pixel."""
 
         if not self.mf_wcs:
             return numpy.array([numpy.nan, numpy.nan])
 
-        skyc = self.mf_wcs.pixel_to_world(*config["xz_full_frame"])
+        skyc = self.mf_wcs.pixel_to_world(*self.guide_pixel)
         return numpy.array([skyc.ra.deg, skyc.dec.deg])
 
     @property

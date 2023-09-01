@@ -226,7 +226,7 @@ class Guider:
 
         else:
             try:
-                mf_wcs = wcs_from_gaia(guider_solution.sources)
+                mf_wcs = wcs_from_gaia(guider_solution.sources, ["x_mf", "y_mf"])
                 guider_solution.mf_wcs = mf_wcs
                 guider_solution.pa = get_crota2(mf_wcs)
 
