@@ -127,7 +127,7 @@ class Guider:
             new_pixel = (pixel_x, pixel_z)
 
         if self.pixel != new_pixel:
-            self.reset_to_acquisition()
+            self.revert_to_acquisition()
             self.pixel = new_pixel
 
         return self.pixel
@@ -137,8 +137,10 @@ class Guider:
 
         return self.command.actor.status & GuiderStatus.GUIDING
 
-    def reset_to_acquisition(self):
+    def revert_to_acquisition(self):
         """Reset the flags for acquisition mode."""
+
+        self.command.warning("Reverting to acquisition.")
 
         self.command.actor._status &= ~GuiderStatus.GUIDING
         self.command.actor._status |= GuiderStatus.ACQUIRING
@@ -204,6 +206,7 @@ class Guider:
 
         default_guide_tolerance: float = self.config.get("guide_tolerance", 5)
         guide_tolerance = guide_tolerance or default_guide_tolerance
+        revert_to_acquistion_threshold = self.config["revert_to_acquistion_threshold"]
 
         # Get astrometric solutions for individual cameras.
         camera_solutions: list[CameraSolution] = await asyncio.gather(
@@ -217,7 +220,7 @@ class Guider:
         guider_solution = GuiderSolution(
             frameno,
             camera_solutions,
-            guide_pixel=numpy.array(self.config["xz_full_frame"]),
+            guide_pixel=numpy.array(self.pixel),
         )
 
         if guider_solution.n_cameras_solved == 0:
@@ -262,6 +265,7 @@ class Guider:
                 "separation": numpy.round(guider_solution.separation, 3),
                 "pa": numpy.round(guider_solution.pa, 4),
                 "zero_point": numpy.round(guider_solution.zero_point, 3),
+                "mode": "guide" if self.is_guiding() else "acquisition",
             }
         )
 
@@ -269,6 +273,7 @@ class Guider:
 
         if not guider_solution.solved:
             await self.update_fits(guider_solution)
+            self.revert_to_acquisition()
             return
 
         # Calculate the correction and apply PID loop.
@@ -306,19 +311,18 @@ class Guider:
 
             guider_solution.correction = applied_motax.tolist()
 
-            if guider_solution.separation < self.guide_tolerance:
+            reached = guider_solution.separation < self.guide_tolerance
+            revert = guider_solution.separation > revert_to_acquistion_threshold
+
+            if reached and not self.is_guiding():
                 self.command.info("Guide tolerance reached. Starting to guide.")
                 self.command.actor._status &= ~GuiderStatus.ACQUIRING
                 self.command.actor._status &= ~GuiderStatus.DRIFTING
                 self.command.actor.status |= GuiderStatus.GUIDING
-            else:
-                if self.is_guiding():
-                    self.command.warning(
-                        "Measured offset exceeds guide tolerance. "
-                        "Reverting to acquisition."
-                    )
 
-                self.reset_to_acquisition()
+            elif revert and self.is_guiding():
+                self.command.warning("Measured offset exceeds guide tolerance.")
+                self.revert_to_acquisition()
 
             await self.update_fits(guider_solution)
 
@@ -350,7 +354,6 @@ class Guider:
         ra: float = hdul["RAW"].header["RA"]
         dec: float = hdul["RAW"].header["DEC"]
 
-        last_solution: CameraSolution | None = None
         wcs_mode = "astrometrynet"
 
         # First determine the algorithm we are going to use. Check the last
@@ -362,14 +365,9 @@ class Guider:
             and self.last.solved
             and self.last.separation < self.guide_tolerance
             and camname in self.last.cameras
+            and self.last[camname].solved
         ):
-            last_cs = self.last[camname]
-            if (
-                last_cs.ref_frame
-                and get_frameno(last_cs.ref_frame) in self.solutions
-                and last_cs.solved
-            ):
-                wcs_mode = "gaia"
+            wcs_mode = "gaia"
 
         wcs: WCS | None = None
         matched: bool = False
@@ -400,10 +398,10 @@ class Guider:
             # This is now wcs_mode="gaia".
 
             # Find the reference file we want to compare with.
-            assert last_solution is not None
-            assert last_solution.ref_frame is not None
+            assert self.last is not None
 
-            ref_frame = last_solution.ref_frame
+            last_solution = self.last[camname]
+            ref_frame = last_solution.path
             ref_solution = self.solutions[get_frameno(ref_frame)]
             ref_wcs = ref_solution[camname].wcs
 
@@ -470,7 +468,7 @@ class Guider:
         """
 
         pra, pdec = pointing
-        fra, fdec = self.field_centre
+        fra, fdec = self.field_centre[0:2]
 
         mid_dec = (pdec + fdec) / 2
 
@@ -591,6 +589,11 @@ class Guider:
 
             coros.append(run_in_executor(update_fits, file, "PROC", header=proc_update))
 
+            # Update the sources file for each camera.
+            sources_cam_path = file.with_suffix(".parquet")
+            if solution.sources is not None:
+                solution.sources.to_parquet(sources_cam_path)
+
         guider_path = get_guider_path(guider_solution.solutions[0].path)
         sources_path = guider_path.with_suffix(".parquet")
 
@@ -613,8 +616,8 @@ class Guider:
 
         gheader["RAFIELD"] = numpy.round(self.field_centre[0], 6)
         gheader["DECFIELD"] = numpy.round(self.field_centre[1], 6)
-        gheader["XMFPIX"] = self.pixel[0]
-        gheader["ZMFPIX"] = self.pixel[1]
+        gheader["XMFPIX"] = guider_solution.guide_pixel[0]
+        gheader["ZMFPIX"] = guider_solution.guide_pixel[1]
         gheader["SOLVED"] = guider_solution.solved
         gheader["RAMEAS"] = nan_or_none(guider_solution.pointing[0], 6)
         gheader["DECMEAS"] = nan_or_none(guider_solution.pointing[1], 6)

@@ -10,7 +10,8 @@ pid:
     Kd: 0.0
 
 max_correction: 3600
-guide_tolerance: 3
+guide_tolerance: 1
+revert_to_acquistion_threshold: 2
 
 xz_full_frame: [2500.0, 1000.0]
 xz_ag_frame: [800.0, 550.0]
