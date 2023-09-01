@@ -1,15 +1,16 @@
 # Changelog
 
-## Next version
+## 0.3.0 - September 1, 2023
 
 ### 🚀 New
 
 * [#3](https://github.com/sdss/lvmguider/pull/3) Plotting of focus sweep and fit data using a cubic spline.
-* [#4](https://github.com/sdss/lvmguider/pull/4) Added code to generate co-added frames and QA metrics.
+* [#4](https://github.com/sdss/lvmguider/pull/4) Added code to generate co-added frames and QA metrics. This code will probably change significantly before it's used routinely.
 
 ### ✨ Improved
 
 * Command telescope offsets with more relaxed thresholds for axis errors. Timeout and continue guiding if the offset takes longer than a certain amount of time.
+* Command PlaneWave offsets with more relaxed `axis_error` and a reasonable timeout to prevent offsets taking long to complete under windy conditions.
 
 
 ## 0.2.1 - August 20, 2023
