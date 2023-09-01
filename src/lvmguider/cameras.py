@@ -194,7 +194,7 @@ class Cameras:
         with elapsed_time(command, "updating lvm.agcam file"):
             await asyncio.gather(
                 *[
-                    run_in_executor(update_fits, fn, header=headers[fn])
+                    run_in_executor(update_fits, fn, "PROC", header=headers[fn])
                     for fn in filenames
                 ]
             )
