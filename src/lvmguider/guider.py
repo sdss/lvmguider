@@ -286,7 +286,7 @@ class Guider:
         corr_motax[0] = self.pid_ax0(corr_motax[0])
         corr_motax[1] = self.pid_ax1(corr_motax[1])
 
-        corr_rot = self.pid_rot(offset_pa)
+        corr_rot = self.pid_rot(offset_pa) or 0.0
 
         applied_motax = numpy.array([0.0, 0.0])
         applied_rot: float = 0.0
@@ -301,7 +301,7 @@ class Guider:
                 _, applied_motax, applied_rot = await self.offset_telescope(
                     corr_motax[0],
                     corr_motax[1],
-                    corr_rot if corr_rot is not None else 0.0,
+                    corr_rot,
                     use_motor_axes=True,
                     timeout=timeout,
                 )
@@ -319,7 +319,7 @@ class Guider:
                 }
             )
 
-            guider_solution.correction = applied_motax.tolist()
+            guider_solution.correction = [*applied_motax.tolist(), corr_rot]
 
             reached = guider_solution.separation < self.guide_tolerance
             revert = guider_solution.separation > revert_to_acquistion_threshold
@@ -667,7 +667,7 @@ class Guider:
         gheader["CORRAPPL"] = guider_solution.correction_applied
         gheader["RACORR"] = 0.0
         gheader["DECORR"] = 0.0
-        gheader["PACORR"] = 0.0
+        gheader["PACORR"] = nan_or_none(guider_solution.correction[2], 4)
         gheader["AX0CORR"] = nan_or_none(guider_solution.correction[0], 3)
         gheader["AX1CORR"] = nan_or_none(guider_solution.correction[1], 3)
         gheader["AX0KP"] = self.pid_ax0.Kp
