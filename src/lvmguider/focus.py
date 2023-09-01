@@ -134,7 +134,7 @@ class Focuser:
             raise ValueError("Focus values out of range.")
 
         source_list: list[pandas.DataFrame] = []
-        files: list[str] = []
+        files: list[pathlib.Path] = []
         framenos: list[int] = []
 
         for focus_position in focus_grid:
@@ -195,7 +195,7 @@ class Focuser:
         if plot:
             frame0 = min(framenos)
             frame1 = max(framenos)
-            basepath = pathlib.Path(files[-1]).absolute().parent
+            basepath = files[-1].absolute().parent
 
             plot_name = f"focus_{self.telescope}_{frame0}_{frame1}.pdf"
             plot_path = basepath / plot_dir / plot_name

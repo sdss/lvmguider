@@ -20,7 +20,6 @@ from astropy.time import Time
 from astropy.wcs import WCS
 from packaging.version import Version
 
-from lvmguider import config
 from lvmguider.tools import get_frameno
 from lvmguider.transformations import get_crota2
 from lvmguider.types import ARRAY_2D_F32
@@ -36,7 +35,7 @@ class CameraSolution:
     frameno: int
     camera: str
     path: pathlib.Path
-    sources: pandas.DataFrame
+    sources: pandas.DataFrame | None = None
     wcs: WCS | None = None
     matched: bool = False
     zero_point: float = numpy.nan
@@ -124,7 +123,10 @@ class GuiderSolution:
     correction: list[float] = field(default_factory=lambda: [0.0, 0.0, 0.0])
 
     def __post_init__(self):
-        self.sources = pandas.concat([cs.sources for cs in self.solutions], axis=0)
+        self.sources = pandas.concat(
+            [cs.sources for cs in self.solutions if cs.sources is not None],
+            axis=0,
+        )
 
         zps = self.sources.loc[:, "zp"].copy().dropna()
         self.zero_point = zps.median()

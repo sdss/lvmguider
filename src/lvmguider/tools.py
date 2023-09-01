@@ -19,6 +19,7 @@ from time import time
 
 from typing import TYPE_CHECKING, Any
 
+import nptyping
 import numpy
 import pandas
 import peewee
@@ -261,72 +262,62 @@ def get_model(key: str):
 
 
 def dataframe_from_model(model_name: str):
-    """Reads a data model and returns and empy data frame with the right types."""
+    """Reads a data model and returns an empty data frame with the right types."""
 
     model = get_model(model_name)
     return pandas.DataFrame({k: pandas.Series(dtype=v) for k, v in model.items()})
 
 
+def header_from_model(model_name: str):
+    """Reads a data model and returns a ``Header`` object."""
+
+    model = get_model(model_name)
+    return fits.Header([(k, *v) for k, v in model.items()])
+
+
 def update_fits(
     file: str | pathlib.Path,
-    extension_data: dict[str | int, dict[str, Any] | pandas.DataFrame | None],
+    ext: int | str,
+    data: nptyping.NDArray | None = None,
+    header: fits.Header | dict[str, Any | tuple[Any, str]] | None = None,
 ):
-    """Updates an existing FITS file by extending a header or table or adding a new HDU.
+    """Updates or creates an image HDU in an existing FITS.
 
     Parameters
     ----------
     file
         The FITS file to update.
-    extension_data
-        A dictionary of extension name to data to update. If the extension does not
-        exists a new one will be created. The data can be a Pandas data frame,
-        which will result in a new binary table, or a dictionary to update
-        an image extension. The dictionary may include a ``__data__`` value
-        with the image data. Image extensions are created as ``RICE_1``-compressed
-        extensions.
+    ext
+        The extension to update or create.
+    data
+        A Numpy array with new data. If defined and the extension does not
+        exist, the new extension will be a compressed image HDU.
+    header
+        The header data to update the extension.
+
 
     """
-
-    if extension_data is not None:
-        extension_data = extension_data.copy()
 
     file = pathlib.Path(file)
     if not file.exists():
         raise FileNotFoundError(f"File {file!s} was not found.")
 
     with fits.open(str(file), mode="update") as hdul:
-        for key, data in extension_data.copy().items():
-            if data is None:
-                continue
+        name = ext if isinstance(ext, str) else None
 
-            try:
-                hdu = hdul[key]
-            except (IndexError, KeyError):
-                hdu = None
-
-            extension_name = name = key if isinstance(key, str) else None
-
-            if isinstance(data, pandas.DataFrame):
-                bintable = fits.BinTableHDU(Table.from_pandas(data), name=name)
-                if hdu is not None:
-                    hdul[key] = bintable
-                else:
-                    hdul.append(bintable)
-
+        try:
+            hdu = hdul[ext]
+        except (IndexError, KeyError):
+            if data is not None:
+                hdu = fits.CompImageHDU(data=data, header=header, name=name)
             else:
-                image_data = extension_data.pop("__data__", None)
-                if hdu:
-                    if image_data is not None:
-                        hdu.data = image_data
-                    hdu.header.update(image_data)
-                else:
-                    hdul.append(
-                        fits.CompImageHDU(
-                            data=image_data,
-                            header=fits.Header([(k, *v) for k, v in data.items()]),
-                            name=extension_name,
-                        )
-                    )
+                hdu = fits.ImageHDU(data=data, header=header, name=name)
+
+            hdul.append(hdu)
+            return
+
+        hdu.data = data
+        hdu.header.update(header)
 
 
 def get_gaia_sources(

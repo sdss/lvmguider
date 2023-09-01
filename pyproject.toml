@@ -45,6 +45,7 @@ peewee = "^3.16.3"
 pgpasslib = "^1.1.0"
 psycopg2-binary = "^2.9.7"
 nptyping = "^2.5.0"
+fastparquet = "^2023.8.0"
 
 [tool.poetry.group.dev.dependencies]
 ipython = ">=8.0.0"

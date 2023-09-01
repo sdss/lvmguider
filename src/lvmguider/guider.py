@@ -17,7 +17,6 @@ import numpy
 import pandas
 from astropy.coordinates import EarthLocation
 from astropy.io import fits
-from astropy.table import Table
 from astropy.time import Time
 from simple_pid import PID
 
@@ -30,7 +29,7 @@ from lvmguider.tools import (
     get_dark_subtrcted_data,
     get_frameno,
     get_guider_path,
-    get_model,
+    header_from_model,
     run_in_executor,
     update_fits,
 )
@@ -340,14 +339,19 @@ class Guider:
 
         camname = hdul["RAW"].header["CAMNAME"]
 
-        sources = pandas.DataFrame(hdul["SOURCES"].data)
+        sources_file = file.parent / file.with_suffix(".parquet")
+        if not sources_file.exists():
+            self.command.warning(f"Cannot find sources file for camera {camname!r}.")
+            return CameraSolution(frameno, camname, file)
+
+        sources = pandas.read_parquet(sources_file)
+        matched_sources = sources.copy()
+
         ra: float = hdul["RAW"].header["RA"]
         dec: float = hdul["RAW"].header["DEC"]
 
         last_solution: CameraSolution | None = None
         wcs_mode = "astrometrynet"
-
-        matched_sources = sources.copy()
 
         # First determine the algorithm we are going to use. Check the last
         # solution for this camera and see if it was good enough to use as reference.
@@ -562,8 +566,9 @@ class Guider:
                 return numpy.round(value, precision)
             return value
 
-        # Update lvm.agcam PROC and SOURCES extensions.
         coros = []
+
+        # Update lvm.agcam PROC extension.
         for solution in guider_solution.solutions:
             file = solution.path.absolute()
             pa = numpy.round(solution.pa, 4)
@@ -577,20 +582,19 @@ class Guider:
                     wcs_cards[card.keyword] = (card.value, card.comment)
 
             proc_update = {
-                "PROC": {
-                    "PA": pa if not numpy.isnan(pa) else None,
-                    "ZEROPT": zeropt if not numpy.isnan(zeropt) else None,
-                    "REFFILE": reffile,
-                    "WCSMODE": solution.wcs_mode,
-                    **wcs_cards,
-                },
-                "SOURCES": solution.sources,
+                "PA": pa if not numpy.isnan(pa) else None,
+                "ZEROPT": zeropt if not numpy.isnan(zeropt) else None,
+                "REFFILE": reffile,
+                "WCSMODE": solution.wcs_mode,
+                **wcs_cards,
             }
 
-            coros.append(run_in_executor(update_fits, file, proc_update))
+            coros.append(run_in_executor(update_fits, file, "PROC", header=proc_update))
 
-        model = get_model("GUIDERDATA")
-        gheader = fits.Header([(k, *v) for k, v in model.items()])
+        guider_path = get_guider_path(guider_solution.solutions[0].path)
+        sources_path = guider_path.with_suffix(".parquet")
+
+        gheader = header_from_model("GUIDERDATA")
 
         gheader["GUIDERV"] = __version__
         gheader["TELESCOP"] = self.telescope
@@ -605,6 +609,7 @@ class Guider:
             gheader["FILEWEST"] = guider_solution["west"].path.name
 
         gheader["DIRNAME"] = str(guider_solution.solutions[0].path.parent)
+        gheader["SOURCEF"] = str(sources_path.name)
 
         gheader["RAFIELD"] = numpy.round(self.field_centre[0], 6)
         gheader["DECFIELD"] = numpy.round(self.field_centre[1], 6)
@@ -638,16 +643,10 @@ class Guider:
 
         guider_hdul = fits.HDUList([fits.PrimaryHDU()])
         guider_hdul.append(fits.ImageHDU(data=None, header=gheader, name="GUIDERDATA"))
-        guider_hdul.append(
-            fits.BinTableHDU(
-                data=Table.from_pandas(guider_solution.sources),
-                name="SOURCES",
-            )
-        )
-
-        guider_path = get_guider_path(guider_solution.solutions[0].path)
 
         coros.append(run_in_executor(guider_hdul.writeto, str(guider_path)))
+
+        coros.append(run_in_executor(guider_solution.sources.to_parquet, sources_path))
 
         with elapsed_time(self.command, "update PROC HDU and create lvm.guider file"):
             await asyncio.gather(*coros)
