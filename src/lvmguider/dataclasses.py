@@ -20,6 +20,7 @@ from astropy.time import Time
 from astropy.wcs import WCS
 from packaging.version import Version
 
+from lvmguider import config
 from lvmguider.tools import get_frameno
 from lvmguider.transformations import get_crota2
 from lvmguider.types import ARRAY_2D_F32
@@ -145,6 +146,16 @@ class GuiderSolution:
 
     @property
     def pointing(self) -> npt.NDArray[npt.Shape["2"], npt.Float64]:
+        """Returns the telescope pointing at boresight."""
+
+        if not self.mf_wcs:
+            return numpy.array([numpy.nan, numpy.nan])
+
+        skyc = self.mf_wcs.pixel_to_world(*config["xz_full_frame"])
+        return numpy.array([skyc.ra.deg, skyc.dec.deg])
+
+    @property
+    def pixel_pointing(self) -> npt.NDArray[npt.Shape["2"], npt.Float64]:
         """Returns the telescope pointing at the master frame pixel."""
 
         if not self.mf_wcs:

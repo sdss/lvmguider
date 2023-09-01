@@ -40,7 +40,6 @@ from lvmguider.transformations import (
     solve_camera_with_astrometrynet,
     wcs_from_gaia,
 )
-from lvmguider.types import ARRAY_2D_F64
 
 
 if TYPE_CHECKING:
@@ -67,7 +66,7 @@ class Guider:
     command
         The actor command used to communicate with the actor system.
     field_centre
-        The field centre on which we want to guider.
+        The field centre on which we want to guider (RA, Dec, PA).
     pixel
         The ``(x,y)`` pixel of the master frame to use to determine the pointing.
         Default to the central pixel.
@@ -77,7 +76,7 @@ class Guider:
     def __init__(
         self,
         command: GuiderCommand,
-        field_centre: tuple[float, float],
+        field_centre: tuple[float, float, float],
         pixel: tuple[float, float] | None = None,
     ):
         self.command = command
@@ -103,6 +102,12 @@ class Guider:
             Kp=-self.config["pid"]["ax1"]["Kp"],
             Ki=-self.config["pid"]["ax1"]["Ki"],
             Kd=-self.config["pid"]["ax1"]["Kd"],
+        )
+
+        self.pid_rot = PID(
+            Kp=-self.config["pid"]["rot"]["Kp"],
+            Ki=-self.config["pid"]["rot"]["Ki"],
+            Kd=-self.config["pid"]["rot"]["Kd"],
         )
 
         self.site = EarthLocation(**self.config["site"])
@@ -235,8 +240,7 @@ class Guider:
             except RuntimeError as err:
                 self.command.error(f"Failed generating master frame WCS: {err}")
 
-        pointing = guider_solution.pointing
-        offset_radec, offset_motax = self.calculate_telescope_offset(pointing)
+        offset_radec, offset_motax, offset_pa = self.calculate_offset(guider_solution)
 
         guider_solution.ra_off = offset_radec[0]
         guider_solution.dec_off = offset_radec[1]
@@ -258,12 +262,13 @@ class Guider:
         self.command.info(
             measured_pointing={
                 "frameno": frameno,
-                "ra": numpy.round(pointing[0], 6),
-                "dec": numpy.round(pointing[1], 6),
+                "ra": numpy.round(guider_solution.pointing[0], 6),
+                "dec": numpy.round(guider_solution.pointing[1], 6),
                 "radec_offset": list(numpy.round(offset_radec, 3)),
                 "motax_offset": list(numpy.round(offset_motax, 3)),
                 "separation": numpy.round(guider_solution.separation, 3),
                 "pa": numpy.round(guider_solution.pa, 4),
+                "pa_offset": numpy.round(offset_pa, 4),
                 "zero_point": numpy.round(guider_solution.zero_point, 3),
                 "mode": "guide" if self.is_guiding() else "acquisition",
             }
@@ -281,7 +286,10 @@ class Guider:
         corr_motax[0] = self.pid_ax0(corr_motax[0])
         corr_motax[1] = self.pid_ax1(corr_motax[1])
 
+        corr_rot = self.pid_rot(offset_pa)
+
         applied_motax = numpy.array([0.0, 0.0])
+        applied_rot: float = 0.0
         try:
             if apply_correction:
                 self.command.actor.status &= ~GuiderStatus.PROCESSING
@@ -290,10 +298,11 @@ class Guider:
                 mode = "acquisition" if not self.is_guiding() else "guide"
                 timeout = self.config["offset"]["timeout"][mode]
 
-                _, applied_motax = await self.offset_telescope(
-                    *corr_motax,
+                _, applied_motax, applied_rot = await self.offset_telescope(
+                    corr_motax[0],
+                    corr_motax[1],
+                    corr_rot if corr_rot is not None else 0.0,
                     use_motor_axes=True,
-                    max_correction=self.config.get("max_correction", 3600),
                     timeout=timeout,
                 )
 
@@ -306,6 +315,7 @@ class Guider:
                 correction_applied={
                     "frameno": frameno,
                     "motax_applied": list(numpy.round(applied_motax, 3)),
+                    "rot_applied": numpy.round(applied_rot, 4),
                 }
             )
 
@@ -447,27 +457,26 @@ class Guider:
 
         return camera_solution
 
-    def calculate_telescope_offset(
+    def calculate_offset(
         self,
-        pointing: ARRAY_2D_F64,
-    ) -> tuple[tuple[float, float], tuple[float, float]]:
+        solution: GuiderSolution,
+    ) -> tuple[tuple[float, float], tuple[float, float], float]:
         """Determines the offset to send to the telescope to acquire the field centre.
 
         Parameters
         ----------
-        pointing
-            The current pointing of the telescope, as determined
-            by `.determine_pointing`.
+        solution
+            The guider solution.
 
         Returns
         -------
         offset
             A tuples of ra/dec and motor axis offsets to acquire the
-            desired field centre, in arcsec.
+            desired field centre, and the PA offset, in arcsec.
 
         """
 
-        pra, pdec = pointing
+        pra, pdec = solution.pixel_pointing
         fra, fdec = self.field_centre[0:2]
 
         mid_dec = (pdec + fdec) / 2
@@ -485,15 +494,22 @@ class Guider:
             site=self.site,
         )
 
-        return ((ra_arcsec, dec_arcsec), (saz_diff_d, sel_diff_d))
+        field_pa = self.field_centre[2]
+        if numpy.isnan(solution.pa):
+            offset_pa = numpy.nan
+        else:
+            pointing_pa = (solution.pa - 180) % 360
+            offset_pa = field_pa - pointing_pa
+
+        return ((ra_arcsec, dec_arcsec), (saz_diff_d, sel_diff_d), offset_pa)
 
     async def offset_telescope(
         self,
         off0: float,
         off1: float,
+        off_rot: float,
         timeout: float = 10,
         use_motor_axes: bool = False,
-        max_correction: float | None = None,
     ):
         """Sends a correction offset to the telescope.
 
@@ -503,13 +519,12 @@ class Guider:
             Offset in the first axis, in arcsec.
         off1
             Offset in the second axis, in arcsec.
+        off_rot
+            Offset in rotation, in arcsec.
         timeout
             Timeout for the offset.
         use_motor_axes
             Whether to apply the corrections as motor axes offsets.
-        max_correction
-            Maximum allowed correction. If any of the axes corrections is larger
-            than this value an exception will be raised.
 
         Returns
         -------
@@ -519,17 +534,26 @@ class Guider:
         applied_motax
             The applied correction in motor axes in arcsec. Zero if the correction
             is applied as RA/Dec.
+        applied_rot
+            Correction applied to the k-mirror, in degrees.
 
         """
 
-        if numpy.any(numpy.abs([off0, off1]) > max_correction):
-            raise ValueError("Requested correction is too big. Not applying it.")
+        applied_radec = numpy.array([0.0, 0.0])
+        applied_motax = numpy.array([0.0, 0.0])
+        applied_rot = 0.0
+
+        max_ax_correction = self.config.get("max_ax_correction", 3600)
+
+        min_rot_correction = self.config.get("min_rot_correction", 0.01)
+        max_rot_correction = self.config.get("max_rot_correction", 3)
+
+        if numpy.any(numpy.abs([off0, off1]) > max_ax_correction):
+            self.command.error("Requested correction is too big. Not applying it.")
+            return applied_radec, applied_motax, applied_rot
 
         telescope = self.command.actor.telescope
         pwi = f"lvm.{telescope}.pwi"
-
-        applied_radec = numpy.array([0.0, 0.0])
-        applied_motax = numpy.array([0.0, 0.0])
 
         if use_motor_axes is False:
             cmd_str = f"offset --ra_add_arcsec {off0} --dec_add_arcsec {off1}"
@@ -552,7 +576,20 @@ class Guider:
         if cmd.status.did_fail:
             raise RuntimeError(f"Failed offsetting telescope {telescope}.")
 
-        return applied_radec, applied_motax
+        if self.config.get("has_kmirror", True):
+            if off_rot > max_rot_correction:
+                self.command.warning("Requested rotator correction is too big.")
+            elif off_rot > min_rot_correction:
+                km = f"lvm.{telescope}.km"
+                cmd_km_str = f"slewAdjust --offset_angle {off_rot:.6f}"
+                cmd_km = await self.command.send_command(km, cmd_km_str)
+
+                if cmd_km.status.did_fail:
+                    self.command.error(f"Failed offsetting k-mirror {telescope}.")
+                else:
+                    applied_rot = off_rot
+
+        return applied_radec, applied_motax, applied_rot
 
     async def update_fits(self, guider_solution: GuiderSolution):
         """Updates the ``lvm.agcam`` files and creates the ``lvm.guider`` file."""

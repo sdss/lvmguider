@@ -1,15 +1,24 @@
 ---
 pid:
   ax0:
-    Kp: 0.7
+    Kp: 0.99
     Ki: 0.0
     Kd: 0.0
   ax1:
-    Kp: 0.7
+    Kp: 0.99
+    Ki: 0.0
+    Kd: 0.0
+  rot:
+    Kp: 0.9
     Ki: 0.0
     Kd: 0.0
 
-max_correction: 3600
+max_ax_correction: 3600
+
+has_kmirror: true
+min_rot_correction: 0.01
+max_rot_correction: 3
+
 guide_tolerance: 1
 revert_to_acquistion_threshold: 2
 
