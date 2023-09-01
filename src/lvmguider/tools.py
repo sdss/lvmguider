@@ -25,7 +25,7 @@ import peewee
 import pgpasslib
 import sep
 from astropy.io import fits
-from astropy.table import Column, Table
+from astropy.table import Table
 from psycopg2 import OperationalError
 
 from sdsstools import read_yaml_file
@@ -267,21 +267,6 @@ def dataframe_from_model(model_name: str):
     return pandas.DataFrame({k: pandas.Series(dtype=v) for k, v in model.items()})
 
 
-def table_from_dataframe(df: pandas.DataFrame):
-    """Converts a Pandas data frame to an astropy table dealing with corner cases."""
-
-    if len(df) > 0:
-        return Table.from_pandas(df)
-
-    # If the DF is empty astropy doesn't respect the original dtypes. So we
-    # build the table manually.
-    columns = []
-    for col in df.columns:
-        columns.append(Column(name=col, dtype=df[col].dtype.type))
-
-    return Table(columns)
-
-
 def update_fits(
     file: str | pathlib.Path,
     extension_data: dict[str | int, dict[str, Any] | pandas.DataFrame | None],
@@ -322,7 +307,7 @@ def update_fits(
             extension_name = name = key if isinstance(key, str) else None
 
             if isinstance(data, pandas.DataFrame):
-                bintable = fits.BinTableHDU(table_from_dataframe(data), name=name)
+                bintable = fits.BinTableHDU(Table.from_pandas(data), name=name)
                 if hdu is not None:
                     hdul[key] = bintable
                 else:
