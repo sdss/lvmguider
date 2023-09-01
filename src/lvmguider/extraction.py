@@ -313,6 +313,9 @@ def extract_marginal(
     if max_detections and len(detections) > max_detections:
         detections = detections.head(max_detections)
 
+    # Reset index to be sequential.
+    detections.reset_index(drop=True, inplace=True)
+
     if len(detections) == 0:
         return detections
 
