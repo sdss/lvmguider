@@ -86,6 +86,7 @@ GUIDERDATA:
   ZMFPIX: [null, 'The z pixel of the master frame']
   RAFIELD: [null, '[deg] Field RA']
   DECFIELD: [null, '[deg] Field Dec']
+  PAFIELD: [null, '[deg] Field PA']
   RAMEAS: [null, '[deg] Measured RA position (boresight)']
   DECMEAS: [null, '[deg] Measured Dec position (boresight)']
   PAMEAS: [null, '[deg] Position angle from master frame WCS']
