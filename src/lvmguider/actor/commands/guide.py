@@ -34,6 +34,7 @@ def is_stopping(command: GuiderCommand):
 @lvmguider_parser.command()
 @click.argument("RA", type=float)
 @click.argument("DEC", type=float)
+@click.argument("PA", type=float, default=0.0, required=False)
 @click.option(
     "--exposure-time",
     "-t",
@@ -67,6 +68,7 @@ async def guide(
     command: GuiderCommand,
     ra: float,
     dec: float,
+    pa: float = 0.0,
     exposure_time: float = 5.0,
     reference_pixel: tuple[float, float] | None = None,
     guide_tolerance: float | None = None,
@@ -78,7 +80,7 @@ async def guide(
     actor = command.actor
     MAX_EXPTIME: float = 18
 
-    guider = Guider(command, (ra, dec), pixel=reference_pixel)
+    guider = Guider(command, (ra, dec, pa), pixel=reference_pixel)
     command.actor.guider = guider
 
     if actor.status & GuiderStatus.NON_IDLE:

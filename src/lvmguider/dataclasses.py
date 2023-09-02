@@ -36,7 +36,7 @@ class CameraSolution:
     frameno: int
     camera: str
     path: pathlib.Path
-    sources: pandas.DataFrame
+    sources: pandas.DataFrame | None = None
     wcs: WCS | None = None
     matched: bool = False
     zero_point: float = numpy.nan
@@ -74,7 +74,7 @@ class CameraSolution:
             raise ValueError("Guider version not found.")
 
         guiderv = Version(proc["GUIDERV"])
-        if guiderv < Version("0.3.0a0"):
+        if guiderv < Version("0.4.0a0"):
             raise ValueError(
                 "The file was generated with an unsupported version of lvmguider."
             )
@@ -124,7 +124,10 @@ class GuiderSolution:
     correction: list[float] = field(default_factory=lambda: [0.0, 0.0, 0.0])
 
     def __post_init__(self):
-        self.sources = pandas.concat([cs.sources for cs in self.solutions], axis=0)
+        self.sources = pandas.concat(
+            [cs.sources for cs in self.solutions if cs.sources is not None],
+            axis=0,
+        )
 
         zps = self.sources.loc[:, "zp"].copy().dropna()
         self.zero_point = zps.median()
@@ -143,12 +146,22 @@ class GuiderSolution:
 
     @property
     def pointing(self) -> npt.NDArray[npt.Shape["2"], npt.Float64]:
-        """Returns the telescope pointing."""
+        """Returns the telescope pointing at boresight."""
 
         if not self.mf_wcs:
             return numpy.array([numpy.nan, numpy.nan])
 
         skyc = self.mf_wcs.pixel_to_world(*config["xz_full_frame"])
+        return numpy.array([skyc.ra.deg, skyc.dec.deg])
+
+    @property
+    def pixel_pointing(self) -> npt.NDArray[npt.Shape["2"], npt.Float64]:
+        """Returns the telescope pointing at the master frame pixel."""
+
+        if not self.mf_wcs:
+            return numpy.array([numpy.nan, numpy.nan])
+
+        skyc = self.mf_wcs.pixel_to_world(*self.guide_pixel)
         return numpy.array([skyc.ra.deg, skyc.dec.deg])
 
     @property
@@ -193,7 +206,7 @@ class GuiderSolution:
             raise ValueError("Guider version not found.")
 
         guiderv = Version(guider_data["GUIDERV"])
-        if guiderv < Version("0.3.0a0"):
+        if guiderv < Version("0.4.0a0"):
             raise ValueError(
                 "The file was generated with an unsupported version of lvmguider."
             )

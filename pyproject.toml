@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "lvmguider"
-version = "0.3.0a0"
+version = "0.4.0a0"
 description = "Temporary package for LVM guiding and focusing"
 authors = ["José Sánchez-Gallego <gallegoj@uw.edu>"]
 license = "BSD-3-Clause"
@@ -45,6 +45,7 @@ peewee = "^3.16.3"
 pgpasslib = "^1.1.0"
 psycopg2-binary = "^2.9.7"
 nptyping = "^2.5.0"
+fastparquet = "^2023.8.0"
 
 [tool.poetry.group.dev.dependencies]
 ipython = ">=8.0.0"
