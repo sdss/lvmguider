@@ -576,7 +576,7 @@ class Guider:
         if cmd.status.did_fail:
             raise RuntimeError(f"Failed offsetting telescope {telescope}.")
 
-        if self.config.get("has_kmirror", True):
+        if self.config.get("has_kmirror", True) and self.is_rot_offset_allowed():
             if off_rot > max_rot_correction:
                 self.command.warning("Requested rotator correction is too big.")
             elif off_rot > min_rot_correction:
@@ -590,6 +590,31 @@ class Guider:
                     applied_rot = off_rot
 
         return applied_radec, applied_motax, applied_rot
+
+    def is_rot_offset_allowed(self):
+        """Checks if it is possible to offset in PA.
+
+        The k-mirror takes ~20 seconds to apply a correction (the interval at
+        which updated trajectories are sent to the controller). So we don't want
+        to be sending multiple corrections until the previous one is done.
+
+        """
+
+        ROT_MIN_ITERATIONS: int = 3
+
+        if len(self.solutions) == 0:
+            return True
+
+        n_last_rot_correction: int = 0
+        for frameno in list(self.solutions)[::-1]:
+            if abs(self.solutions[frameno].correction[-1]) > 0:
+                return n_last_rot_correction >= ROT_MIN_ITERATIONS
+
+            n_last_rot_correction += 1
+            if n_last_rot_correction >= ROT_MIN_ITERATIONS:
+                return True
+
+        return False
 
     async def update_fits(self, guider_solution: GuiderSolution):
         """Updates the ``lvm.agcam`` files and creates the ``lvm.guider`` file."""
