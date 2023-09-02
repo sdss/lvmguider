@@ -674,7 +674,7 @@ class Guider:
             gheader["FILEWEST"] = guider_solution["west"].path.name
 
         gheader["DIRNAME"] = str(guider_solution.solutions[0].path.parent)
-        gheader["SOURCEF"] = str(sources_path.name)
+        gheader["SOURCESF"] = str(sources_path.name)
 
         gheader["RAFIELD"] = numpy.round(self.field_centre[0], 6)
         gheader["DECFIELD"] = numpy.round(self.field_centre[1], 6)
