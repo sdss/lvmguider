@@ -1,0 +1,110 @@
+PROC:
+  TELESCOP: [null, 'Telescope that took the image']
+  CAMNAME: [null, 'Camera that took the image']
+  DARKFILE: [null, 'Associated dark frame']
+  DIRNAME: [null, 'Original file directory']
+  GUIDERV: [null, 'Version of lvmguider']
+  SOURCESF: [null, 'Sources file']
+  PA: [null, '[deg] Position angle from WCS']
+  ZEROPT: [null, '[mag] Zero point of the LVM magnitude']
+  REFFILE: [null, 'Reference file for astrometric solution']
+  WCSMODE: ['none', 'Source of astrometric solution']
+
+SOURCES:
+  thresh: 'f8'
+  npix: 'Int32'
+  tnpix: 'Int32'
+  xmin: 'Int32'
+  xmax: 'Int32'
+  ymin: 'Int32'
+  ymax: 'Int32'
+  x: 'f8'
+  y: 'f8'
+  x2: 'f8'
+  y2: 'f8'
+  xy: 'f8'
+  errx2: 'f8'
+  erry2: 'f8'
+  errxy: 'f8'
+  a: 'f8'
+  b: 'f8'
+  theta: 'f8'
+  cxx: 'f8'
+  cyy: 'f8'
+  cxy: 'f8'
+  cflux: 'f8'
+  flux: 'f8'
+  cpeak: 'f8'
+  peak: 'f8'
+  xcpeak: 'Int32'
+  ycpeak: 'Int32'
+  xpeak: 'Int32'
+  ypeak: 'Int32'
+  flag: 'Int8'
+  ecc: 'f8'
+  x1: 'f8'
+  xstd: 'f8'
+  xrms: 'f8'
+  xfitvalid: 'Int8'
+  y1: 'f8'
+  ystd: 'f8'
+  yrms: 'f8'
+  yfitvalid: 'Int8'
+  valid: 'Int8'
+  fwhm: 'f8'
+  telescope: 'U4'
+  camera: 'U4'
+  x_mf: 'f8'
+  y_mf: 'f8'
+  source_id: 'Int64'
+  ra: 'f8'
+  dec: 'f8'
+  pmra: 'f4'
+  pmdec: 'f4'
+  phot_g_mean_mag: 'f4'
+  ra_epoch: 'f4'
+  dec_epoch: 'f4'
+  lmag_ab: 'f4'
+  lflux: 'f4'
+  match_sep: 'f4'
+  ap_flux: 'f4'
+  ap_fluxerr: 'f4'
+  zp: 'f4'
+
+GUIDERDATA:
+  GUIDERV: [null, 'Version of lvmguider']
+  TELESCOP: [null, 'Telescope that took the images']
+  GUIDMODE: ['acquition', 'Acquisition or guiding?']
+  DATE: [null, 'Date of file creation']
+  FRAMENO: [null, 'Frame number']
+  FILEEAST: [null, 'AG east camera file']
+  FILEWEST: [null, 'AG west camera file']
+  DIRNAME: [null, 'Original file directory']
+  SOURCESF: [null, 'Sources file']
+  SOLVED: [False, 'Astrometric solution found?']
+  XMFPIX: [null, 'The x pixel of the master frame']
+  ZMFPIX: [null, 'The z pixel of the master frame']
+  RAFIELD: [null, '[deg] Field RA']
+  DECFIELD: [null, '[deg] Field Dec']
+  PAFIELD: [null, '[deg] Field PA']
+  RAMEAS: [null, '[deg] Measured RA position (boresight)']
+  DECMEAS: [null, '[deg] Measured Dec position (boresight)']
+  PAMEAS: [null, '[deg] Position angle from master frame WCS']
+  OFFRAMEA: [null, '[arcsec] RA measured offset']
+  OFFDEMEA: [null, '[arcsec] Dec measured offset']
+  OFFA0MEA: [null, '[arcsec] Motor axis 0 measured offset']
+  OFFA1MEA: [null, '[arcsec] Motor axis 1 measured offset']
+  OFFPAMEA: [null, '[deg] PA measured offset']
+  CORRAPPL: [True, 'Was the correction sent to the telescope?']
+  RACORR: [0.0, '[arcsec] RA applied correction']
+  DECORR: [0.0, '[arcsec] Dec applied correction']
+  PACORR: [0.0, '[arcsec] PA applied correction']
+  AX0CORR: [null, '[arcsec] Motor axis 0 applied offset']
+  AX1CORR: [null, '[arcsec] Motor axis 1 applied offset']
+  AX0KP: [null, 'Axis 0 PID K term']
+  AX0KI: [null, 'Axis 0 PID I term']
+  AX0KD: [null, 'Axis 0 PID D term']
+  AX1KP: [null, 'Axis 1 PID K term']
+  AX1KI: [null, 'Axis 1 PID I term']
+  AX1KD: [null, 'Axis 1 PID D term']
+  ZEROPT: [null, '[mag] Zero point of the LVM magnitude']

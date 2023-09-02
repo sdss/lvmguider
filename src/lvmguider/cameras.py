@@ -18,14 +18,18 @@ from typing import TYPE_CHECKING
 import numpy
 import pandas
 from astropy.io import fits
-from astropy.table import Table
 
 from sdsstools.time import get_sjd
 
 from lvmguider import __version__
-from lvmguider.extraction import extract_marginal
+from lvmguider.extraction import extract_sources as extract_sources_func
 from lvmguider.maskbits import GuiderStatus
-from lvmguider.tools import elapsed_time, run_in_executor
+from lvmguider.tools import (
+    elapsed_time,
+    header_from_model,
+    run_in_executor,
+    update_fits,
+)
 
 
 if TYPE_CHECKING:
@@ -59,7 +63,7 @@ class Cameras:
         flavour: str = "object",
         extract_sources: bool = False,
         nretries: int = 3,
-    ) -> tuple[list[str], int, list[pandas.DataFrame] | None]:
+    ) -> tuple[list[pathlib.Path], int, list[pandas.DataFrame] | None]:
         """Exposes the cameras and returns the filenames."""
 
         command.actor._status &= ~GuiderStatus.IDLE
@@ -100,12 +104,12 @@ class Cameras:
         else:
             self.last_seqno = next_seqno
 
-        filenames: set[str] = set()
+        filenames: set[pathlib.Path] = set()
         for reply in cmd.replies:
             if "filename" in reply.message:
                 filename = reply.message["filename"]["filename"]
                 cam_name = reply.message["filename"]["camera"]
-                filenames.add(filename)
+                filenames.add(pathlib.Path(filename))
                 if flavour == "dark":
                     self._write_dark_info(cam_name, filename)
 
@@ -125,52 +129,42 @@ class Cameras:
             else:
                 raise RuntimeError("Run out of retries. Exposing failed.")
 
-        # Create a new extension with the dark-subtracted image.
-        with elapsed_time(command, "add PROC extension to raw files"):
-            for fn in filenames:
-                with fits.open(fn, mode="update") as hdul:
-                    camname = hdul["RAW"].header["CAMNAME"].lower()
+        headers: dict[pathlib.Path, fits.Header] = {}
 
-                    dark_file = self._get_dark_frame(fn, camname)
-                    if dark_file is None:
-                        command.warning(f"No dark frame found for camera {camname}.")
-                        dark_file = ""
+        # Create a new extension with processed data.
+        for fn in filenames:
+            camname = fits.getval(str(fn), "CAMNAME", "RAW")
 
-                    proc_header = fits.Header()
-                    proc_header["DARKFILE"] = dark_file
-                    proc_header["GUIDERV"] = (__version__, "Version of lvmguider")
-                    proc_header["WCSMODE"] = ("none", "Source of astrometric solution")
+            dark_file = self._get_dark_frame(fn, camname)
+            if dark_file is None:
+                command.warning(f"No dark frame found for camera {camname}.")
+                dark_file = ""
 
-                    hdul.append(
-                        fits.ImageHDU(
-                            data=None,
-                            header=proc_header,
-                            name="PROC",
-                        )
-                    )
+            header = header_from_model("PROC")
+            header["TELESCOP"] = self.telescope
+            header["CAMNAME"] = camname
+            header["DARKFILE"] = os.path.basename(dark_file)
+            header["DIRNAME"] = str(fn.absolute().parent)
+            header["GUIDERV"] = __version__
+            header["WCSMODE"] = "none"
 
-        sources = []
+            headers[fn] = header
+
+        sources: list[pandas.DataFrame] = []
         if flavour == "object" and extract_sources:
             try:
                 sources = await asyncio.gather(
-                    *[self.extract_sources(fn) for fn in filenames]
+                    *[run_in_executor(extract_sources_func, fn) for fn in filenames]
                 )
             except Exception as err:
                 command.warning(f"Failed extracting sources: {err}")
                 extract_sources = False
             else:
-                with elapsed_time(command, "add SOURCE extension to raw files"):
-                    for ifn, fn in enumerate(filenames):
-                        with fits.open(fn, mode="update") as hdul:
-                            camname = hdul["RAW"].header["CAMNAME"].lower()
-                            isources = sources[ifn]
-                            isources["camera"] = camname
-                            hdul.append(
-                                fits.BinTableHDU(
-                                    data=Table.from_pandas(isources),
-                                    name="SOURCES",
-                                )
-                            )
+                for ifn, fn in enumerate(filenames):
+                    sources_path = fn.with_suffix(".parquet")
+                    sources[ifn].to_parquet(sources_path)
+
+                    headers[fn]["SOURCESF"] = sources_path.name
 
         if len(sources) > 0:
             all_sources = pandas.concat(sources)
@@ -183,7 +177,7 @@ class Cameras:
         command.info(
             frame={
                 "seqno": next_seqno,
-                "filenames": list(filenames),
+                "filenames": [str(fn) for fn in filenames],
                 "flavour": flavour,
                 "n_sources": len(valid),
                 "focus_position": round(focus_position, 1),
@@ -197,32 +191,15 @@ class Cameras:
         if not command.actor.status & GuiderStatus.NON_IDLE:
             command.actor.status |= GuiderStatus.IDLE
 
+        with elapsed_time(command, "updating lvm.agcam file"):
+            await asyncio.gather(
+                *[
+                    run_in_executor(update_fits, fn, "PROC", header=headers[fn])
+                    for fn in filenames
+                ]
+            )
+
         return (list(filenames), next_seqno, list(sources) if extract_sources else None)
-
-    async def extract_sources(self, filename: str, subtract_dark: bool = True):
-        """Extracts sources from a file."""
-
-        hdus = fits.open(filename)
-
-        # Initially use raw data.
-        data = hdus["RAW"].data / hdus["RAW"].header["EXPTIME"]
-
-        if subtract_dark and "PROC" in hdus:
-            darkfile = hdus["PROC"].header["DARKFILE"]
-            if darkfile and pathlib.Path(darkfile).exists():
-                dark_data = fits.getdata(darkfile).astype(numpy.float32)
-                dark_exptime = fits.getheader(darkfile, "RAW")["EXPTIME"]
-
-                data = data - (dark_data / dark_exptime)
-
-        return await run_in_executor(
-            extract_marginal,
-            data,
-            box_size=31,
-            threshold=3.0,
-            max_detections=50,
-            sextractor_quick_options={"minarea": 5},
-        )
 
     def reset_seqno(self):
         """Resets the seqno.
@@ -304,20 +281,22 @@ class Cameras:
 
         return focus_position
 
-    def _get_dark_frame(self, filename: str, cam_name: str):
+    def _get_dark_frame(self, filename: str | pathlib.Path, cam_name: str):
         """Gets the path to the dark frame."""
+
+        filename = pathlib.Path(filename).absolute()
 
         dark_file = self.dark_file.get(cam_name, None)
         if dark_file is not None:
             return dark_file
 
-        dirname = os.path.dirname(filename)
-        path = os.path.join(dirname, f"lvm.{self.telescope}.agcam.{cam_name}.dark.dat")
+        dirname = filename.parent
+        path = dirname / f"lvm.{self.telescope}.agcam.{cam_name}.dark.dat"
 
-        if os.path.exists(path):
+        if path.exists():
             dark_file = open(path, "r").read().strip()
             self.dark_file[cam_name] = dark_file
-            return dark_file
+            return pathlib.Path(dark_file)
 
         return None
 
