@@ -1,5 +1,17 @@
 # Changelog
 
+## Next version
+
+### 🚀 New
+
+* [#5](https://github.com/sdss/lvmguider/pull/5) Major refactor of the guider code.
+  * Extracted sources are always matched to Gaia DR3 regardless of whether the solution was obtained using astrometry.net or kd-tree. `lmag` zero points are calculated for each source.
+  * Once acquisition is complete the WCS of the individual cameras is determined from the Gaia cross-match, and not by tranlating the reference WCS using the measured offset. This allows each new WCS to also reflect changes in PA.
+  * Average zero points and PAs are output.
+  * All the metadata is carried out in two dataclasess, `CameraSolution` and `GuiderSolution`.
+  * The output data model has changed. Former `proc-` files are now named `lvm.{telescope}.guider`, and sources are saved as `parquet` tables. The latter allows to preserve the column types in the presence of missing data.
+
+
 ## 0.3.0 - September 1, 2023
 
 ### 🚀 New
