@@ -545,8 +545,8 @@ class Guider:
 
         max_ax_correction = self.config.get("max_ax_correction", 3600)
 
-        min_rot_correction = self.config.get("min_rot_correction", 0.01)
-        max_rot_correction = self.config.get("max_rot_correction", 3)
+        # min_rot_correction = self.config.get("min_rot_correction", 0.01)
+        # max_rot_correction = self.config.get("max_rot_correction", 3)
 
         if numpy.any(numpy.abs([off0, off1]) > max_ax_correction):
             self.command.error("Requested correction is too big. Not applying it.")
