@@ -576,18 +576,18 @@ class Guider:
         if cmd.status.did_fail:
             raise RuntimeError(f"Failed offsetting telescope {telescope}.")
 
-        if self.config.get("has_kmirror", True) and self.is_rot_offset_allowed():
-            if off_rot > max_rot_correction:
-                self.command.warning("Requested rotator correction is too big.")
-            elif off_rot > min_rot_correction:
-                km = f"lvm.{telescope}.km"
-                cmd_km_str = f"slewAdjust --offset_angle {off_rot:.6f}"
-                cmd_km = await self.command.send_command(km, cmd_km_str)
+        # if self.config.get("has_kmirror", True) and self.is_rot_offset_allowed():
+        #     if off_rot > max_rot_correction:
+        #         self.command.warning("Requested rotator correction is too big.")
+        #     elif off_rot > min_rot_correction:
+        #         km = f"lvm.{telescope}.km"
+        #         cmd_km_str = f"slewAdjust --offset_angle {off_rot:.6f}"
+        #         cmd_km = await self.command.send_command(km, cmd_km_str)
 
-                if cmd_km.status.did_fail:
-                    self.command.error(f"Failed offsetting k-mirror {telescope}.")
-                else:
-                    applied_rot = off_rot
+        #         if cmd_km.status.did_fail:
+        #             self.command.error(f"Failed offsetting k-mirror {telescope}.")
+        #         else:
+        #             applied_rot = off_rot
 
         return applied_radec, applied_motax, applied_rot
 
