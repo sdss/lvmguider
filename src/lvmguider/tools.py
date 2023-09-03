@@ -485,7 +485,9 @@ def estimate_zeropoint(
 def get_dark_subtracted_data(file: pathlib.Path | str) -> tuple[ARRAY_2D_F32, bool]:
     """Returns a background or dark subtracted image."""
 
-    hdul = fits.open(str(file))
+    path = pathlib.Path(file)
+
+    hdul = fits.open(str(path))
 
     exptime = hdul["RAW"].header["EXPTIME"]
 
@@ -493,7 +495,7 @@ def get_dark_subtracted_data(file: pathlib.Path | str) -> tuple[ARRAY_2D_F32, bo
     data: ARRAY_2D_F32 = hdul["RAW"].data.copy().astype("f4") / exptime
 
     # Get data and subtract dark or fit background.
-    dirname = hdul["PROC"].header["DIRNAME"]
+    dirname = hdul["PROC"].header.get("DIRNAME", path.parent)
     dark_file = hdul["PROC"].header["DARKFILE"]
 
     dark_path = pathlib.Path(dirname) / dark_file
