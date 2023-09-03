@@ -11,6 +11,8 @@ from __future__ import annotations
 import pathlib
 from datetime import datetime
 
+from typing import Any, cast
+
 import numpy
 import pandas
 from astropy.coordinates import EarthLocation, SkyCoord
@@ -463,6 +465,7 @@ def match_with_gaia(
     gaia_sources: pandas.DataFrame | None = None,
     max_separation: float = 2,
     concat: bool = False,
+    db_connection_params: dict[str, Any] = {},
 ) -> tuple[pandas.DataFrame, int]:
     """Match detections to Gaia sources using nearest neighbours.
 
@@ -481,6 +484,9 @@ def match_with_gaia(
     concat
         If `True`, the returned data frame is the input ``sources`` concatenated
         with the match information.
+    db_connection_params
+        Database connection parameters to pass to `.get_gaia_sources` if
+        ``gaia_sources`` are not passed.
 
     Returns
     -------
@@ -499,7 +505,7 @@ def match_with_gaia(
     epoch_diff = epoch - GAIA_EPOCH
 
     if gaia_sources is None:
-        gaia_sources = get_gaia_sources(wcs)
+        gaia_sources = get_gaia_sources(wcs, db_connection_params=db_connection_params)
 
     sources = sources.copy()
     gaia_sources = gaia_sources.copy()
@@ -532,19 +538,20 @@ def match_with_gaia(
 
     # Get Gaia rows for the valid matches. Change their indices to those
     # of their matching sources (which are 0..len(sources)-1 since we reindexed).
-    matches: pandas.DataFrame = gaia_sources.iloc[ii[valid]]
+    matches: pandas.DataFrame = gaia_sources.iloc[ii[valid]].copy()
     assert isinstance(matches, pandas.DataFrame)
 
     matches.index = pandas.Index(numpy.arange(len(ii))[valid])
 
-    dx = matches.xpix - sources.x
-    dy = matches.ypix - sources.y
-    matches["match_sep"] = numpy.hypot(dx, dy) * PIXSCALE
+    dx = (matches.xpix - sources.x).astype(numpy.float32)
+    dy = (matches.ypix - sources.y).astype(numpy.float32)
+    match_sep = cast(pandas.Series, numpy.hypot(dx, dy) * PIXSCALE)
+    matches.loc[:, "match_sep"] = match_sep.loc[matches.index]
 
-    matches.drop(columns=["xpix", "ypix"], inplace=True)
+    matches = matches.drop(columns=["xpix", "ypix"])
 
     if concat:
-        sources.loc[matches.index, matches.columns] = matches
+        sources.loc[:, matches.columns] = matches
         return sources, valid.sum()
 
     return matches, valid.sum()

@@ -30,12 +30,12 @@ from lvmguider.tools import (
     get_frameno,
     get_guider_path,
     header_from_model,
+    nan_or_none,
     run_in_executor,
     update_fits,
 )
 from lvmguider.transformations import (
     delta_radec2mot_axis,
-    get_crota2,
     match_with_gaia,
     solve_camera_with_astrometrynet,
     wcs_from_gaia,
@@ -140,7 +140,7 @@ class Guider:
     def is_guiding(self):
         """Are we guiding?"""
 
-        return self.command.actor.status & GuiderStatus.GUIDING
+        return bool(self.command.actor.status & GuiderStatus.GUIDING)
 
     def revert_to_acquisition(self):
         """Reset the flags for acquisition mode."""
@@ -223,9 +223,14 @@ class Guider:
 
         # Initial guider solution.
         guider_solution = GuiderSolution(
-            frameno,
-            camera_solutions,
+            frameno=frameno,
+            solutions=camera_solutions,
+            telescope=self.telescope,
             guide_pixel=numpy.array(self.pixel),
+            ra_field=self.field_centre[0],
+            dec_field=self.field_centre[1],
+            pa_field=self.field_centre[2],
+            guide_mode="guide" if self.is_guiding() else "acquisition",
         )
 
         if guider_solution.n_cameras_solved == 0:
@@ -233,9 +238,9 @@ class Guider:
 
         else:
             try:
+                assert guider_solution.sources is not None
                 mf_wcs = wcs_from_gaia(guider_solution.sources, ["x_mf", "y_mf"])
-                guider_solution.mf_wcs = mf_wcs
-                guider_solution.pa = get_crota2(mf_wcs)
+                guider_solution.wcs = mf_wcs
 
             except RuntimeError as err:
                 self.command.error(f"Failed generating master frame WCS: {err}")
@@ -356,7 +361,12 @@ class Guider:
         sources_file = file.parent / file.with_suffix(".parquet")
         if not sources_file.exists():
             self.command.warning(f"Cannot find sources file for camera {camname!r}.")
-            return CameraSolution(frameno, camname, file)
+            return CameraSolution(
+                frameno=frameno,
+                camera=camname,
+                path=file,
+                telescope=self.telescope,
+            )
 
         sources = pandas.read_parquet(sources_file)
         matched_sources = sources.copy()
@@ -441,15 +451,15 @@ class Guider:
         sources.update(zp)
 
         camera_solution = CameraSolution(
-            frameno,
-            camname,
-            file,
+            frameno=frameno,
+            camera=camname,
+            path=file,
             sources=sources,
             wcs_mode=wcs_mode,
             wcs=wcs,
             matched=matched,
             ref_frame=ref_frame,
-            zero_point=zp.zp.median(),
+            telescope=self.telescope,
         )
 
         if camera_solution.solved is False:
@@ -619,14 +629,9 @@ class Guider:
     async def update_fits(self, guider_solution: GuiderSolution):
         """Updates the ``lvm.agcam`` files and creates the ``lvm.guider`` file."""
 
-        def nan_or_none(value: float, precision: int | None = None):
-            if numpy.isnan(value):
-                return None
-            if precision is not None:
-                return numpy.round(value, precision)
-            return value
-
         coros = []
+
+        assert guider_solution.sources is not None
 
         # Update lvm.agcam PROC extension.
         for solution in guider_solution.solutions:
@@ -659,7 +664,7 @@ class Guider:
         guider_path = get_guider_path(guider_solution.solutions[0].path)
         sources_path = guider_path.with_suffix(".parquet")
 
-        gheader = header_from_model("GUIDERDATA")
+        gheader = header_from_model("GUIDERDATA_HEADER")
 
         gheader["GUIDERV"] = __version__
         gheader["TELESCOP"] = self.telescope
@@ -704,8 +709,8 @@ class Guider:
         gheader["AX1KD"] = self.pid_ax1.Kd
         gheader["ZEROPT"] = nan_or_none(guider_solution.zero_point, 3)
 
-        if guider_solution.mf_wcs:
-            gheader.extend(guider_solution.mf_wcs.to_header())
+        if guider_solution.wcs:
+            gheader.extend(guider_solution.wcs.to_header())
 
         guider_hdul = fits.HDUList([fits.PrimaryHDU()])
         guider_hdul.append(fits.ImageHDU(data=None, header=gheader, name="GUIDERDATA"))

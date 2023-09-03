@@ -9,19 +9,21 @@
 from __future__ import annotations
 
 import pathlib
+import warnings
 from dataclasses import dataclass, field
+
+from typing import Literal
 
 import nptyping as npt
 import numpy
 import pandas
 from astropy.io import fits
-from astropy.table import Table
 from astropy.time import Time
 from astropy.wcs import WCS
 from packaging.version import Version
 
 from lvmguider import config
-from lvmguider.tools import get_frameno
+from lvmguider.tools import dataframe_from_model, get_frameno
 from lvmguider.transformations import get_crota2
 from lvmguider.types import ARRAY_2D_F32
 
@@ -29,30 +31,75 @@ from lvmguider.types import ARRAY_2D_F32
 __all__ = ["CameraSolution", "GuiderSolution", "FrameData"]
 
 
-@dataclass
-class CameraSolution:
-    """A camera solution, including the determined WCS."""
+WCS_MODE_T = Literal["none"] | Literal["astrometrynet"] | Literal["gaia"]
 
-    frameno: int
-    camera: str
-    path: pathlib.Path
-    sources: pandas.DataFrame | None = None
+
+@dataclass(kw_only=True)
+class BaseSolution:
+    """A base class for an object with an astrometric solution."""
+
+    telescope: str
     wcs: WCS | None = None
     matched: bool = False
-    zero_point: float = numpy.nan
-    pa: float = numpy.nan
-    ref_frame: pathlib.Path | None = None
-    wcs_mode: str = "none"
 
     def __post_init__(self):
-        if numpy.isnan(self.pa) and self.wcs is not None:
-            self.pa = get_crota2(self.wcs)
+        if self.sources is None:
+            self.sources = dataframe_from_model("SOURCES")
 
     @property
     def solved(self):
         """Was the frame solved?"""
 
         return self.wcs is not None
+
+    @property
+    def pa(self):
+        """Returns the position angle from the WCS."""
+
+        if self.wcs is not None:
+            return get_crota2(self.wcs)
+
+        return numpy.nan
+
+    @property
+    def zero_point(self):
+        """Returns the median zero point."""
+
+        if self.sources is not None:
+            return self.sources.zp.dropna().median()
+
+        return numpy.nan
+
+    @property
+    def fwhm(self):
+        """Returns the FWHM from the extracted sources."""
+
+        if self.sources is not None:
+            return self.sources.loc[self.sources.valid == 1].fwhm.dropna().median()
+
+        return numpy.nan
+
+    @property
+    def pointing(self) -> npt.NDArray[npt.Shape["2"], npt.Float64]:
+        """Returns the camera pointing at its central pixel."""
+
+        if not self.wcs:
+            return numpy.array([numpy.nan, numpy.nan])
+
+        skyc = self.wcs.pixel_to_world(*config["xz_ag_frame"])
+        return numpy.array([skyc.ra.deg, skyc.dec.deg])
+
+
+@dataclass(kw_only=True)
+class CameraSolution(BaseSolution):
+    """A camera solution, including the determined WCS."""
+
+    frameno: int
+    camera: str
+    path: pathlib.Path
+    sources: pandas.DataFrame | None = None
+    ref_frame: pathlib.Path | None = None
+    wcs_mode: WCS_MODE_T = "none"
 
     @classmethod
     def open(cls, file: str | pathlib.Path):
@@ -64,9 +111,6 @@ class CameraSolution:
         if "PROC" not in hdul:
             raise ValueError("HDU list does not have a PROC extension.")
 
-        if "SOURCES" not in hdul:
-            raise ValueError("HDU list does not have a SOURCES extension.")
-
         raw = hdul["RAW"].header
         proc = hdul["PROC"].header
 
@@ -74,35 +118,39 @@ class CameraSolution:
             raise ValueError("Guider version not found.")
 
         guiderv = Version(proc["GUIDERV"])
-        if guiderv < Version("0.4.0a0"):
+        if guiderv < Version("0.3.0a0"):
             raise ValueError(
                 "The file was generated with an unsupported version of lvmguider."
             )
 
-        sources = Table(hdul["SOURCES"].data).to_pandas()
+        sources: pandas.DataFrame | None = None
+        if proc["SOURCESF"] != "":
+            dirname = file.parent
+            sources = pandas.read_parquet(dirname / proc["SOURCESF"])
 
-        wcs_mode = proc["WCSMODE"]
-        wcs = WCS(proc) if wcs_mode != "none" else None
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            wcs_mode = proc["WCSMODE"]
+            wcs = WCS(proc) if wcs_mode != "none" else None
 
         ref_file = proc["REFFILE"]
         ref_frame = pathlib.Path(ref_file) if ref_file is not None else None
 
         return CameraSolution(
-            get_frameno(file),
-            raw["CAMNAME"],
-            file.absolute(),
-            sources,
+            frameno=get_frameno(file),
+            telescope=raw["TELESCOP"],
+            camera=raw["CAMNAME"],
+            path=file.absolute(),
+            sources=sources,
             wcs=wcs,
             wcs_mode=wcs_mode,
-            matched=len(sources.ra.dropna()) > 0,
-            pa=proc["PA"] or numpy.nan,
-            zero_point=proc["ZEROPT"] or numpy.nan,
+            matched=len(sources.ra.dropna()) > 0 if sources is not None else False,
             ref_frame=ref_frame,
         )
 
 
-@dataclass
-class GuiderSolution:
+@dataclass(kw_only=True)
+class GuiderSolution(BaseSolution):
     """A class to hold an astrometric solution determined by the guider.
 
     This class abstracts an astrometric solution regardless of whether it was
@@ -111,29 +159,29 @@ class GuiderSolution:
     """
 
     frameno: int
+    telescope: str
     solutions: list[CameraSolution]
     guide_pixel: npt.NDArray[npt.Shape["2"], npt.Float32]
-    mf_wcs: WCS | None = None
-    pa: float = numpy.nan
+    ra_field: float = numpy.nan
+    dec_field: float = numpy.nan
+    pa_field: float = numpy.nan
     ra_off: float = numpy.nan
     dec_off: float = numpy.nan
+    pa_off: float = numpy.nan
     axis0_off: float = numpy.nan
     axis1_off: float = numpy.nan
-    pa_off: float = numpy.nan
     correction_applied: bool = False
     correction: list[float] = field(default_factory=lambda: [0.0, 0.0, 0.0])
+    guide_mode: str = "guide"
 
-    def __post_init__(self):
-        self.sources = pandas.concat(
+    @property
+    def sources(self):
+        """Concatenates sources from the co-added solutions."""
+
+        return pandas.concat(
             [cs.sources for cs in self.solutions if cs.sources is not None],
             axis=0,
         )
-
-        zps = self.sources.loc[:, "zp"].copy().dropna()
-        self.zero_point = zps.median()
-
-        if numpy.isnan(self.pa) and self.mf_wcs is not None:
-            self.pa = get_crota2(self.mf_wcs)
 
     def __getitem__(self, key: str):
         """Returns the associated camera solution."""
@@ -146,29 +194,29 @@ class GuiderSolution:
 
     @property
     def pointing(self) -> npt.NDArray[npt.Shape["2"], npt.Float64]:
-        """Returns the telescope pointing at boresight."""
+        """Returns the telescope pointing at boresight from the WCS."""
 
-        if not self.mf_wcs:
+        if not self.wcs:
             return numpy.array([numpy.nan, numpy.nan])
 
-        skyc = self.mf_wcs.pixel_to_world(*config["xz_full_frame"])
+        skyc = self.wcs.pixel_to_world(*config["xz_full_frame"])
         return numpy.array([skyc.ra.deg, skyc.dec.deg])
 
     @property
     def pixel_pointing(self) -> npt.NDArray[npt.Shape["2"], npt.Float64]:
-        """Returns the telescope pointing at the master frame pixel."""
+        """Returns the telescope pointing at the master frame pixel from the WCS."""
 
-        if not self.mf_wcs:
+        if not self.wcs:
             return numpy.array([numpy.nan, numpy.nan])
 
-        skyc = self.mf_wcs.pixel_to_world(*self.guide_pixel)
+        skyc = self.wcs.pixel_to_world(*self.guide_pixel)
         return numpy.array([skyc.ra.deg, skyc.dec.deg])
 
     @property
     def solved(self):
         """Was the frame solved?"""
 
-        return self.mf_wcs is not None
+        return self.wcs is not None
 
     @property
     def cameras(self):
@@ -206,12 +254,12 @@ class GuiderSolution:
             raise ValueError("Guider version not found.")
 
         guiderv = Version(guider_data["GUIDERV"])
-        if guiderv < Version("0.4.0a0"):
+        if guiderv < Version("0.3.0a0"):
             raise ValueError(
                 "The file was generated with an unsupported version of lvmguider."
             )
 
-        mf_wcs = WCS(guider_data) if guider_data["SOLVED"] else None
+        wcs = WCS(guider_data) if guider_data["SOLVED"] else None
 
         solutions: list[CameraSolution] = []
         for key in ["FILEEAST", "FILEWEST"]:
@@ -220,11 +268,11 @@ class GuiderSolution:
                 solutions.append(CameraSolution.open(dirname / guider_data[key]))
 
         return GuiderSolution(
-            get_frameno(file),
-            solutions,
-            numpy.array([guider_data["XMFPIX"], guider_data["ZMFPIX"]]),
-            mf_wcs=mf_wcs,
-            pa=guider_data,
+            frameno=get_frameno(file),
+            telescope=guider_data["TELESCOP"],
+            solutions=solutions,
+            guide_pixel=numpy.array([guider_data["XMFPIX"], guider_data["ZMFPIX"]]),
+            wcs=wcs,
             ra_off=guider_data["OFFRAMEA"] or numpy.nan,
             dec_off=guider_data["OFFDEMEA"] or numpy.nan,
             pa_off=guider_data["OFFPAMEA"] or numpy.nan,
@@ -239,13 +287,13 @@ class GuiderSolution:
         )
 
 
-@dataclass
+@dataclass(kw_only=True)
 class FrameData:
     """Data associated with a frame."""
 
-    file: pathlib.Path
-    raw_header: fits.Header
     frameno: int
+    path: pathlib.Path
+    raw_header: dict
     date_obs: Time
     sjd: int
     camera: str
@@ -254,23 +302,142 @@ class FrameData:
     image_type: str
     kmirror_drot: float
     focusdt: float
-    proc_header: fits.Header | None = None
-    proc_file: pathlib.Path | None = None
-    astrometry_header: fits.Header | None = None
-    reference_file: pathlib.Path | None = None
-    fwhm_median: float = numpy.nan
-    fwhm_std: float = numpy.nan
-    guide_mode: str | None = None
-    sources: pandas.DataFrame | None = None
+    solution: CameraSolution
     stacked: bool = False
-    wcs: WCS | None = None
-    wcs_reprocessed: bool = False
-    pa: float = numpy.nan
-    zp: float = numpy.nan
+    reprocessed: bool = False
     data: ARRAY_2D_F32 | None = None
 
     @property
-    def wcs_mode(self):
-        """Returns the origin of the ``PROC`` WCS."""
+    def sources(self):
+        """Accessor to the camera solution sources."""
 
-        return self.proc_header["WCSMODE"] if self.proc_header else None
+        return self.solution.sources
+
+
+@dataclass(kw_only=True)
+class CoAdd_CameraSolution(CameraSolution):
+    """A camera solution for a co-added frame."""
+
+    path: pathlib.Path = pathlib.Path("")
+    coadd_image: ARRAY_2D_F32 | None = None
+    frames: list[FrameData] | None = None
+    sources: pandas.DataFrame | None = None
+    sigmaclip: bool = False
+    sigmaclip_sigma: float | None = None
+
+    def frame_data(self):
+        """Returns a Pandas data frame from a list of `.FrameData`."""
+
+        df = dataframe_from_model("FRAMEDATA")
+
+        if self.frames is None:
+            return df
+
+        records: list[dict] = []
+        for fd in self.frames:
+            records.append(
+                dict(
+                    frameno=fd.frameno,
+                    date_obs=fd.date_obs.isot,
+                    camera=fd.camera,
+                    telescope=fd.telescope,
+                    exptime=fd.exptime,
+                    kmirror_drot=fd.kmirror_drot,
+                    focusdt=fd.focusdt,
+                    fwhm=fd.solution.fwhm,
+                    pa=fd.solution.pa,
+                    zero_point=fd.solution.zero_point,
+                    stacked=int(fd.stacked),
+                    solved=int(fd.solution.solved),
+                    wcs_mode=fd.solution.wcs_mode,
+                )
+            )
+
+        df = pandas.DataFrame.from_records(records)
+        df = df.sort_values(["frameno", "camera"])
+
+        df.reset_index(drop=True, inplace=True)
+
+        return df
+
+
+@dataclass(kw_only=True)
+class GlobalSolution(BaseSolution):
+    """A global solution from co-added frames."""
+
+    coadd_solutions: list[CoAdd_CameraSolution]
+    guider_solutions: list[GuiderSolution]
+    path: pathlib.Path = pathlib.Path("")
+    matched: bool = True
+
+    @property
+    def sources(self):
+        """Concatenates sources from the co-added solutions."""
+
+        return pandas.concat(
+            [cs.sources for cs in self.coadd_solutions if cs.sources is not None],
+            axis=0,
+        )
+
+    @property
+    def pointing(self) -> npt.NDArray[npt.Shape["2"], npt.Float64]:
+        """Returns the camera pointing at its central pixel."""
+
+        if not self.wcs:
+            return numpy.array([numpy.nan, numpy.nan])
+
+        skyc = self.wcs.pixel_to_world(*config["xz_full_frame"])
+        return numpy.array([skyc.ra.deg, skyc.dec.deg])
+
+    def frame_data(self):
+        """Concatenates the frame data and returns a Pandas data frame."""
+
+        frame_data = pandas.concat([cs.frame_data() for cs in self.coadd_solutions])
+        frame_data.sort_values(["frameno", "camera"], inplace=True)
+
+        return frame_data
+
+    def guider_data(self):
+        """Constructs a data frame with guider data."""
+
+        df = dataframe_from_model("GUIDERDATA_FRAME")
+
+        records: list[dict] = []
+        for gs in self.guider_solutions:
+            pa = get_crota2(self.wcs) if self.wcs is not None else numpy.nan
+            pointing = gs.pointing
+
+            records.append(
+                dict(
+                    frameno=gs.frameno,
+                    telescope=gs.telescope,
+                    fwhm=gs.fwhm,
+                    pa=pa,
+                    zero_point=gs.zero_point,
+                    solved=int(gs.solved),
+                    guide_mode=gs.guide_mode,
+                    x_mf_pixel=gs.guide_pixel[0],
+                    z_mf_pixel=gs.guide_pixel[1],
+                    ra=pointing[0],
+                    dec=pointing[1],
+                    ra_field=gs.ra_field,
+                    dec_field=gs.dec_field,
+                    pa_field=gs.pa_field,
+                    ra_off=gs.ra_off,
+                    dec_off=gs.dec_off,
+                    pa_off=gs.pa_off,
+                    axis0_off=gs.axis0_off,
+                    axis1_off=gs.axis1_off,
+                    applied=int(gs.correction_applied),
+                    ax0_applied=gs.correction[0],
+                    ax1_applied=gs.correction[1],
+                    rot_applied=gs.correction[2],
+                )
+            )
+
+        df = pandas.DataFrame.from_records(records)
+        df = df.sort_values(["frameno"])
+
+        df.reset_index(drop=True, inplace=True)
+
+        return df

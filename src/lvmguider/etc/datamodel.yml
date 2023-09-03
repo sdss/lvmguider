@@ -71,7 +71,7 @@ SOURCES:
   ap_fluxerr: 'f4'
   zp: 'f4'
 
-GUIDERDATA:
+GUIDERDATA_HEADER:
   GUIDERV: [null, 'Version of lvmguider']
   TELESCOP: [null, 'Telescope that took the images']
   GUIDMODE: ['acquition', 'Acquisition or guiding?']
@@ -108,3 +108,107 @@ GUIDERDATA:
   AX1KI: [null, 'Axis 1 PID I term']
   AX1KD: [null, 'Axis 1 PID D term']
   ZEROPT: [null, '[mag] Zero point of the LVM magnitude']
+
+FRAMEDATA:
+  frameno: 'Int16'
+  telescope: 'S4'
+  camera: 'S4'
+  date_obs: 'S25'
+  exptime: 'f4'
+  kmirror_drot: 'f4'
+  focusdt: 'f4'
+  fwhm_median: 'f4'
+  pa: 'f4'
+  zero_point: 'f4'
+  stacked: 'Int8'
+  solved: 'Int8'
+  wcs_mode: 'S15'
+
+GUIDERDATA_FRAME:
+  frameno: 'Int16'
+  telescope: 'S4'
+  zero_point: 'f4'
+  solved: 'Int8'
+  guide_mode: 'S12'
+  x_mf_pixel: 'f4'
+  z_mf_pixel: 'f4'
+  ra: 'f8'
+  dec: 'f8'
+  pa: 'f4'
+  ra_field: 'f8'
+  dec_field: 'f8'
+  pa_field: 'f4'
+  ra_off: 'f4'
+  dec_off: 'f4'
+  pa_off: 'f4'
+  axis0_off: 'f4'
+  axis1_off: 'f4'
+  applied: 'Int8'
+  ax0_applied: 'f4'
+  ax1_applied: 'f4'
+  rot_applied: 'f4'
+
+CAMERA_COADD:
+  TELESCOP: [null, 'Telescope that took the data']
+  CAMNAME: [null, 'Camera name']
+  INSTRUME: ['LVM', 'SDSS-V Local Volume Mapper']
+  OBSERVAT: ['LCO', 'Observatory']
+  MJD: [null, 'SDSS MJD (MJD+0.4)']
+  FRAME0: [null, 'First frame in guide sequence']
+  FRAMEN: [null, 'Last frame in guide sequence']
+  NFRAMES: [null - frame0 + 1, 'Number of frames in sequence']
+  STACK0: [null, 'First stacked frame']
+  STACKN: [null, 'Last stacked frame']
+  NSTACKED: [null, 'Number of frames stacked']
+  COESTIM: ['none', 'Estimator used to stack data']
+  SIGCLIP: [false, 'Was the stack sigma-clipped?']
+  SIGMA: [null, 'Sigma used for sigma-clipping']
+  OBSTIME0: [null, 'DATE-OBS of first frame']
+  OBSTIMEN: [null, 'DATE-OBS of last frame']
+  FWHM0: [null, '[arcsec] FWHM of sources in first frame']
+  FWHMN: [null, '[arcsec] FWHM of sources in last frame']
+  FHHMMED: [null, '[arcsec] Median of the FHWM of all frames']
+  COFWHM: [null, '[arcsec] Co-added median FWHM']
+  COFWHMST: [null, '[arcsec] Co-added FWHM standard deviation']
+  PACOEFFA: [null, 'Slope of PA fit']
+  PACOEFFB: [null, 'Intercept of PA fit']
+  PAMIN: [null, '[deg] Minimum PA from WCS']
+  PAMAX: [null, '[deg] Maximum PA from WCS']
+  PADRIFT: [null, '[deg] PA drift in frame range']
+  ZEROPT: [null, '[mag] Instrumental zero-point']
+  SOLVED: [false, 'Was the co-added frame astrometrically solved?']
+  WARNPADR: [null, 'PA drift > 0.1 degrees']
+  WARNTRAN: [null, 'Transparency N magnitudes above photometric']
+  WARNMATC: [null, 'Co-added frame could not be matched with Gaia']
+
+GLOBAL_COADD:
+  TELESCOP: [null, 'Telescope that took the data']
+  INSTRUME: ['LVM', 'SDSS-V Local Volume Mapper']
+  OBSERVAT: ['LCO', 'Observatory']
+  MJD: [null, 'SDSS MJD (MJD+0.4)']
+  FRAME0: [null, 'First frame in guide sequence']
+  FRAMEN: [null, 'Last frame in guide sequence']
+  NFRAMES: [null - frame0 + 1, 'Number of frames in sequence']
+  OBSTIME0: [null, 'DATE-OBS of first frame']
+  OBSTIMEN: [null, 'DATE-OBS of last frame']
+  FWHM0: [null, '[arcsec] FWHM of sources in first frame']
+  FWHMN: [null, '[arcsec] FWHM of sources in last frame']
+  FHHMMED: [null, '[arcsec] Median of the FHWM of all frames']
+  PACOEFFA: [null, 'Slope of PA fit']
+  PACOEFFB: [null, 'Intercept of PA fit']
+  PAMIN: [null, '[deg] Minimum PA from WCS']
+  PAMAX: [null, '[deg] Maximum PA from WCS']
+  PADRIFT: [null, '[deg] PA drift in frame range']
+  ZEROPT: [null, '[mag] Instrumental zero-point']
+  SOLVED: [false, 'Was the global frame astrometrically solved?']
+  XMFPIX: [null, 'The x pixel of the master frame']
+  ZMFPIX: [null, 'The z pixel of the master frame']
+  RAFIELD: [null, '[deg] Field RA']
+  DECFIELD: [null, '[deg] Field Dec']
+  PAFIELD: [null, '[deg] Field PA']
+  RAMEAS: [null, '[deg] Measured RA position (boresight)']
+  DECMEAS: [null, '[deg] Measured Dec position (boresight)']
+  PAMEAS: [null, '[deg] Position angle from master frame WCS']
+  WARNPA: [null, 'PA pointing error > 0.7 arcmin']
+  WARNPADR: [null, 'PA drift > 0.7 arcmin']
+  WARNTRAN: [null, 'Transparency N magnitudes above photometric']
