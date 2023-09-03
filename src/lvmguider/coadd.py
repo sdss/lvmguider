@@ -34,6 +34,7 @@ from lvmguider.dataclasses import (
     GuiderSolution,
 )
 from lvmguider.extraction import extract_marginal, extract_sources
+from lvmguider.plotting import plot_qa
 from lvmguider.tools import (
     angle_difference,
     estimate_zeropoint,
@@ -169,6 +170,7 @@ def create_global_coadd(
     telescope: str,
     outpath: str | None = "default",
     save_camera_coadded: bool = False,
+    generate_qa: bool = True,
     **coadd_camera_kwargs,
 ):
     """Produces a global co-added frame.
@@ -308,6 +310,9 @@ def create_global_coadd(
         frames_path = path.with_name(path.stem + "_frames.parquet")
         log.debug(f"Writing frame data to {frames_path!s}")
         frame_data.to_parquet(frames_path)
+
+    if generate_qa:
+        plot_qa(gs)
 
     return gs
 
