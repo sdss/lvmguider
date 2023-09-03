@@ -494,13 +494,18 @@ def get_dark_subtracted_data(file: pathlib.Path | str) -> tuple[ARRAY_2D_F32, bo
     # Data in counts per second.
     data: ARRAY_2D_F32 = hdul["RAW"].data.copy().astype("f4") / exptime
 
-    # Get data and subtract dark or fit background.
-    dirname = hdul["PROC"].header.get("DIRNAME", path.parent)
-    dark_file = hdul["PROC"].header["DARKFILE"]
+    if "PROC" in hdul:
+        # Get data and subtract dark or fit background.
+        dirname = hdul["PROC"].header.get("DIRNAME", path.parent)
+        dark_file = hdul["PROC"].header.get("DARKFILE", "")
 
-    dark_path = pathlib.Path(dirname) / dark_file
+        dark_path = pathlib.Path(dirname) / dark_file
 
-    if dark_file != "" and dark_path.exists():
+    else:
+        dark_file = ""
+        dark_path = None
+
+    if dark_file != "" and dark_path is not None and dark_path.exists():
         dark: ARRAY_2D_F32 = fits.getdata(str(dark_path), "RAW").astype("f4")
         dark_exptime: float = fits.getval(str(dark_path), "EXPTIME", "RAW")
         data = data - dark / dark_exptime
@@ -551,6 +556,39 @@ def get_files_in_time_range(
         for file in files
         if os.path.getmtime(file) > dt0 and os.path.getmtime(file) < dt1
     ]
+
+
+def get_agcam_in_time_range(
+    path: pathlib.Path,
+    time0: Time,
+    time1: Time,
+    pattern: str = "*.fits",
+):
+    """Similar to `.get_files_in_time_range` but uses the keyword ``DATE-OBS``."""
+
+    files = path.glob(pattern)
+
+    matched: list[pathlib.Path] = []
+    for file in files:
+        try:
+            hdul = fits.open(file)
+        except Exception:
+            continue
+
+        if "RAW" in hdul:
+            header = hdul["RAW"].header
+        else:
+            header = hdul[0].header
+
+        if "DATE-OBS" not in header:
+            continue
+
+        time = Time(header["DATE-OBS"], format="isot")
+        # print(time, time0, time1, time < time1, time > time0)
+        if time > time0 and time < time1:
+            matched.append(file)
+
+    return matched
 
 
 def get_guider_files_from_spec(
@@ -616,9 +654,11 @@ def get_guider_files_from_spec(
     frame1 = header.get(f"G{telescope.upper()}FRN", None)
 
     if use_time_range is True or (frame0 is None or frame1 is None):
+        log.warning(f"Matching guider frames by date for file {spec_file.name}")
+
         time0 = Time(header["INTSTART"])
         time1 = Time(header["INTEND"])
-        files = get_files_in_time_range(
+        files = get_agcam_in_time_range(
             agcam_path,
             time0,
             time1,
@@ -626,7 +666,7 @@ def get_guider_files_from_spec(
         )
 
         if len(files) == 0:
-            raise ValueError(f"Cannot determine the guider frames for {spec_file!s}")
+            raise ValueError(f"Cannot find guider frames for {spec_file!s}")
 
         return sorted(files)
 

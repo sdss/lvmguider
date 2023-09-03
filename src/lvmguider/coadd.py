@@ -10,15 +10,18 @@ from __future__ import annotations
 
 import multiprocessing
 import os
+import os.path
 import pathlib
 from functools import partial
 
-from typing import TYPE_CHECKING, Sequence
+from typing import TYPE_CHECKING, Literal, Sequence
 
 import numpy
+import pandas
 from astropy.io import fits
 from astropy.stats import sigma_clip
 from astropy.time import Time
+from packaging.version import Version
 
 from sdsstools.time import get_sjd
 
@@ -30,7 +33,7 @@ from lvmguider.dataclasses import (
     GlobalSolution,
     GuiderSolution,
 )
-from lvmguider.extraction import extract_marginal
+from lvmguider.extraction import extract_marginal, extract_sources
 from lvmguider.tools import (
     angle_difference,
     estimate_zeropoint,
@@ -42,42 +45,85 @@ from lvmguider.tools import (
     polyfit_with_sigclip,
     sort_files_by_camera,
 )
-from lvmguider.transformations import ag_to_full_frame, match_with_gaia, wcs_from_gaia
+from lvmguider.transformations import (
+    ag_to_full_frame,
+    get_crota2,
+    match_with_gaia,
+    solve_camera_with_astrometrynet,
+    wcs_from_gaia,
+)
 from lvmguider.types import ARRAY_2D_F32
 
 
 if TYPE_CHECKING:
-    pass
+    from lvmguider.astrometrynet import AstrometrySolution
 
 
 AnyPath = str | os.PathLike
 
 
+MULTIPROCESS_MODE: Literal["frames"] | Literal["cameras"] = "frames"
+MULTIPROCESS_NCORES: dict[str, int] = {"frames": 12, "cameras": 2}
+
+
 def process_all_spec_frames(path: AnyPath, **kwargs):
-    """Processes all the spectrograph frames in a directory."""
+    """Processes all the spectrograph frames in a directory.
+
+    Parameters
+    ----------
+    path
+        The path to the directory to process. This is usually a
+        ``/data/spectro/<MJD>`` directory.
+    kwargs
+        Keyword arguments to pass to `.coadd_from_spec_frame`.
+
+    """
 
     path = pathlib.Path(path)
     spec_files = sorted(path.glob("sdR-*-b1-*.fits.gz"))
 
     for file in spec_files:
         # Skip cals and frames without any guider information.
+
         header = fits.getheader(str(file))
 
         if header["IMAGETYP"] != "object":
             continue
 
-        coadd_from_spec_frame(file, fail_silent=True, **kwargs)
+        if header["EXPTIME"] < 120:
+            log.warning(f"Spec frame {file.name!s} is too short. Skipping.")
+            continue
+
+        coadd_from_spec_frame(file, **kwargs)
 
 
 def coadd_from_spec_frame(
     file: AnyPath,
     outpath: str | None = None,
     telescopes: list[str] = ["sci", "spec", "skye", "skyw"],
-    fail_silent: bool = False,
     use_time_range: bool | None = None,
     **kwargs,
 ):
-    """Processes the guider frames associated with an spectrograph file."""
+    """Processes the guider frames associated with an spectrograph file.
+
+    Parameters
+    ----------
+    file
+        The spectro file to process. Guider frames will be selected
+        from the header keywords in the file.
+    output
+        The path where to save the global co-added frame. If `None`,
+        uses the default path which includes the frame number of the
+        spectro file.
+    telescopes
+        The list of telescope guider frames to process.
+    use_time_range
+        If `True`, selects guider frames from their timestamps instead
+        of using the headers in the spectro file.
+    kwargs
+        Keyword arguments to pass to `.create_global_coadd`.
+
+    """
 
     outpath = outpath or config["coadds"]["paths"]["coadd_spec_path"]
 
@@ -89,28 +135,33 @@ def coadd_from_spec_frame(
     outpath = outpath.format(specno=specno)
 
     for telescope in telescopes:
+        log.info(
+            f"Generating co-added frame for {telescope!r} for "
+            f"spectrograph file {file!s}"
+        )
+
         try:
+            log.debug("Identifying guider frames.")
             frames = get_guider_files_from_spec(
                 file,
                 telescope=telescope,
                 use_time_range=use_time_range,
             )
         except Exception as err:
-            if fail_silent is False:
-                log.error(f"Cannot process {telescope} for {file!s}: {err}")
+            log.error(f"Cannot process {telescope!r} for {file!s}: {err}")
             continue
 
         if len(frames) < 4:
-            if fail_silent is False:
-                log.warning(f"No guider frames found for {telescope!r} in {file!s}")
+            log.warning(f"No guider frames found for {telescope!r} in {file!s}")
             continue
 
-        log.info(
-            f"Generating co-added frame for {telescope!r} for "
-            f"spectrograph file {file!s}"
-        )
-
-        create_global_coadd(frames, telescope=telescope, outpath=outpath, **kwargs)
+        try:
+            create_global_coadd(frames, telescope=telescope, outpath=outpath, **kwargs)
+        except Exception as err:
+            log.critical(
+                f"Failed generating co-added frames for {file!s} on "
+                f"telescope {telescope!r}: {err}"
+            )
 
 
 def create_global_coadd(
@@ -166,9 +217,13 @@ def create_global_coadd(
     frame_nos = set([get_frameno(file) for file in files])
 
     # Co-add each camera independently.
-    with multiprocessing.Pool(2) as pool:
-        coadd_camera_partial = partial(coadd_camera, **coadd_camera_kwargs)
-        coadd_solutions = list(pool.map(coadd_camera_partial, camera_files))
+    coadd_camera_partial = partial(coadd_camera, **coadd_camera_kwargs)
+
+    if MULTIPROCESS_MODE == "cameras":
+        with multiprocessing.Pool(MULTIPROCESS_NCORES["cameras"]) as pool:
+            coadd_solutions = list(pool.map(coadd_camera_partial, camera_files))
+    else:
+        coadd_solutions = list(map(coadd_camera_partial, camera_files))
 
     # Now create a global solution.
     root = pathlib.Path(files[0]).parent
@@ -340,7 +395,17 @@ def coadd_camera(
 
     # Loop over each file, add the dark-subtracked data to the stack, and collect
     # frame metadata.
-    _frames = list(map(create_framedata, paths))
+    create_framedata_partial = partial(
+        create_framedata,
+        db_connection_params=db_connection_params,
+    )
+
+    if MULTIPROCESS_MODE == "frames":
+        with multiprocessing.Pool(MULTIPROCESS_NCORES["frames"]) as pool:
+            _frames = list(pool.map(create_framedata_partial, paths))
+    else:
+        _frames = list(map(create_framedata_partial, paths))
+
     frames = [frame for frame in _frames if frame is not None]
 
     data_stack: list[ARRAY_2D_F32] = []
@@ -387,7 +452,7 @@ def coadd_camera(
         del data_stack
         assert coadd_image is not None
 
-        coadd_solution = process_coadd(
+        coadd_solution = process_camera_coadd(
             coadd_image,
             frames,
             db_connection_params=db_connection_params,
@@ -449,12 +514,28 @@ def coadd_camera(
     return coadd_solution
 
 
-def create_framedata(path: pathlib.Path):
+def create_framedata(path: pathlib.Path, db_connection_params: dict = {}):
     """Collects information from a guider frame into a `.FrameData` object."""
+
+    # Copy the original path.
+    orig_path: pathlib.Path = path
+    reprocessed: bool = False
 
     if not path.exists():
         log.error(f"Cannot find frame {path!s}")
         return None
+
+    try:
+        guiderv = fits.getval(str(path), "GUIDERV", "PROC")
+    except Exception:
+        guiderv = "0.0.0"
+
+    if Version(guiderv) < Version("0.3.0a0"):
+        path = reprocess_agcam(
+            path,
+            db_connection_params=db_connection_params,
+        )
+        reprocessed = True
 
     with fits.open(str(path)) as hdul:
         # RAW header
@@ -474,12 +555,14 @@ def create_framedata(path: pathlib.Path):
 
         proc_header = hdul["PROC"].header
 
-        data, dark_sub = get_dark_subtracted_data(path)
+        # We use the original path here always because reprocessed
+        # files do not include image data.
+        data, dark_sub = get_dark_subtracted_data(orig_path)
         if dark_sub is False:
             log.debug(f"{log_h} missing dark frame. Fitting and removing background.")
 
         wcs_mode = proc_header["WCSMODE"]
-        stacked = wcs_mode == "gaia"
+        stacked = (wcs_mode == "gaia") or reprocessed
 
         try:
             solution = CameraSolution.open(path)
@@ -506,10 +589,11 @@ def create_framedata(path: pathlib.Path):
         focusdt=raw_header["FOCUSDT"],
         stacked=stacked,
         data=data,
+        reprocessed=reprocessed,
     )
 
 
-def process_coadd(
+def process_camera_coadd(
     data: ARRAY_2D_F32,
     framedata: list[FrameData],
     db_connection_params={},
@@ -517,8 +601,8 @@ def process_coadd(
     """Processes co-added data, extracts sources, and determines the WCS."""
 
     frame: FrameData | None = None
-    for fd in framedata:
-        if fd.solution.solved and fd.solution.wcs_mode == "gaia":
+    for fd in framedata[::-1]:  # In reverse order. Last file is likely to be guiding.
+        if fd.solution.solved and (fd.solution.wcs_mode == "gaia" or fd.reprocessed):
             frame = fd
             break
 
@@ -580,9 +664,15 @@ def get_guider_solutions(root: pathlib.Path, framenos: list[int], telescope: str
     for frameno in framenos:
         filename = f"lvm.{telescope}.guider_{frameno:08d}.fits"
 
+        log_h = f"{telescope}-{frameno}:"
+
         path = root / filename
         if not path.exists():
-            log.error(f"Cannot find guider solution. File {path!s} does not exist.")
+            try:
+                path = reprocess_legacy_guider_frame(root, frameno, telescope)
+            except Exception:
+                log.error(f"{log_h} failed retrieving guider solution.")
+                continue
 
         guider_data = fits.getheader(path, "GUIDERDATA")
 
@@ -607,6 +697,9 @@ def create_coadd_header(solution: CoAdd_CameraSolution):
 
     frame_data = solution.frame_data()
     stacked = frame_data.loc[frame_data.stacked == 1, :]
+
+    if len(frame_data) == 0 or len(stacked) == 0:
+        raise ValueError("No stacked data found.")
 
     frame0 = frame_data.iloc[0].frameno
     framen = frame_data.iloc[-1].frameno
@@ -790,7 +883,9 @@ def create_global_header(solution: GlobalSolution):
         pa_field = guider_data.pa_field.iloc[0]
         pa = solution.pa
         pa_warn_threshold = config["coadds"]["warnings"]["pa_error"]
-        pa_warn = abs(angle_difference(pa, pa_field)) > pa_warn_threshold
+
+        if pa_field is not None:
+            pa_warn = abs(angle_difference(pa, pa_field)) > pa_warn_threshold
 
     header = header_from_model("GLOBAL_COADD")
 
@@ -847,3 +942,231 @@ def create_global_header(solution: GlobalSolution):
         header.insert("WCSAXES", ("", "/*** CO-ADDED WCS ***/"))
 
     return header
+
+
+def reprocess_agcam(file: AnyPath, overwrite: bool = False, db_connection_params={}):
+    """Reprocesses an old file and converts it to the ``>=0.4.0`` format.
+
+    .. warning::
+        This function reprocesses a file on a best-effort basis. The astrometric
+        solution is calculated using astrometry.net, which may be different
+        from the original solution.
+
+    Paremeters
+    ----------
+    file
+        The file to reprocess.
+    overwrite
+        Exits early if the reprocessed file already exists.
+    db_connection_params
+        Database connection details to query Gaia.
+
+    Returns
+    -------
+    processed
+        The path to the processed file. The processed file is written relative
+        to the parent of the input file as ``reprocessed/<file>``. Note that
+        the reprocessed file does not include the raw original data to
+        save space since that would not have changed. Reprocessed files are
+        assigned ``GUIDERV=0.99.0``.
+
+    """
+
+    file = pathlib.Path(file)
+    reproc_path = file.parent / "reprocessed" / file.name
+    sources_path = reproc_path.with_suffix(".parquet")
+
+    if reproc_path.exists() and not overwrite:
+        log.debug(f"Found reprocessed file {reproc_path!s}")
+        return reproc_path
+
+    log.warning(f"File {file!s} is too old and will be reprocessed.")
+
+    hdul_orig = fits.open(file)
+
+    if "RAW" in hdul_orig:
+        raw = hdul_orig["RAW"].header
+    else:
+        raw = hdul_orig[0].header
+
+    proc = hdul_orig["PROC"].header if "PROC" in hdul_orig else {}
+
+    sources = extract_sources(file)
+
+    solution: AstrometrySolution = solve_camera_with_astrometrynet(
+        sources,
+        ra=raw["RA"],
+        dec=raw["DEC"],
+    )
+    wcs = solution.wcs
+
+    # Now match with Gaia.
+    if solution.wcs is not None:
+        sources, _ = match_with_gaia(
+            solution.wcs,
+            sources,
+            concat=True,
+            db_connection_params=db_connection_params,
+        )
+
+    darkfile = proc.get("DARKFILE", None)
+    if darkfile:
+        darkfile = os.path.basename(darkfile)
+
+    new_proc = header_from_model("PROC")
+    new_proc["TELESCOP"] = raw["TELESCOP"]
+    new_proc["CAMNAME"] = raw["CAMNAME"]
+    new_proc["DARKFILE"] = darkfile
+    new_proc["DIRNAME"] = str(file.parent)
+    new_proc["GUIDERV"] = "0.99.0"
+    new_proc["SOURCESF"] = sources_path.name
+    new_proc["PA"] = nan_or_none(get_crota2(wcs), 4) if wcs else None
+    new_proc["ZEROPT"] = nan_or_none(sources.zp.dropna().median())
+    new_proc["WCSMODE"] = "none" if wcs is None else "astrometrynet"
+    new_proc["ORIGFILE"] = (file.name, "Original file name")
+    new_proc["REPROC"] = (True, "Has this file been reprocessed?")
+
+    if wcs is not None:
+        new_proc.extend(wcs.to_header())
+
+    reproc_path.parent.mkdir(parents=True, exist_ok=True)
+
+    hdul = fits.HDUList(
+        [
+            fits.PrimaryHDU(),
+            fits.ImageHDU(header=raw, name="RAW"),
+            fits.ImageHDU(header=new_proc, name="PROC"),
+        ]
+    )
+    hdul.writeto(str(reproc_path), overwrite=True)
+    hdul.close()
+
+    sources.to_parquet(sources_path)
+
+    return reproc_path
+
+
+def reprocess_legacy_guider_frame(
+    root: pathlib.Path,
+    frameno: int,
+    telescope: str,
+    overwrite: bool = False,
+):
+    """Reprocesses a legacy ``proc-`` file.
+
+    .. warning::
+        This function reprocesses a file on a best-effort basis. Usually
+        the individual frames used to generate the solution have also been
+        reprocessed and the results may differ to those actually observed
+        on sky.
+
+    Paremeters
+    ----------
+    root
+        The root path (usually the ``agcam`` directory for the given MJD).
+    frameno
+        The frame number.
+    telescope
+        The telescope that took the images.
+    overwrite
+        If `False` and a reprocessed ``lvm.guider`` file has been generated,
+        uses that one.
+
+    Returns
+    -------
+    processed
+        The path to the processed file. The processed file is written relative
+        to the parent of the input file as
+        ``reprocessed/lvm,{telescope}.guider_{frameno:08d}.fits``. Reprocessed
+        files are assigned ``GUIDERV=0.99.0``. The sources ``.parquet`` table
+        file is also generated.
+
+
+    """
+
+    log_h = f"{telescope}-{frameno}:"
+
+    proc_file = root / f"proc-lvm.{telescope}.agcam_{frameno:08d}.fits"
+    guider_file = root / "reprocessed" / f"lvm.{telescope}.guider_{frameno:08d}.fits"
+    guider_sources_file = guider_file.with_suffix(".parquet")
+
+    if not proc_file.exists():
+        raise FileNotFoundError(f"Cannot find file {proc_file!s}")
+
+    if overwrite is False and guider_file.exists():
+        log.debug(f"{log_h} found reprocessed lvm.guider file {guider_file!s}.")
+        return guider_file
+
+    log.warning(f"{log_h} using legacy proc- file {proc_file!s}.")
+
+    proc = dict(fits.getheader(proc_file, "ASTROMETRY"))
+
+    gdata_header = header_from_model("GUIDERDATA_HEADER")
+    for key in gdata_header:
+        if key in proc:
+            gdata_header[key] = proc[key]
+
+    gdata_header["GUIDERV"] = "0.99.0"
+    gdata_header["DIRNAME"] = str(guider_file.parent)
+    gdata_header["SOURCESF"] = guider_sources_file.name
+
+    gdata_header["XFFPIX"] = config["xz_full_frame"][0]
+    gdata_header["ZFFPIX"] = config["xz_full_frame"][1]
+
+    gdata_header["GUIDMODE"] = "acquisition" if proc["ACQUISIT"] else "guide"
+
+    # Get the sources. Try first the location of the new-style sources file.
+    # Otherwise check if there's a reprocessed file.
+    sources: list[pandas.DataFrame] = []
+    for key in ["FILE0", "FILE1"]:
+        filex = proc.get(key, None)
+        if filex is None:
+            continue
+
+        filex = pathlib.Path(filex).name
+
+        found: bool = False
+        if (root / filex).with_suffix(".parquet").exists():
+            sources_file = (root / filex).with_suffix(".parquet")
+            sources.append(pandas.read_parquet(sources_file))
+            found = True
+
+        elif (root / "reprocessed" / filex).with_suffix(".parquet").exists():
+            sources_file = (root / "reprocessed" / filex).with_suffix(".parquet")
+            sources.append(pandas.read_parquet(sources_file))
+            found = True
+
+        if found:
+            if "east" in filex:
+                gdata_header["FILEEAST"] = filex
+            else:
+                gdata_header["FILEWEST"] = filex
+
+    if len(sources) == 0:
+        raise RuntimeError(f"No sources found for guider frame {proc_file!s}")
+
+    sources_concat = pandas.concat(sources)
+    if len(sources_concat.ra.dropna()) > 5:
+        wcs = wcs_from_gaia(sources_concat, xy_cols=["x_ff", "y_ff"])
+    else:
+        log.warning(f"Insufficient Gaia matches for {proc_file!s}. Cannot fit WCS.")
+        wcs = None
+
+    if wcs is not None:
+        gdata_header.extend(wcs.to_header())
+
+        gdata_header["PAMEAS"] = nan_or_none(get_crota2(wcs), 4)
+        gdata_header["ZEROPT"] = nan_or_none(sources_concat.zp.dropna().median(), 3)
+        gdata_header["SOLVED"] = True
+
+    hdul = fits.HDUList(
+        [
+            fits.PrimaryHDU(),
+            fits.ImageHDU(header=gdata_header, name="GUIDERDATA"),
+        ]
+    )
+    hdul.writeto(str(guider_file), overwrite=True)
+
+    sources_concat.to_parquet(guider_sources_file)
+
+    return guider_file

@@ -264,7 +264,7 @@ class GuiderSolution(BaseSolution):
         solutions: list[CameraSolution] = []
         for key in ["FILEEAST", "FILEWEST"]:
             if guider_data[key] is not None:
-                dirname = pathlib.Path(dirname or guider_data["DIRNAME"])
+                dirname = pathlib.Path(dirname or guider_data["DIRNAME"] or file.parent)
                 solutions.append(CameraSolution.open(dirname / guider_data[key]))
 
         if "XFFPIX" in guider_data:
@@ -413,7 +413,7 @@ class GlobalSolution(BaseSolution):
 
         records: list[dict] = []
         for gs in self.guider_solutions:
-            pa = get_crota2(self.wcs) if self.wcs is not None else numpy.nan
+            pa = get_crota2(gs.wcs) if gs.wcs is not None else numpy.nan
             pointing = gs.pointing
 
             records.append(

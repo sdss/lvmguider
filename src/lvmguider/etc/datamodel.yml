@@ -7,6 +7,8 @@ PROC:
   SOURCESF: [null, 'Sources file']
   PA: [null, '[deg] Position angle from WCS']
   ZEROPT: [null, '[mag] Zero point of the LVM magnitude']
+  ORIGFILE: [null, 'Original file name']
+  REPROC: [false, 'Has this file been reprocessed?']
   REFFILE: [null, 'Reference file for astrometric solution']
   WCSMODE: ['none', 'Source of astrometric solution']
 
