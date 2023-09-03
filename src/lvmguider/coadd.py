@@ -182,10 +182,11 @@ def create_global_coadd(
 
     # Fit a new WCS from the individual co-added solutions using the full frame.
     sources = gs.sources
-    if len(sources.ra.dropna()) > 5:
-        gs.wcs = wcs_from_gaia(sources, xy_cols=["x_ff", "y_ff"])
-    else:
-        log.warning("Unable to fit global WCS. Not enough matched sources.")
+    if telescope != "spec":
+        if len(sources.ra.dropna()) > 5:
+            gs.wcs = wcs_from_gaia(sources, xy_cols=["x_ff", "y_ff"])
+        else:
+            log.warning("Unable to fit global WCS. Not enough matched sources.")
 
     if outpath is not None:
         # Create the path for the output file.
@@ -351,9 +352,9 @@ def coadd_camera(
     coadd_image: ARRAY_2D_F32 | None = None
     coadd_solution: CoAdd_CameraSolution
 
-    if len(data_stack) == 0:
+    if len(data_stack) == 0 or telescope == "spec":
         if telescope == "spec":
-            log.warning(f"Not stacking data for telecope {telescope!r}.")
+            log.debug(f"Not stacking data for telecope {telescope!r}.")
         else:
             log.error(f"No data to stack for {telescope!r}.")
 
@@ -550,10 +551,9 @@ def process_coadd(
         db_connection_params=db_connection_params,
     )
 
+    wcs = None
     if n_matches < 5:
         log.warning("Insufficient number of Gaia matches. Cannot generate WCS.")
-        wcs = None
-
     else:
         # Get WCS solution from Gaia.
         wcs = wcs_from_gaia(coadd_sources)
