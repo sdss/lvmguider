@@ -34,7 +34,7 @@ from lvmguider.extraction import extract_marginal
 from lvmguider.tools import (
     angle_difference,
     estimate_zeropoint,
-    get_dark_subtrcted_data,
+    get_dark_subtracted_data,
     get_frameno,
     get_guider_files_from_spec,
     header_from_model,
@@ -474,7 +474,7 @@ def create_framedata(path: pathlib.Path):
 
         proc_header = hdul["PROC"].header
 
-        data, dark_sub = get_dark_subtrcted_data(path)
+        data, dark_sub = get_dark_subtracted_data(path)
         if dark_sub is False:
             log.debug(f"{log_h} missing dark frame. Fitting and removing background.")
 

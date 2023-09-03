@@ -482,7 +482,7 @@ def estimate_zeropoint(
     return df
 
 
-def get_dark_subtrcted_data(file: pathlib.Path | str) -> tuple[ARRAY_2D_F32, bool]:
+def get_dark_subtracted_data(file: pathlib.Path | str) -> tuple[ARRAY_2D_F32, bool]:
     """Returns a background or dark subtracted image."""
 
     hdul = fits.open(str(file))

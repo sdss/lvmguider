@@ -26,7 +26,7 @@ from lvmguider.maskbits import GuiderStatus
 from lvmguider.tools import (
     elapsed_time,
     estimate_zeropoint,
-    get_dark_subtrcted_data,
+    get_dark_subtracted_data,
     get_frameno,
     get_guider_path,
     header_from_model,
@@ -352,7 +352,7 @@ class Guider:
         frameno = get_frameno(file)
         hdul = fits.open(str(file))
 
-        data, dark_sub = get_dark_subtrcted_data(file)
+        data, dark_sub = get_dark_subtracted_data(file)
         if not dark_sub:
             self.command.debug(f"No dark frame found for {file!s}. Fitting background.")
 
