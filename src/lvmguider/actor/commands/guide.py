@@ -45,7 +45,7 @@ def is_stopping(command: GuiderCommand):
 @click.option(
     "--reference-pixel",
     type=click.Tuple((float, float)),
-    help="The pixel of the master frame to use as pointing reference.",
+    help="The pixel of the full frame to use as pointing reference.",
 )
 @click.option(
     "--guide-tolerance",

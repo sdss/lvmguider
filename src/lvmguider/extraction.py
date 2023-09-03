@@ -488,13 +488,13 @@ def extract_sources(filename: str | pathlib.Path, subtract_dark: bool = True):
     Returns
     -------
     sources
-        A data frame with the extracted sources along with their master frame
+        A data frame with the extracted sources along with their full frame
         coordinates. Note that in SExtractor fashion, all the pixel coordinates
         assume that the centre of the lower left pixel is ``(1, 1)``.
 
     """
 
-    from lvmguider.transformations import ag_to_master_frame
+    from lvmguider.transformations import ag_to_full_frame
 
     hdus = fits.open(filename)
 
@@ -524,7 +524,7 @@ def extract_sources(filename: str | pathlib.Path, subtract_dark: bool = True):
     sources["telescope"] = telescope
 
     xy = sources.loc[:, ["x", "y"]].to_numpy()
-    mf_locs, _ = ag_to_master_frame(f"{telescope}-{camname[0]}", xy)
-    sources.loc[:, ["x_mf", "y_mf"]] = mf_locs
+    ff_locs, _ = ag_to_full_frame(f"{telescope}-{camname[0]}", xy)
+    sources.loc[:, ["x_ff", "y_ff"]] = ff_locs
 
     return sources

@@ -54,8 +54,8 @@ SOURCES:
   fwhm: 'f8'
   telescope: 'U4'
   camera: 'U4'
-  x_mf: 'f8'
-  y_mf: 'f8'
+  x_ff: 'f8'
+  y_ff: 'f8'
   source_id: 'Int64'
   ra: 'f8'
   dec: 'f8'
@@ -82,14 +82,14 @@ GUIDERDATA_HEADER:
   DIRNAME: [null, 'Original file directory']
   SOURCESF: [null, 'Sources file']
   SOLVED: [False, 'Astrometric solution found?']
-  XMFPIX: [null, 'The x pixel of the master frame']
-  ZMFPIX: [null, 'The z pixel of the master frame']
+  XFFPIX: [null, 'The x pixel of the full frame']
+  ZFFPIX: [null, 'The z pixel of the full frame']
   RAFIELD: [null, '[deg] Field RA']
   DECFIELD: [null, '[deg] Field Dec']
   PAFIELD: [null, '[deg] Field PA']
   RAMEAS: [null, '[deg] Measured RA position (boresight)']
   DECMEAS: [null, '[deg] Measured Dec position (boresight)']
-  PAMEAS: [null, '[deg] Position angle from master frame WCS']
+  PAMEAS: [null, '[deg] Position angle from full frame WCS']
   OFFRAMEA: [null, '[arcsec] RA measured offset']
   OFFDEMEA: [null, '[arcsec] Dec measured offset']
   OFFA0MEA: [null, '[arcsec] Motor axis 0 measured offset']
@@ -130,8 +130,8 @@ GUIDERDATA_FRAME:
   zero_point: 'f4'
   solved: 'Int8'
   guide_mode: 'S12'
-  x_mf_pixel: 'f4'
-  z_mf_pixel: 'f4'
+  x_ff_pixel: 'f4'
+  z_ff_pixel: 'f4'
   ra: 'f8'
   dec: 'f8'
   pa: 'f4'
@@ -201,14 +201,14 @@ GLOBAL_COADD:
   PADRIFT: [null, '[deg] PA drift in frame range']
   ZEROPT: [null, '[mag] Instrumental zero-point']
   SOLVED: [false, 'Was the global frame astrometrically solved?']
-  XMFPIX: [null, 'The x pixel of the master frame']
-  ZMFPIX: [null, 'The z pixel of the master frame']
+  XFFPIX: [null, 'The x pixel of the full frame']
+  ZFFPIX: [null, 'The z pixel of the full frame']
   RAFIELD: [null, '[deg] Field RA']
   DECFIELD: [null, '[deg] Field Dec']
   PAFIELD: [null, '[deg] Field PA']
   RAMEAS: [null, '[deg] Measured RA position (boresight)']
   DECMEAS: [null, '[deg] Measured Dec position (boresight)']
-  PAMEAS: [null, '[deg] Position angle from master frame WCS']
+  PAMEAS: [null, '[deg] Position angle from full frame WCS']
   WARNPA: [null, 'PA pointing error > 0.7 arcmin']
   WARNPADR: [null, 'PA drift > 0.7 arcmin']
   WARNTRAN: [null, 'Transparency N magnitudes above photometric']

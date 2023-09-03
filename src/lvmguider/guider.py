@@ -68,7 +68,7 @@ class Guider:
     field_centre
         The field centre on which we want to guider (RA, Dec, PA).
     pixel
-        The ``(x,y)`` pixel of the master frame to use to determine the pointing.
+        The ``(x,y)`` pixel of the full frame to use to determine the pointing.
         Default to the central pixel.
 
     """
@@ -124,7 +124,7 @@ class Guider:
         return self.solutions[max(self.solutions)]
 
     def set_pixel(self, pixel_x: float | None = None, pixel_z: float | None = None):
-        """Sets the master frame pixel coordinates ``(x, z)`` on which to guide."""
+        """Sets the full frame pixel coordinates ``(x, z)`` on which to guide."""
 
         if pixel_x is None or pixel_z is None:
             new_pixel = self.config["xz_full_frame"]
@@ -239,11 +239,11 @@ class Guider:
         else:
             try:
                 assert guider_solution.sources is not None
-                mf_wcs = wcs_from_gaia(guider_solution.sources, ["x_mf", "y_mf"])
-                guider_solution.wcs = mf_wcs
+                ff_wcs = wcs_from_gaia(guider_solution.sources, ["x_ff", "y_ff"])
+                guider_solution.wcs = ff_wcs
 
             except RuntimeError as err:
-                self.command.error(f"Failed generating master frame WCS: {err}")
+                self.command.error(f"Failed generating full frame WCS: {err}")
 
         offset_radec, offset_motax, offset_pa = self.calculate_offset(guider_solution)
 
@@ -684,8 +684,8 @@ class Guider:
         gheader["RAFIELD"] = numpy.round(self.field_centre[0], 6)
         gheader["DECFIELD"] = numpy.round(self.field_centre[1], 6)
         gheader["PAFIELD"] = numpy.round(self.field_centre[2], 4)
-        gheader["XMFPIX"] = guider_solution.guide_pixel[0]
-        gheader["ZMFPIX"] = guider_solution.guide_pixel[1]
+        gheader["XFFPIX"] = guider_solution.guide_pixel[0]
+        gheader["ZFFPIX"] = guider_solution.guide_pixel[1]
         gheader["SOLVED"] = guider_solution.solved
         gheader["RAMEAS"] = nan_or_none(guider_solution.pointing[0], 6)
         gheader["DECMEAS"] = nan_or_none(guider_solution.pointing[1], 6)

@@ -33,14 +33,14 @@ conf.auto_download = False
 conf.iers_degraded_accuracy = "ignore"
 
 
-def ag_to_master_frame(
+def ag_to_full_frame(
     camera: str,
     in_locs: numpy.ndarray,
     rot_shift: tuple | None = None,
     verbose=False,
 ):
     """Rotate and shift the star locations from an AG frame to the correct locations in
-    the large "master frame" corresponding to the full focal plane.
+    the large "full frame" (master frame) corresponding to the full focal plane.
 
     Adapted from Tom Herbst's code.
 
@@ -57,7 +57,7 @@ def ag_to_master_frame(
     Returns
     -------
     rs_loc
-        Array of corresponding star locations in "master frame".
+        Array of corresponding star locations in "full frame".
 
     """
 
@@ -88,7 +88,7 @@ def ag_to_master_frame(
 
     if verbose:
         print("")
-        print("ag_to_master_frame: rot_shift for ", camera, numpy.degrees(th), Sx, Sz)
+        print("ag_to_full_frame: rot_shift for ", camera, numpy.degrees(th), Sx, Sz)
         print("")
 
     # Rotation matrix
@@ -107,8 +107,8 @@ def ag_to_master_frame(
     return (rsLoc.T, (th, Sx, Sz))
 
 
-def master_frame_to_ag(camera: str, locs: numpy.ndarray):
-    """Transforms the star locations from the master frame
+def full_frame_to_ag(camera: str, locs: numpy.ndarray):
+    """Transforms the star locations from the full frame
     to the internal pixel locations in the AG frame.
 
     Adapted from Tom Herbst.
@@ -153,7 +153,7 @@ def master_frame_to_ag(camera: str, locs: numpy.ndarray):
     # Make 2xnPts Sx,Sz offset matrix
     off = numpy.tile(numpy.array([[Sx, Sz]]).transpose(), (1, locs.shape[0]))
 
-    # Transform MF --> AG. See Single_Sensor_Solve doc
+    # Transform FF --> AG. See Single_Sensor_Solve doc
     rsLoc = numpy.dot(M, (locs.T - rOff - off)) + rOff
 
     # Return calculated positions (need to transpose for standard layout)
@@ -185,7 +185,7 @@ def solve_locs(
     dec
         The estimated Dec of the field.
     full_frame
-        Whether this is a full "master frame" field, requiring a different set of
+        Whether this is a full "full frame" field, requiring a different set of
         index files.
     index_paths
         The paths to the index files to use. A dictionary of series number
@@ -222,7 +222,7 @@ def solve_locs(
     radius = 5  # Search radius in degrees
 
     if full_frame:
-        midX, midZ = config["xz_full_frame"]  # Middle of Master Frame
+        midX, midZ = config["xz_full_frame"]  # Middle of full Frame
         index_paths_default = {
             5200: "/data/astrometrynet/5200",
             4100: "/data/astrometrynet/4100",
@@ -236,7 +236,7 @@ def solve_locs(
 
     locs = locs.copy()
     if full_frame:
-        locs = locs.rename(columns={"x_master": "x", "y_master": "y"})
+        locs = locs.rename(columns={"x_full": "x", "y_full": "y"})
 
     solution = astrometrynet_quick(
         index_paths,

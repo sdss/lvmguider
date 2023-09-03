@@ -42,7 +42,7 @@ from lvmguider.tools import (
     polyfit_with_sigclip,
     sort_files_by_camera,
 )
-from lvmguider.transformations import ag_to_master_frame, match_with_gaia, wcs_from_gaia
+from lvmguider.transformations import ag_to_full_frame, match_with_gaia, wcs_from_gaia
 from lvmguider.types import ARRAY_2D_F32
 
 
@@ -110,22 +110,22 @@ def coadd_from_spec_frame(
             f"spectrograph file {file!s}"
         )
 
-        create_coadd(frames, telescope=telescope, outpath=outpath, **kwargs)
+        create_global_coadd(frames, telescope=telescope, outpath=outpath, **kwargs)
 
 
-def create_coadd(
+def create_global_coadd(
     files: Sequence[AnyPath],
     telescope: str,
     outpath: str | None = "default",
     save_camera_coadded: bool = False,
     **coadd_camera_kwargs,
 ):
-    """Produces a master co-added frame.
+    """Produces a global co-added frame.
 
     Calls `.coadd_camera` with the frames for each camera and produces
     a single co-added file with the extensions from the camera co-added frames
     and an extension ``COADD`` with the global astrometric solution of the
-    master frame.
+    full frame.
 
     Parameters
     ----------
@@ -135,7 +135,7 @@ def create_coadd(
     telescope
         The telescope associated with the images.
     outpath
-        The path of the master co-added frame. If a relative path, it is written
+        The path of the global co-added frame. If a relative path, it is written
         relative to the path of the first file in the list. If `False`, the file
         is not written to disk but the ``HDUList` is returned. With ``"default"``,
         the default output path is used.
@@ -180,10 +180,10 @@ def create_coadd(
         telescope=telescope,
     )
 
-    # Fit a new WCS from the individual co-added solutions using the master frame.
+    # Fit a new WCS from the individual co-added solutions using the full frame.
     sources = gs.sources
     if len(sources.ra.dropna()) > 5:
-        gs.wcs = wcs_from_gaia(sources, xy_cols=["x_mf", "y_mf"])
+        gs.wcs = wcs_from_gaia(sources, xy_cols=["x_ff", "y_ff"])
     else:
         log.warning("Unable to fit global WCS. Not enough matched sources.")
 
@@ -536,10 +536,10 @@ def process_coadd(
     coadd_sources["telescope"] = frame.telescope
     coadd_sources["camera"] = frame.camera
 
-    # Add master frame pixels.
+    # Add global frame pixels.
     xy = coadd_sources.loc[:, ["x", "y"]].to_numpy()
-    mf_locs, _ = ag_to_master_frame(f"{frame.telescope}-{frame.camera[0]}", xy)
-    coadd_sources.loc[:, ["x_mf", "y_mf"]] = mf_locs
+    ff_locs, _ = ag_to_full_frame(f"{frame.telescope}-{frame.camera[0]}", xy)
+    coadd_sources.loc[:, ["x_ff", "y_ff"]] = ff_locs
 
     # Match with Gaia sources.
     coadd_sources, n_matches = match_with_gaia(
@@ -828,8 +828,8 @@ def create_global_header(solution: GlobalSolution):
 
     # Pointing
     if telescope != "spec":
-        header["XMFPIX"] = guider_data.x_mf_pixel.iloc[0]
-        header["ZMFPIX"] = guider_data.z_mf_pixel.iloc[0]
+        header["XFFPIX"] = guider_data.x_ff_pixel.iloc[0]
+        header["ZFFPIX"] = guider_data.z_ff_pixel.iloc[0]
         header["RAFIELD"] = nan_or_none(guider_data.ra_field.iloc[0], 6)
         header["DECFIELD"] = nan_or_none(guider_data.dec_field.iloc[0], 6)
         header["PAFIELD"] = nan_or_none(guider_data.pa_field.iloc[0], 4)

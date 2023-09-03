@@ -22,7 +22,7 @@ from astropy.time import Time
 from astropy.wcs import WCS
 from packaging.version import Version
 
-from lvmguider import config
+from lvmguider import config, log
 from lvmguider.tools import dataframe_from_model, get_frameno
 from lvmguider.transformations import get_crota2
 from lvmguider.types import ARRAY_2D_F32
@@ -204,7 +204,7 @@ class GuiderSolution(BaseSolution):
 
     @property
     def pixel_pointing(self) -> npt.NDArray[npt.Shape["2"], npt.Float64]:
-        """Returns the telescope pointing at the master frame pixel from the WCS."""
+        """Returns the telescope pointing at the full frame pixel from the WCS."""
 
         if not self.wcs:
             return numpy.array([numpy.nan, numpy.nan])
@@ -267,11 +267,20 @@ class GuiderSolution(BaseSolution):
                 dirname = pathlib.Path(dirname or guider_data["DIRNAME"])
                 solutions.append(CameraSolution.open(dirname / guider_data[key]))
 
+        if "XFFPIX" in guider_data:
+            guide_pixel = numpy.array([guider_data["XFFPIX"], guider_data["ZFFPIX"]])
+        elif "XMFPIX" in guider_data:
+            # From when we called it master frame.
+            guide_pixel = numpy.array([guider_data["XMFPIX"], guider_data["ZMFPIX"]])
+        else:
+            log.warning("Missing pixel information. Default to central pixel.")
+            guide_pixel = config["xz_full_frame"]
+
         return GuiderSolution(
             frameno=get_frameno(file),
             telescope=guider_data["TELESCOP"],
             solutions=solutions,
-            guide_pixel=numpy.array([guider_data["XMFPIX"], guider_data["ZMFPIX"]]),
+            guide_pixel=guide_pixel,
             wcs=wcs,
             ra_off=guider_data["OFFRAMEA"] or numpy.nan,
             dec_off=guider_data["OFFDEMEA"] or numpy.nan,
@@ -416,8 +425,8 @@ class GlobalSolution(BaseSolution):
                     zero_point=gs.zero_point,
                     solved=int(gs.solved),
                     guide_mode=gs.guide_mode,
-                    x_mf_pixel=gs.guide_pixel[0],
-                    z_mf_pixel=gs.guide_pixel[1],
+                    x_ff_pixel=gs.guide_pixel[0],
+                    z_ff_pixel=gs.guide_pixel[1],
                     ra=pointing[0],
                     dec=pointing[1],
                     ra_field=gs.ra_field,
