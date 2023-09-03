@@ -145,6 +145,7 @@ def plot_position_angle(
 
     fig, axd = get_figure()
 
+    # Plot top panels with the East and West camera PA and PA error.
     for camera_solution in solution.coadd_solutions:
         if camera_solution.frames is None or len(camera_solution.frames) == 0:
             continue
@@ -155,9 +156,11 @@ def plot_position_angle(
         if len(frame_data.pa.dropna()) < 2:
             continue
 
+        # Unhide plot.
         ax = axd[camera]  # type: ignore
         ax.axis("on")
 
+        # Plot PA.
         axes = _plot_pa_axes(
             ax,
             frame_data,
@@ -165,6 +168,7 @@ def plot_position_angle(
             legend=False,
         )
 
+        # Remove the inside labels since they are identical left and right.
         if camera == "east":
             axes[1].set_ylabel("")
         else:
@@ -180,7 +184,7 @@ def plot_position_angle(
                 legend=True,
             )
 
-    # Now do the global data.
+    # Now use the PAs from the guider data (i.e., full frame).
     guider_data = solution.guider_data()
     guider_data = guider_data.loc[guider_data.guide_mode == "guide"]
     if len(guider_data.pa.dropna()) >= 2:
@@ -216,6 +220,7 @@ def _plot_pa_axes(
 
     pa_threshold = config["coadds"]["warnings"]["pa_error"]
 
+    # Plot absolute position angle.
     (pa_plot,) = ax.plot(
         data.frameno,
         data.pa,
@@ -224,15 +229,18 @@ def _plot_pa_axes(
         label="Position angle",
     )
 
+    # Create right axis for the PA error.
     right_ax = ax.twinx()
     right_ax.grid(False)
 
+    # For the cameras we calculate the error wrt the mean PA.
+    # For the full frame PAs we use the initial PA and calculate the "drift".
     if pa_error_mode == "first":
         ref_pa = data.pa.dropna().iloc[0]
     else:
         ref_pa = data.pa.dropna().mean()
 
-    abs_error = (ref_pa - data.pa).abs().max()
+    # Plot PA error.
     (pa_error_plot,) = right_ax.plot(
         data.frameno,
         ref_pa - data.pa,
@@ -241,6 +249,8 @@ def _plot_pa_axes(
         label="PA error",
     )
 
+    # If the PA error goes over the limit, show a band with the threshold.
+    abs_error = (ref_pa - data.pa).abs().max()
     if abs_error > pa_threshold:
         right_ax.axhspan(
             ymin=-0.0025,
@@ -275,22 +285,26 @@ def plot_zero_point_or_fwhm(
     save_subplots: bool = False,
     column="zero_point",
 ):
-    """Plots the zero point or fwhm of an exposure."""
+    """Plots the zero point or FWHM of an exposure."""
 
     fig, axd = get_figure()
 
+    # Plot top panels with the East and West camera zero point or FWHM.
     for camera_solution in solution.coadd_solutions:
         camera = camera_solution.camera
 
+        # Get all the frames and the ZP/FWHM value of the co-added camera image.
         frame_data = camera_solution.frame_data()
         coadd_value = getattr(camera_solution, column)
 
         if len(frame_data) == 0 and numpy.isnan(coadd_value):
             continue
 
+        # Un-hide the axes.
         ax = axd[camera]  # type: ignore
         ax.axis("on")
 
+        # Plot data.
         ax = _plot_zero_point_or_fwhm_axes(
             ax,
             frame_data,
@@ -299,14 +313,9 @@ def plot_zero_point_or_fwhm(
             legend=False,
         )
 
-        ax.set_xlabel("Frame number")
-        ax.set_title(f"Camera {camera.capitalize()}")
-
+        # Move the West camera y-axis to the right to unclutter the central section.
         if camera == "west":
             ax.yaxis.set_label_position("right")
-
-        ax.ticklabel_format(useOffset=False)
-        ax.xaxis.get_major_locator().set_params(integer=True)
 
         if save_subplots:
             create_subplot(
@@ -319,7 +328,7 @@ def plot_zero_point_or_fwhm(
                 legend=True,
             )
 
-    # Now do the global data.
+    # Now do the full frame. Almost identical to above.
     guider_data = solution.guider_data()
     guider_data = guider_data.loc[guider_data.guide_mode == "guide"]
     global_value = getattr(solution, column)
@@ -365,10 +374,11 @@ def _plot_zero_point_or_fwhm_axes(
     title: str | None = None,
     legend: bool = True,
 ):
-    """Plot zero point axes."""
+    """Plot zero point or FWHM axes."""
 
     handles = []
 
+    # Plot the data for each frame.
     (plot,) = ax.plot(
         data.frameno,
         data[column],
@@ -377,6 +387,7 @@ def _plot_zero_point_or_fwhm_axes(
     )
     handles.append(plot)
 
+    # If the co-added value exists, plot it as a horizontal dashed line.
     if not numpy.isnan(coadd):
         median_line = ax.axhline(
             y=coadd,
