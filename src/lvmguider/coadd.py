@@ -365,6 +365,8 @@ def coadd_camera(
         )
 
     else:
+        log.debug(f"Creating median-combined co-added frame for {camname!r}.")
+
         # Combine the stack of data frames using the median of each pixel.
         # Optionally sigma-clip each pixel (this is computationally intensive).
         if use_sigmaclip:
@@ -377,12 +379,9 @@ def coadd_camera(
                 axis=0,
                 copy=False,
             )
-
-            log.debug("Creating median-combined co-added frame.")
             coadd_image = numpy.ma.median(stack_masked, axis=0).data
 
         else:
-            log.debug("Creating median-combined co-added frame.")
             coadd_image = numpy.median(numpy.array(data_stack), axis=0)
 
         del data_stack
