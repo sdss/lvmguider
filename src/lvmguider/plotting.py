@@ -11,19 +11,23 @@ from __future__ import annotations
 import os
 import pathlib
 
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Callable, Sequence
 
 import matplotlib
 import matplotlib.pyplot as plt
+import matplotlib.text
+import matplotlib.transforms as mtransforms
 import numpy
 import seaborn
+from matplotlib.axes import Axes
+from matplotlib.transforms import Bbox
 
 from lvmguider import config
 
 
 if TYPE_CHECKING:
     import pandas
-    from matplotlib.axes import Axes
+    from matplotlib.figure import Figure
 
     from lvmguider.dataclasses import GlobalSolution
 
@@ -47,7 +51,12 @@ def plot_qa(
     stem = solution.path.stem
 
     # Set up seaborn and matplotlib.
-    seaborn.set_theme(style="darkgrid", palette="deep", font="serif")
+    seaborn.set_theme(
+        style="darkgrid",
+        palette="deep",
+        font="serif",
+        font_scale=1.2,  # type: ignore
+    )
 
     with plt.ioff():
         # Plot PA
@@ -72,10 +81,18 @@ def plot_qa(
             column="fwhm",
         )
 
+        # Plot guider offsets
+        outpath_fwhm = root / (stem + "_guide_offsets.pdf")
+        plot_guider_offsets(
+            outpath_fwhm,
+            solution,
+            save_subplots=save_subplots,
+        )
+
     seaborn.reset_orig()
 
 
-def create_subplot_path(
+def get_subplot_path(
     orig_path: AnyPath,
     suffix: str = "",
     extension="png",
@@ -99,12 +116,71 @@ def create_subplot_path(
 def create_subplot(func: Callable, path: AnyPath, *args, dpi: int = 100, **kwargs):
     """Creates a subplot by calling a plotting function."""
 
+    pathlib.Path(path).parent.mkdir(parents=True, exist_ok=True)
+
     fig, ax = plt.subplots(figsize=(11, 8))
     func(ax, *args, **kwargs)
     fig.savefig(str(path), dpi=dpi)
 
 
-def get_figure():
+def save_subplot(
+    fig: Figure,
+    axes: Axes | list[Axes],
+    path: AnyPath,
+    pad: float | Sequence[float] = (0.01, 0.0),
+    bbox_range: Sequence[float] | None = None,
+):
+    """Saves a subplot, including axes labels, tick labels, and titles."""
+
+    # https://stackoverflow.com/questions/4325733/save-a-subplot-in-matplotlib
+
+    if isinstance(axes, Axes):
+        axes = [axes]
+
+    pathlib.Path(path).parent.mkdir(parents=True, exist_ok=True)
+
+    if bbox_range is not None:
+        fig.savefig(
+            str(path),
+            bbox_inches=mtransforms.Bbox(
+                # This is in "figure fraction" for the bottom half
+                # input in [[xmin, ymin], [xmax, ymax]]
+                numpy.array(
+                    [
+                        [bbox_range[0], bbox_range[1]],
+                        [bbox_range[2], bbox_range[3]],
+                    ]
+                )
+            ).transformed(
+                (fig.transFigure - fig.dpi_scale_trans)  # type: ignore
+            ),
+        )
+        return
+
+    items = []
+    # For text objects, we need to draw the figure first, otherwise
+    # the extents are undefined.
+    for ax in axes:
+        ax.figure.canvas.draw()
+
+        items += ax.get_xticklabels()
+        items += ax.get_yticklabels()
+        items += [ax.get_xaxis().get_label(), ax.get_yaxis().get_label()]
+        items += [ax, ax.title]  # type: ignore
+
+    bbox = Bbox.union([item.get_window_extent() for item in items])
+
+    if isinstance(pad, Sequence):
+        bbox = bbox.expanded(1.0 + pad[0], 1.0 + pad[1])
+    else:
+        bbox = bbox.expanded(1.0 + pad, 1.0 + pad)
+
+    extent = bbox.transformed(fig.dpi_scale_trans.inverted())  # type: ignore
+
+    fig.savefig(str(path), bbox_inches=extent)
+
+
+def get_camera_figure():
     """Returns a customised figure and axes."""
 
     fig, axd = plt.subplot_mosaic(
@@ -143,7 +219,7 @@ def plot_position_angle(
 ):
     """Plots the position angle."""
 
-    fig, axd = get_figure()
+    fig, axd = get_camera_figure()
 
     # Plot top panels with the East and West camera PA and PA error.
     for camera_solution in solution.coadd_solutions:
@@ -177,7 +253,7 @@ def plot_position_angle(
         if save_subplots:
             create_subplot(
                 _plot_pa_axes,
-                create_subplot_path(outpath, f"_{camera}"),
+                get_subplot_path(outpath, f"_{camera}"),
                 frame_data,
                 title=f"Camera {camera.capitalize()}",
                 pa_error_mode="mean",
@@ -196,7 +272,7 @@ def plot_position_angle(
         if save_subplots:
             create_subplot(
                 _plot_pa_axes,
-                create_subplot_path(outpath),
+                get_subplot_path(outpath),
                 guider_data,
                 title="Full frame",
                 pa_error_mode="first",
@@ -287,7 +363,7 @@ def plot_zero_point_or_fwhm(
 ):
     """Plots the zero point or FWHM of an exposure."""
 
-    fig, axd = get_figure()
+    fig, axd = get_camera_figure()
 
     # Plot top panels with the East and West camera zero point or FWHM.
     for camera_solution in solution.coadd_solutions:
@@ -320,7 +396,7 @@ def plot_zero_point_or_fwhm(
         if save_subplots:
             create_subplot(
                 _plot_zero_point_or_fwhm_axes,
-                create_subplot_path(outpath, f"_{camera}"),
+                get_subplot_path(outpath, f"_{camera}"),
                 frame_data,
                 coadd_value,
                 column=column,
@@ -348,7 +424,7 @@ def plot_zero_point_or_fwhm(
         if save_subplots:
             create_subplot(
                 _plot_zero_point_or_fwhm_axes,
-                create_subplot_path(outpath),
+                get_subplot_path(outpath),
                 guider_data,
                 global_value,
                 column=column,
@@ -414,3 +490,91 @@ def _plot_zero_point_or_fwhm_axes(
         ax.set_title(title)
 
     return ax
+
+
+def plot_guider_offsets(
+    outpath: pathlib.Path,
+    solution: GlobalSolution,
+    save_subplots: bool = False,
+):
+    """Plots guider data (RA/Dec/PA offsets and applied corrections)."""
+
+    fig, axd = plt.subplot_mosaic(
+        [["sep", "sep"], ["meas", "applied"]],
+        figsize=(11, 8),
+    )
+
+    fig.subplots_adjust(
+        left=0.1,
+        right=0.9,
+        bottom=0.075,
+        top=0.93,
+        wspace=0.45,
+        hspace=0.3,
+    )
+
+    gdata = solution.guider_data()
+
+    # Top panel. On the left y axis plot the separation to the field
+    # centre. In the right y axis plot the PA error (field - measured).
+    gdata["separation"] = numpy.hypot(gdata.ra_off, gdata.dec_off)
+    sep_data = gdata.loc[:, ["frameno", "separation"]]
+
+    sep_ax = axd["sep"]  # type: ignore
+    sep_ax.plot(sep_data.frameno, sep_data.separation, "b-", label="Separation")
+    sep_ax.set_xlabel("Frame number")
+    sep_ax.set_ylabel("Separation [arcsec]", labelpad=10)
+
+    sep_ax_r = sep_ax.twinx()
+    sep_ax_r.grid(False)
+    sep_ax_r.plot(sep_data.index, gdata.pa_field - gdata.pa, "g-", label="PA error")
+    sep_ax_r.set_ylabel("Position angle error [deg]", labelpad=10)
+
+    # Bottom left panel. Plot the measured offsets in RA, Dec, and PA.
+    meas_ax = axd["meas"]  # type: ignore
+    meas_ax.plot(gdata.frameno, gdata.ra_off, "b-")
+    meas_ax.plot(gdata.frameno, gdata.dec_off, "r-")
+    meas_ax.set_xlabel("Frame number")
+    meas_ax.set_ylabel("RA/Dec measured error [arcsec]", labelpad=10)
+
+    meas_ax_r = meas_ax.twinx()
+    meas_ax_r.grid(False)
+    meas_ax_r.plot(gdata.frameno, gdata.pa_off, "g-")
+    meas_ax_r.set_ylabel("PA measured error [deg]")
+
+    # Bottom right panel. Plot the applied corrections in RA, Dec, and PA.
+    appl_ax = axd["applied"]  # type: ignore
+    appl_ax.plot(gdata.frameno, gdata.ax0_applied, "b-")
+    appl_ax.plot(gdata.frameno, gdata.ax1_applied, "r-")
+    appl_ax.set_xlabel("Frame number")
+    appl_ax.set_ylabel("Applied offset [arcsec]")
+
+    appl_ax_r = appl_ax.twinx()
+    appl_ax_r.grid(False)
+    appl_ax_r.plot(gdata.frameno, gdata.rot_applied, "g-")
+    appl_ax_r.set_ylabel("PA applied offset [deg]", labelpad=10)
+
+    if save_subplots:
+        save_subplot(
+            fig,
+            [sep_ax, sep_ax_r],
+            get_subplot_path(outpath, ""),
+            bbox_range=[0.0, 0.47, 1.0, 0.98],
+        )
+
+        save_subplot(
+            fig,
+            [meas_ax, meas_ax_r],
+            get_subplot_path(outpath, "_measured"),
+            bbox_range=[0.0, 0.0, 0.505, 0.48],
+        )
+
+        save_subplot(
+            fig,
+            [appl_ax, appl_ax_r],
+            get_subplot_path(outpath, "_applied"),
+            bbox_range=[0.505, 0.0, 1.0, 0.48],
+        )
+
+    fig.suptitle(f"Guider data for {solution.path.name}")
+    fig.savefig(str(outpath))
