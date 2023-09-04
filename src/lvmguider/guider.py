@@ -146,7 +146,8 @@ class Guider:
     def revert_to_acquisition(self):
         """Reset the flags for acquisition mode."""
 
-        self.command.warning("Reverting to acquisition.")
+        if self.is_guiding():
+            self.command.warning("Reverting to acquisition.")
 
         self.command.actor._status &= ~GuiderStatus.GUIDING
         self.command.actor._status |= GuiderStatus.ACQUIRING
