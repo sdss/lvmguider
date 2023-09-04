@@ -20,6 +20,7 @@ min_rot_correction: 0.01
 max_rot_correction: 3
 
 guide_tolerance: 1
+pa_tolerance: 0.012
 revert_to_acquistion_threshold: 2
 
 xz_full_frame: [2500.0, 1000.0]

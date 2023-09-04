@@ -85,6 +85,7 @@ class Guider:
 
         self.config = command.actor.config
         self.guide_tolerance = self.config["guide_tolerance"]
+        self.pa_tolerance = self.config["pa_tolerance"]
 
         self.field_centre = field_centre
         self.pixel = pixel or self.config["xz_full_frame"]
@@ -317,6 +318,8 @@ class Guider:
         finally:
             self.command.actor.status &= ~GuiderStatus.CORRECTING
 
+            guider_solution.correction = [*applied_motax.tolist(), applied_rot]
+
             self.command.info(
                 correction_applied={
                     "frameno": frameno,
@@ -325,12 +328,21 @@ class Guider:
                 }
             )
 
-            guider_solution.correction = [*applied_motax.tolist(), corr_rot]
+            # Are we close enough to the field centre to guide using Gaia?
+            sep_reached = guider_solution.separation < self.guide_tolerance
 
-            reached = guider_solution.separation < self.guide_tolerance
+            # Have we converged in PA? Note that we can only move in positive
+            # offsets in the k-mirror, so if the offset_pa is < 0 we've gone
+            # too far and we cannot easily fix it. That's why here we don't
+            # take abs(offset_pa) since self.pa_tolerance is positive.
+            pa_reached = numpy.isnan(offset_pa) or offset_pa < self.pa_tolerance
+
+            # If the separation is > certain threshold (which usually is larger
+            # than the threshold for considering we are guiding in the first place)
+            # then we revert to acquisition.
             revert = guider_solution.separation > revert_to_acquistion_threshold
 
-            if reached and not self.is_guiding():
+            if sep_reached and pa_reached and not self.is_guiding():
                 self.command.info("Guide tolerance reached. Starting to guide.")
                 self.command.actor._status &= ~GuiderStatus.ACQUIRING
                 self.command.actor._status &= ~GuiderStatus.DRIFTING
@@ -510,7 +522,7 @@ class Guider:
             offset_pa = numpy.nan
         else:
             pointing_pa = (solution.pa - 180) % 360
-            offset_pa = field_pa - pointing_pa
+            offset_pa = (field_pa - pointing_pa) % 360
 
         return ((ra_arcsec, dec_arcsec), (saz_diff_d, sel_diff_d), offset_pa)
 
@@ -556,8 +568,8 @@ class Guider:
 
         max_ax_correction = self.config.get("max_ax_correction", 3600)
 
-        # min_rot_correction = self.config.get("min_rot_correction", 0.01)
-        # max_rot_correction = self.config.get("max_rot_correction", 3)
+        min_rot_correction = self.config.get("min_rot_correction", 0.01)
+        max_rot_correction = self.config.get("max_rot_correction", 3)
 
         if numpy.any(numpy.abs([off0, off1]) > max_ax_correction):
             self.command.error("Requested correction is too big. Not applying it.")
@@ -587,18 +599,18 @@ class Guider:
         if cmd.status.did_fail:
             raise RuntimeError(f"Failed offsetting telescope {telescope}.")
 
-        # if self.config.get("has_kmirror", True) and self.is_rot_offset_allowed():
-        #     if off_rot > max_rot_correction:
-        #         self.command.warning("Requested rotator correction is too big.")
-        #     elif off_rot > min_rot_correction:
-        #         km = f"lvm.{telescope}.km"
-        #         cmd_km_str = f"slewAdjust --offset_angle {off_rot:.6f}"
-        #         cmd_km = await self.command.send_command(km, cmd_km_str)
+        if self.config.get("has_kmirror", True) and self.is_rot_offset_allowed():
+            if off_rot > max_rot_correction:
+                self.command.warning("Requested rotator correction is too big.")
+            elif off_rot > min_rot_correction:
+                km = f"lvm.{telescope}.km"
+                cmd_km_str = f"slewAdjust --offset_angle {off_rot:.6f}"
+                cmd_km = await self.command.send_command(km, cmd_km_str)
 
-        #         if cmd_km.status.did_fail:
-        #             self.command.error(f"Failed offsetting k-mirror {telescope}.")
-        #         else:
-        #             applied_rot = off_rot
+                if cmd_km.status.did_fail:
+                    self.command.error(f"Failed offsetting k-mirror {telescope}.")
+                else:
+                    applied_rot = off_rot
 
         return applied_radec, applied_motax, applied_rot
 
@@ -611,17 +623,21 @@ class Guider:
 
         """
 
+        if self.is_guiding():
+            return False
+
         ROT_MIN_ITERATIONS: int = 3
 
-        if len(self.solutions) == 0:
+        if len(self.solutions) <= 1:
             return True
 
         n_last_rot_correction: int = 0
         for frameno in list(self.solutions)[::-1]:
+            n_last_rot_correction += 1
+
             if abs(self.solutions[frameno].correction[-1]) > 0:
                 return n_last_rot_correction >= ROT_MIN_ITERATIONS
 
-            n_last_rot_correction += 1
             if n_last_rot_correction >= ROT_MIN_ITERATIONS:
                 return True
 
