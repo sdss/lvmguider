@@ -66,7 +66,7 @@ class BaseSolution:
         """Returns the median zero point."""
 
         if self.sources is not None:
-            return self.sources.zp.dropna().median()
+            return float(self.sources.zp.dropna().median())
 
         return numpy.nan
 

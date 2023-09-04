@@ -169,7 +169,7 @@ class Cameras:
         if len(sources) > 0:
             all_sources = pandas.concat(sources)
             valid = all_sources.loc[all_sources.valid == 1]
-            fwhm = numpy.median(valid["fwhm"]) if len(valid) > 0 else None
+            fwhm = float(numpy.median(valid["fwhm"])) if len(valid) > 0 else None
         else:
             valid = []
             fwhm = None
