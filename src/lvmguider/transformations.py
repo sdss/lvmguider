@@ -456,7 +456,7 @@ def get_crota2(wcs: WCS):
         raise ValueError("WCS does not have information to determine CROTA2.")
 
     crota2 = numpy.degrees(numpy.arctan2(-cd[0, 1], cd[1, 1]))
-    return crota2 if crota2 > 0 else crota2 + 360
+    return float(crota2 if crota2 > 0 else crota2 + 360)
 
 
 def match_with_gaia(

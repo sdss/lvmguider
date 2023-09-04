@@ -24,7 +24,8 @@ import numpy
 import pandas
 from astropy.io import fits
 from astropy.table import Table
-from astropy.wcs import WCS
+from astropy.units import UnitsWarning
+from astropy.wcs import WCS, FITSFixedWarning
 
 
 PathLike = TypeVar("PathLike", pathlib.Path, str)
@@ -478,16 +479,20 @@ def astrometrynet_quick(
         else:
             return solution
 
-    warnings.simplefilter("ignore")
-    wcs = WCS(open(wcs_output).read(), relax=True)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=FITSFixedWarning)
+        wcs = WCS(open(wcs_output).read(), relax=True)
 
     solution.wcs = wcs
     solution.stdout = open(stdout).read()
     solution.stderr = open(stderr).read()
 
     if os.path.exists(corr_file):
-        stars = Table.read(corr_file).to_pandas()
-        solution.stars = stars
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=UnitsWarning)
+
+            stars = Table.read(corr_file).to_pandas()
+            solution.stars = stars
 
     return solution
 

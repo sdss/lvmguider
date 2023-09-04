@@ -514,6 +514,7 @@ def plot_guider_offsets(
     )
 
     gdata = solution.guider_data()
+    gdata = gdata.loc[gdata.guide_mode == "guide"]
 
     # Top panel. On the left y axis plot the separation to the field
     # centre. In the right y axis plot the PA error (field - measured).

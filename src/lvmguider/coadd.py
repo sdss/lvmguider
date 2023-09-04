@@ -64,7 +64,7 @@ AnyPath = str | os.PathLike
 
 
 MULTIPROCESS_MODE: Literal["frames"] | Literal["cameras"] = "frames"
-MULTIPROCESS_NCORES: dict[str, int] = {"frames": 12, "cameras": 2}
+MULTIPROCESS_NCORES: dict[str, int] = {"frames": 4, "cameras": 2}
 
 
 def process_all_spec_frames(path: AnyPath, **kwargs):
@@ -229,11 +229,17 @@ def create_global_coadd(
 
     # Now create a global solution.
     root = pathlib.Path(files[0]).parent
-    guider_solutions = get_guider_solutions(root, list(frame_nos), telescope)
+
+    get_guider_solutions_p = partial(get_guider_solutions, root, telescope)
+    if MULTIPROCESS_MODE == "cameras":
+        with multiprocessing.Pool(MULTIPROCESS_NCORES["cameras"]) as pool:
+            guider_solutions = list(pool.map(get_guider_solutions_p, list(frame_nos)))
+    else:
+        guider_solutions = map(get_guider_solutions_p, list(frame_nos))
 
     gs = GlobalSolution(
         coadd_solutions=coadd_solutions,
-        guider_solutions=guider_solutions,
+        guider_solutions=[gs for gs in guider_solutions if gs is not None],
         telescope=telescope,
     )
 
@@ -324,6 +330,7 @@ def coadd_camera(
     sigma: float = 3.0,
     database_profile: str = "default",
     database_params: dict = {},
+    overwrite_reprocess: bool = False,
 ):
     """Co-adds a series of AG camera frames.
 
@@ -366,6 +373,8 @@ def coadd_camera(
         Profile name to use to connect to the database and query Gaia.
     database_params
         Additional database parameters used to override the profile.
+    overwrite_reprocess
+        Whether to overwrite reprocessed files or use already existing ones.
 
     Returns
     -------
@@ -403,6 +412,7 @@ def coadd_camera(
     create_framedata_partial = partial(
         create_framedata,
         db_connection_params=db_connection_params,
+        overwrite_reprocess=overwrite_reprocess,
     )
 
     if MULTIPROCESS_MODE == "frames":
@@ -519,7 +529,11 @@ def coadd_camera(
     return coadd_solution
 
 
-def create_framedata(path: pathlib.Path, db_connection_params: dict = {}):
+def create_framedata(
+    path: pathlib.Path,
+    db_connection_params: dict = {},
+    overwrite_reprocess: bool = False,
+):
     """Collects information from a guider frame into a `.FrameData` object."""
 
     # Copy the original path.
@@ -539,6 +553,7 @@ def create_framedata(path: pathlib.Path, db_connection_params: dict = {}):
         path = reprocess_agcam(
             path,
             db_connection_params=db_connection_params,
+            overwrite=overwrite_reprocess,
         )
         reprocessed = True
 
@@ -661,35 +676,30 @@ def process_camera_coadd(
     )
 
 
-def get_guider_solutions(root: pathlib.Path, framenos: list[int], telescope: str):
-    """Collects guider solutions for a range of framenos."""
+def get_guider_solutions(root: pathlib.Path, telescope: str, frameno: int):
+    """Collects guider solutions for a frame."""
 
-    solutions: list[GuiderSolution] = []
+    filename = f"lvm.{telescope}.guider_{frameno:08d}.fits"
 
-    for frameno in framenos:
-        filename = f"lvm.{telescope}.guider_{frameno:08d}.fits"
+    log_h = f"{telescope}-{frameno}:"
 
-        log_h = f"{telescope}-{frameno}:"
+    path = root / filename
+    if not path.exists():
+        try:
+            path = reprocess_legacy_guider_frame(root, frameno, telescope)
+        except Exception:
+            log.error(f"{log_h} failed retrieving guider solution.")
+            return None
 
-        path = root / filename
-        if not path.exists():
-            try:
-                path = reprocess_legacy_guider_frame(root, frameno, telescope)
-            except Exception:
-                log.error(f"{log_h} failed retrieving guider solution.")
-                continue
+    guider_data = fits.getheader(path, "GUIDERDATA")
 
-        guider_data = fits.getheader(path, "GUIDERDATA")
+    solution = GuiderSolution.open(path)
+    solution.guide_mode = guider_data["GUIDMODE"]
+    solution.ra_field = guider_data["RAFIELD"]
+    solution.dec_field = guider_data["DECFIELD"]
+    solution.pa_field = guider_data.get("PAFIELD", numpy.nan)
 
-        solution = GuiderSolution.open(path)
-        solution.guide_mode = guider_data["GUIDMODE"]
-        solution.ra_field = guider_data["RAFIELD"]
-        solution.dec_field = guider_data["DECFIELD"]
-        solution.pa_field = guider_data.get("PAFIELD", numpy.nan)
-
-        solutions.append(solution)
-
-    return solutions
+    return solution
 
 
 def create_coadd_header(solution: CoAdd_CameraSolution):

@@ -19,7 +19,7 @@ import numpy
 import pandas
 from astropy.io import fits
 from astropy.time import Time
-from astropy.wcs import WCS
+from astropy.wcs import WCS, FITSFixedWarning
 from packaging.version import Version
 
 from lvmguider import config, log
@@ -129,7 +129,7 @@ class CameraSolution(BaseSolution):
             sources = pandas.read_parquet(dirname / proc["SOURCESF"])
 
         with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
+            warnings.simplefilter("ignore", category=FITSFixedWarning)
             wcs_mode = proc["WCSMODE"]
             wcs = WCS(proc) if wcs_mode != "none" else None
 
@@ -259,7 +259,9 @@ class GuiderSolution(BaseSolution):
                 "The file was generated with an unsupported version of lvmguider."
             )
 
-        wcs = WCS(guider_data) if guider_data["SOLVED"] else None
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=FITSFixedWarning)
+            wcs = WCS(guider_data) if guider_data["SOLVED"] else None
 
         solutions: list[CameraSolution] = []
         for key in ["FILEEAST", "FILEWEST"]:
@@ -342,27 +344,24 @@ class CoAdd_CameraSolution(CameraSolution):
         if self.frames is None:
             return df
 
-        records: list[dict] = []
-        for fd in self.frames:
-            records.append(
-                dict(
-                    frameno=fd.frameno,
-                    date_obs=fd.date_obs.isot,
-                    camera=fd.camera,
-                    telescope=fd.telescope,
-                    exptime=fd.exptime,
-                    kmirror_drot=fd.kmirror_drot,
-                    focusdt=fd.focusdt,
-                    fwhm=fd.solution.fwhm,
-                    pa=fd.solution.pa,
-                    zero_point=fd.solution.zero_point,
-                    stacked=int(fd.stacked),
-                    solved=int(fd.solution.solved),
-                    wcs_mode=fd.solution.wcs_mode,
-                )
+        for ii, fd in enumerate(self.frames):
+            new_row = dict(
+                frameno=fd.frameno,
+                date_obs=fd.date_obs.isot,
+                camera=fd.camera,
+                telescope=fd.telescope,
+                exptime=numpy.float32(fd.exptime),
+                kmirror_drot=numpy.float32(fd.kmirror_drot),
+                focusdt=numpy.float32(fd.focusdt),
+                fwhm=numpy.float32(fd.solution.fwhm),
+                pa=numpy.float32(fd.solution.pa),
+                zero_point=numpy.float32(fd.solution.zero_point),
+                stacked=int(fd.stacked),
+                solved=int(fd.solution.solved),
+                wcs_mode=fd.solution.wcs_mode,
             )
+            df.loc[ii, list(new_row)] = list(new_row.values())
 
-        df = pandas.DataFrame.from_records(records)
         df = df.sort_values(["frameno", "camera"])
 
         df.reset_index(drop=True, inplace=True)
@@ -411,42 +410,38 @@ class GlobalSolution(BaseSolution):
 
         df = dataframe_from_model("GUIDERDATA_FRAME")
 
-        records: list[dict] = []
-        for gs in self.guider_solutions:
+        for ii, gs in enumerate(self.guider_solutions):
             pa = get_crota2(gs.wcs) if gs.wcs is not None else numpy.nan
             pointing = gs.pointing
 
-            records.append(
-                dict(
-                    frameno=gs.frameno,
-                    telescope=gs.telescope,
-                    fwhm=gs.fwhm,
-                    pa=pa,
-                    zero_point=gs.zero_point,
-                    solved=int(gs.solved),
-                    guide_mode=gs.guide_mode,
-                    x_ff_pixel=gs.guide_pixel[0],
-                    z_ff_pixel=gs.guide_pixel[1],
-                    ra=pointing[0],
-                    dec=pointing[1],
-                    ra_field=gs.ra_field,
-                    dec_field=gs.dec_field,
-                    pa_field=gs.pa_field,
-                    ra_off=gs.ra_off,
-                    dec_off=gs.dec_off,
-                    pa_off=gs.pa_off,
-                    axis0_off=gs.axis0_off,
-                    axis1_off=gs.axis1_off,
-                    applied=int(gs.correction_applied),
-                    ax0_applied=gs.correction[0],
-                    ax1_applied=gs.correction[1],
-                    rot_applied=gs.correction[2],
-                )
+            new_row = dict(
+                frameno=gs.frameno,
+                telescope=gs.telescope,
+                fwhm=numpy.float32(gs.fwhm),
+                pa=numpy.float32(pa),
+                zero_point=numpy.float32(gs.zero_point),
+                solved=int(gs.solved),
+                guide_mode=gs.guide_mode,
+                x_ff_pixel=numpy.float32(gs.guide_pixel[0]),
+                z_ff_pixel=numpy.float32(gs.guide_pixel[1]),
+                ra=numpy.float64(pointing[0]),
+                dec=numpy.float64(pointing[1]),
+                ra_field=numpy.float64(gs.ra_field),
+                dec_field=numpy.float64(gs.dec_field),
+                pa_field=numpy.float32(gs.pa_field),
+                ra_off=numpy.float32(gs.ra_off),
+                dec_off=numpy.float32(gs.dec_off),
+                pa_off=numpy.float32(gs.pa_off),
+                axis0_off=numpy.float32(gs.axis0_off),
+                axis1_off=numpy.float32(gs.axis1_off),
+                applied=int(gs.correction_applied),
+                ax0_applied=numpy.float32(gs.correction[0]),
+                ax1_applied=numpy.float32(gs.correction[1]),
+                rot_applied=numpy.float32(gs.correction[2]),
             )
+            df.loc[ii, list(new_row)] = list(new_row.values())
 
-        df = pandas.DataFrame.from_records(records)
         df = df.sort_values(["frameno"])
-
         df.reset_index(drop=True, inplace=True)
 
         return df

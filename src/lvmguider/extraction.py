@@ -297,7 +297,10 @@ def extract_marginal(
     assert isinstance(sex_detections, pandas.DataFrame)
     assert isinstance(back, numpy.ndarray)
 
-    detections[sex_detections.columns] = sex_detections
+    for column in sex_detections.columns:
+        dtype = detections.dtypes[column]
+        detections[column] = sex_detections[column].astype(dtype)
+
     detections.loc[:, "valid"] = 0
 
     if exclude_border:
@@ -340,13 +343,15 @@ def extract_marginal(
             axis=1,
         )
 
-        detections.loc[:, fit_df.columns] = fit_df
+        for column in fit_df.columns:
+            dtype = detections.dtypes[column]
+            detections[column] = fit_df[column].astype(dtype)
 
     valid = (detections.xfitvalid == 1) & (detections.yfitvalid == 1)
-    detections.loc[:, "valid"] = valid
+    detections.loc[:, "valid"] = valid.astype(numpy.int8)
 
     # Calculate FWHM as average of xstd and ystd.
-    detections.loc[:, "fwhm"] = 0.5 * (detections.xstd + detections.ystd)
+    detections.loc[:, "fwhm"] = 0.5 * (detections.xstd + detections.ystd).astype("f4")
 
     assert sub is not None
 
