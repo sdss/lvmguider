@@ -600,7 +600,9 @@ class Guider:
         if cmd.status.did_fail:
             raise RuntimeError(f"Failed offsetting telescope {telescope}.")
 
-        if self.config.get("has_kmirror", True) and self.is_rot_offset_allowed():
+        guide_in_rot = self.config["has_kmirror"] and self.config["guide_in_rot"]
+
+        if guide_in_rot and self.is_rot_offset_allowed():
             if off_rot > max_rot_correction:
                 self.command.warning("Requested rotator correction is too big.")
             elif off_rot > min_rot_correction:
