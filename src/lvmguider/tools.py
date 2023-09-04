@@ -473,8 +473,12 @@ def estimate_zeropoint(
     zp = -2.5 * numpy.log10(flux_adu[valid] * gain) - sources.lmag_ab[valid]
 
     df = pandas.DataFrame(columns=["ap_flux", "ap_fluxerr", "zp"], dtype=numpy.float32)
-    df.loc[:, "ap_flux"] = flux_adu
-    df.loc[:, "ap_fluxerr"] = fluxerr_adu
+
+    # There is a weirdness in Pandas that if flux_adu is a single value then the
+    # .loc[:, "ap_flux"] would not set any values. So we replace the entire column
+    # but endure the dtypes.
+    df["ap_flux"] = flux_adu.astype(numpy.float32)
+    df["ap_fluxerr"] = fluxerr_adu.astype(numpy.float32)
     df.loc[valid, "zp"] = zp.astype(numpy.float32)
 
     df.index = sources.index
