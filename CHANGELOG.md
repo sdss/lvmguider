@@ -10,6 +10,7 @@
   * Average zero points and PAs are output.
   * All the metadata is carried out in two dataclasess, `CameraSolution` and `GuiderSolution`.
   * The output data model has changed. Former `proc-` files are now named `lvm.{telescope}.guider`, and sources are saved as `parquet` tables. The latter allows to preserve the column types in the presence of missing data.
+* [#6](https://github.com/sdss/lvmguider/pull/6) Major improvements to co-adding code.
 
 
 ## 0.3.0 - September 1, 2023
