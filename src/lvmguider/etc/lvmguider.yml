@@ -20,6 +20,7 @@ min_rot_correction: 0.01
 max_rot_correction: 3
 
 guide_tolerance: 1
+pa_tolerance: 0.012
 revert_to_acquistion_threshold: 2
 
 xz_full_frame: [2500.0, 1000.0]
@@ -30,6 +31,15 @@ offset:
   timeout:
     acquisition: 10.0
     guide: 5.0
+
+coadds:
+  paths:
+    coadd_camera_path: coadds/lvm.{telescope}.coadd.{camname}_{frameno0:08d}_{frameno1:08d}.fits
+    coadd_path: coadds/lvm.{telescope}.coadd_{frameno0:08d}_{frameno1:08d}.fits
+    coadd_spec_path: coadds/lvm.{{telescope}}.coadd_s{specno:08d}.fits
+  warnings:
+    pa_error: 0.012
+    pa_drift: 0.012
 
 site:
   lon: -70.70166667

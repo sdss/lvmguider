@@ -11,6 +11,8 @@ from __future__ import annotations
 import pathlib
 from datetime import datetime
 
+from typing import Any, cast
+
 import numpy
 import pandas
 from astropy.coordinates import EarthLocation, SkyCoord
@@ -31,14 +33,14 @@ conf.auto_download = False
 conf.iers_degraded_accuracy = "ignore"
 
 
-def ag_to_master_frame(
+def ag_to_full_frame(
     camera: str,
     in_locs: numpy.ndarray,
     rot_shift: tuple | None = None,
     verbose=False,
 ):
     """Rotate and shift the star locations from an AG frame to the correct locations in
-    the large "master frame" corresponding to the full focal plane.
+    the large "full frame" (master frame) corresponding to the full focal plane.
 
     Adapted from Tom Herbst's code.
 
@@ -55,7 +57,7 @@ def ag_to_master_frame(
     Returns
     -------
     rs_loc
-        Array of corresponding star locations in "master frame".
+        Array of corresponding star locations in "full frame".
 
     """
 
@@ -86,7 +88,7 @@ def ag_to_master_frame(
 
     if verbose:
         print("")
-        print("ag_to_master_frame: rot_shift for ", camera, numpy.degrees(th), Sx, Sz)
+        print("ag_to_full_frame: rot_shift for ", camera, numpy.degrees(th), Sx, Sz)
         print("")
 
     # Rotation matrix
@@ -105,8 +107,8 @@ def ag_to_master_frame(
     return (rsLoc.T, (th, Sx, Sz))
 
 
-def master_frame_to_ag(camera: str, locs: numpy.ndarray):
-    """Transforms the star locations from the master frame
+def full_frame_to_ag(camera: str, locs: numpy.ndarray):
+    """Transforms the star locations from the full frame
     to the internal pixel locations in the AG frame.
 
     Adapted from Tom Herbst.
@@ -151,7 +153,7 @@ def master_frame_to_ag(camera: str, locs: numpy.ndarray):
     # Make 2xnPts Sx,Sz offset matrix
     off = numpy.tile(numpy.array([[Sx, Sz]]).transpose(), (1, locs.shape[0]))
 
-    # Transform MF --> AG. See Single_Sensor_Solve doc
+    # Transform FF --> AG. See Single_Sensor_Solve doc
     rsLoc = numpy.dot(M, (locs.T - rOff - off)) + rOff
 
     # Return calculated positions (need to transpose for standard layout)
@@ -183,7 +185,7 @@ def solve_locs(
     dec
         The estimated Dec of the field.
     full_frame
-        Whether this is a full "master frame" field, requiring a different set of
+        Whether this is a full "full frame" field, requiring a different set of
         index files.
     index_paths
         The paths to the index files to use. A dictionary of series number
@@ -220,7 +222,7 @@ def solve_locs(
     radius = 5  # Search radius in degrees
 
     if full_frame:
-        midX, midZ = config["xz_full_frame"]  # Middle of Master Frame
+        midX, midZ = config["xz_full_frame"]  # Middle of full Frame
         index_paths_default = {
             5200: "/data/astrometrynet/5200",
             4100: "/data/astrometrynet/4100",
@@ -234,7 +236,7 @@ def solve_locs(
 
     locs = locs.copy()
     if full_frame:
-        locs = locs.rename(columns={"x_master": "x", "y_master": "y"})
+        locs = locs.rename(columns={"x_full": "x", "y_full": "y"})
 
     solution = astrometrynet_quick(
         index_paths,
@@ -454,7 +456,7 @@ def get_crota2(wcs: WCS):
         raise ValueError("WCS does not have information to determine CROTA2.")
 
     crota2 = numpy.degrees(numpy.arctan2(-cd[0, 1], cd[1, 1]))
-    return crota2 if crota2 > 0 else crota2 + 360
+    return float(crota2 if crota2 > 0 else crota2 + 360)
 
 
 def match_with_gaia(
@@ -463,6 +465,7 @@ def match_with_gaia(
     gaia_sources: pandas.DataFrame | None = None,
     max_separation: float = 2,
     concat: bool = False,
+    db_connection_params: dict[str, Any] = {},
 ) -> tuple[pandas.DataFrame, int]:
     """Match detections to Gaia sources using nearest neighbours.
 
@@ -481,6 +484,9 @@ def match_with_gaia(
     concat
         If `True`, the returned data frame is the input ``sources`` concatenated
         with the match information.
+    db_connection_params
+        Database connection parameters to pass to `.get_gaia_sources` if
+        ``gaia_sources`` are not passed.
 
     Returns
     -------
@@ -499,7 +505,7 @@ def match_with_gaia(
     epoch_diff = epoch - GAIA_EPOCH
 
     if gaia_sources is None:
-        gaia_sources = get_gaia_sources(wcs)
+        gaia_sources = get_gaia_sources(wcs, db_connection_params=db_connection_params)
 
     sources = sources.copy()
     gaia_sources = gaia_sources.copy()
@@ -532,19 +538,20 @@ def match_with_gaia(
 
     # Get Gaia rows for the valid matches. Change their indices to those
     # of their matching sources (which are 0..len(sources)-1 since we reindexed).
-    matches: pandas.DataFrame = gaia_sources.iloc[ii[valid]]
+    matches: pandas.DataFrame = gaia_sources.iloc[ii[valid]].copy()
     assert isinstance(matches, pandas.DataFrame)
 
     matches.index = pandas.Index(numpy.arange(len(ii))[valid])
 
-    dx = matches.xpix - sources.x
-    dy = matches.ypix - sources.y
-    matches["match_sep"] = numpy.hypot(dx, dy) * PIXSCALE
+    dx = (matches.xpix - sources.x).astype(numpy.float32)
+    dy = (matches.ypix - sources.y).astype(numpy.float32)
+    match_sep = cast(pandas.Series, numpy.hypot(dx, dy) * PIXSCALE)
+    matches.loc[:, "match_sep"] = match_sep.loc[matches.index]
 
-    matches.drop(columns=["xpix", "ypix"], inplace=True)
+    matches = matches.drop(columns=["xpix", "ypix"])
 
     if concat:
-        sources.loc[matches.index, matches.columns] = matches
+        sources.loc[:, matches.columns] = matches
         return sources, valid.sum()
 
     return matches, valid.sum()

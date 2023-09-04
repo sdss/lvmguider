@@ -26,16 +26,16 @@ from lvmguider.maskbits import GuiderStatus
 from lvmguider.tools import (
     elapsed_time,
     estimate_zeropoint,
-    get_dark_subtrcted_data,
+    get_dark_subtracted_data,
     get_frameno,
     get_guider_path,
     header_from_model,
+    nan_or_none,
     run_in_executor,
     update_fits,
 )
 from lvmguider.transformations import (
     delta_radec2mot_axis,
-    get_crota2,
     match_with_gaia,
     solve_camera_with_astrometrynet,
     wcs_from_gaia,
@@ -68,7 +68,7 @@ class Guider:
     field_centre
         The field centre on which we want to guider (RA, Dec, PA).
     pixel
-        The ``(x,y)`` pixel of the master frame to use to determine the pointing.
+        The ``(x,y)`` pixel of the full frame to use to determine the pointing.
         Default to the central pixel.
 
     """
@@ -85,6 +85,7 @@ class Guider:
 
         self.config = command.actor.config
         self.guide_tolerance = self.config["guide_tolerance"]
+        self.pa_tolerance = self.config["pa_tolerance"]
 
         self.field_centre = field_centre
         self.pixel = pixel or self.config["xz_full_frame"]
@@ -124,7 +125,7 @@ class Guider:
         return self.solutions[max(self.solutions)]
 
     def set_pixel(self, pixel_x: float | None = None, pixel_z: float | None = None):
-        """Sets the master frame pixel coordinates ``(x, z)`` on which to guide."""
+        """Sets the full frame pixel coordinates ``(x, z)`` on which to guide."""
 
         if pixel_x is None or pixel_z is None:
             new_pixel = self.config["xz_full_frame"]
@@ -140,12 +141,13 @@ class Guider:
     def is_guiding(self):
         """Are we guiding?"""
 
-        return self.command.actor.status & GuiderStatus.GUIDING
+        return bool(self.command.actor.status & GuiderStatus.GUIDING)
 
     def revert_to_acquisition(self):
         """Reset the flags for acquisition mode."""
 
-        self.command.warning("Reverting to acquisition.")
+        if self.is_guiding():
+            self.command.warning("Reverting to acquisition.")
 
         self.command.actor._status &= ~GuiderStatus.GUIDING
         self.command.actor._status |= GuiderStatus.ACQUIRING
@@ -223,9 +225,14 @@ class Guider:
 
         # Initial guider solution.
         guider_solution = GuiderSolution(
-            frameno,
-            camera_solutions,
+            frameno=frameno,
+            solutions=camera_solutions,
+            telescope=self.telescope,
             guide_pixel=numpy.array(self.pixel),
+            ra_field=self.field_centre[0],
+            dec_field=self.field_centre[1],
+            pa_field=self.field_centre[2],
+            guide_mode="guide" if self.is_guiding() else "acquisition",
         )
 
         if guider_solution.n_cameras_solved == 0:
@@ -233,17 +240,18 @@ class Guider:
 
         else:
             try:
-                mf_wcs = wcs_from_gaia(guider_solution.sources, ["x_mf", "y_mf"])
-                guider_solution.mf_wcs = mf_wcs
-                guider_solution.pa = get_crota2(mf_wcs)
+                assert guider_solution.sources is not None
+                ff_wcs = wcs_from_gaia(guider_solution.sources, ["x_ff", "y_ff"])
+                guider_solution.wcs = ff_wcs
 
             except RuntimeError as err:
-                self.command.error(f"Failed generating master frame WCS: {err}")
+                self.command.error(f"Failed generating full frame WCS: {err}")
 
         offset_radec, offset_motax, offset_pa = self.calculate_offset(guider_solution)
 
         guider_solution.ra_off = offset_radec[0]
         guider_solution.dec_off = offset_radec[1]
+        guider_solution.pa_off = offset_pa
         guider_solution.axis0_off = offset_motax[0]
         guider_solution.axis1_off = offset_motax[1]
 
@@ -311,6 +319,8 @@ class Guider:
         finally:
             self.command.actor.status &= ~GuiderStatus.CORRECTING
 
+            guider_solution.correction = [*applied_motax.tolist(), applied_rot]
+
             self.command.info(
                 correction_applied={
                     "frameno": frameno,
@@ -319,12 +329,21 @@ class Guider:
                 }
             )
 
-            guider_solution.correction = [*applied_motax.tolist(), corr_rot]
+            # Are we close enough to the field centre to guide using Gaia?
+            sep_reached = guider_solution.separation < self.guide_tolerance
 
-            reached = guider_solution.separation < self.guide_tolerance
+            # Have we converged in PA? Note that we can only move in positive
+            # offsets in the k-mirror, so if the offset_pa is < 0 we've gone
+            # too far and we cannot easily fix it. That's why here we don't
+            # take abs(offset_pa) since self.pa_tolerance is positive.
+            pa_reached = numpy.isnan(offset_pa) or offset_pa < self.pa_tolerance
+
+            # If the separation is > certain threshold (which usually is larger
+            # than the threshold for considering we are guiding in the first place)
+            # then we revert to acquisition.
             revert = guider_solution.separation > revert_to_acquistion_threshold
 
-            if reached and not self.is_guiding():
+            if sep_reached and pa_reached and not self.is_guiding():
                 self.command.info("Guide tolerance reached. Starting to guide.")
                 self.command.actor._status &= ~GuiderStatus.ACQUIRING
                 self.command.actor._status &= ~GuiderStatus.DRIFTING
@@ -347,7 +366,7 @@ class Guider:
         frameno = get_frameno(file)
         hdul = fits.open(str(file))
 
-        data, dark_sub = get_dark_subtrcted_data(file)
+        data, dark_sub = get_dark_subtracted_data(file)
         if not dark_sub:
             self.command.debug(f"No dark frame found for {file!s}. Fitting background.")
 
@@ -356,7 +375,12 @@ class Guider:
         sources_file = file.parent / file.with_suffix(".parquet")
         if not sources_file.exists():
             self.command.warning(f"Cannot find sources file for camera {camname!r}.")
-            return CameraSolution(frameno, camname, file)
+            return CameraSolution(
+                frameno=frameno,
+                camera=camname,
+                path=file,
+                telescope=self.telescope,
+            )
 
         sources = pandas.read_parquet(sources_file)
         matched_sources = sources.copy()
@@ -441,15 +465,15 @@ class Guider:
         sources.update(zp)
 
         camera_solution = CameraSolution(
-            frameno,
-            camname,
-            file,
+            frameno=frameno,
+            camera=camname,
+            path=file,
             sources=sources,
             wcs_mode=wcs_mode,
             wcs=wcs,
             matched=matched,
             ref_frame=ref_frame,
-            zero_point=zp.zp.median(),
+            telescope=self.telescope,
         )
 
         if camera_solution.solved is False:
@@ -499,7 +523,7 @@ class Guider:
             offset_pa = numpy.nan
         else:
             pointing_pa = (solution.pa - 180) % 360
-            offset_pa = field_pa - pointing_pa
+            offset_pa = (field_pa - pointing_pa) % 360
 
         return ((ra_arcsec, dec_arcsec), (saz_diff_d, sel_diff_d), offset_pa)
 
@@ -545,8 +569,8 @@ class Guider:
 
         max_ax_correction = self.config.get("max_ax_correction", 3600)
 
-        # min_rot_correction = self.config.get("min_rot_correction", 0.01)
-        # max_rot_correction = self.config.get("max_rot_correction", 3)
+        min_rot_correction = self.config.get("min_rot_correction", 0.01)
+        max_rot_correction = self.config.get("max_rot_correction", 3)
 
         if numpy.any(numpy.abs([off0, off1]) > max_ax_correction):
             self.command.error("Requested correction is too big. Not applying it.")
@@ -576,18 +600,18 @@ class Guider:
         if cmd.status.did_fail:
             raise RuntimeError(f"Failed offsetting telescope {telescope}.")
 
-        # if self.config.get("has_kmirror", True) and self.is_rot_offset_allowed():
-        #     if off_rot > max_rot_correction:
-        #         self.command.warning("Requested rotator correction is too big.")
-        #     elif off_rot > min_rot_correction:
-        #         km = f"lvm.{telescope}.km"
-        #         cmd_km_str = f"slewAdjust --offset_angle {off_rot:.6f}"
-        #         cmd_km = await self.command.send_command(km, cmd_km_str)
+        if self.config.get("has_kmirror", True) and self.is_rot_offset_allowed():
+            if off_rot > max_rot_correction:
+                self.command.warning("Requested rotator correction is too big.")
+            elif off_rot > min_rot_correction:
+                km = f"lvm.{telescope}.km"
+                cmd_km_str = f"slewAdjust --offset_angle {off_rot:.6f}"
+                cmd_km = await self.command.send_command(km, cmd_km_str)
 
-        #         if cmd_km.status.did_fail:
-        #             self.command.error(f"Failed offsetting k-mirror {telescope}.")
-        #         else:
-        #             applied_rot = off_rot
+                if cmd_km.status.did_fail:
+                    self.command.error(f"Failed offsetting k-mirror {telescope}.")
+                else:
+                    applied_rot = off_rot
 
         return applied_radec, applied_motax, applied_rot
 
@@ -600,17 +624,21 @@ class Guider:
 
         """
 
+        if self.is_guiding():
+            return False
+
         ROT_MIN_ITERATIONS: int = 3
 
-        if len(self.solutions) == 0:
+        if len(self.solutions) <= 1:
             return True
 
         n_last_rot_correction: int = 0
         for frameno in list(self.solutions)[::-1]:
+            n_last_rot_correction += 1
+
             if abs(self.solutions[frameno].correction[-1]) > 0:
                 return n_last_rot_correction >= ROT_MIN_ITERATIONS
 
-            n_last_rot_correction += 1
             if n_last_rot_correction >= ROT_MIN_ITERATIONS:
                 return True
 
@@ -619,14 +647,9 @@ class Guider:
     async def update_fits(self, guider_solution: GuiderSolution):
         """Updates the ``lvm.agcam`` files and creates the ``lvm.guider`` file."""
 
-        def nan_or_none(value: float, precision: int | None = None):
-            if numpy.isnan(value):
-                return None
-            if precision is not None:
-                return numpy.round(value, precision)
-            return value
-
         coros = []
+
+        assert guider_solution.sources is not None
 
         # Update lvm.agcam PROC extension.
         for solution in guider_solution.solutions:
@@ -659,7 +682,7 @@ class Guider:
         guider_path = get_guider_path(guider_solution.solutions[0].path)
         sources_path = guider_path.with_suffix(".parquet")
 
-        gheader = header_from_model("GUIDERDATA")
+        gheader = header_from_model("GUIDERDATA_HEADER")
 
         gheader["GUIDERV"] = __version__
         gheader["TELESCOP"] = self.telescope
@@ -679,8 +702,8 @@ class Guider:
         gheader["RAFIELD"] = numpy.round(self.field_centre[0], 6)
         gheader["DECFIELD"] = numpy.round(self.field_centre[1], 6)
         gheader["PAFIELD"] = numpy.round(self.field_centre[2], 4)
-        gheader["XMFPIX"] = guider_solution.guide_pixel[0]
-        gheader["ZMFPIX"] = guider_solution.guide_pixel[1]
+        gheader["XFFPIX"] = guider_solution.guide_pixel[0]
+        gheader["ZFFPIX"] = guider_solution.guide_pixel[1]
         gheader["SOLVED"] = guider_solution.solved
         gheader["RAMEAS"] = nan_or_none(guider_solution.pointing[0], 6)
         gheader["DECMEAS"] = nan_or_none(guider_solution.pointing[1], 6)
@@ -704,8 +727,8 @@ class Guider:
         gheader["AX1KD"] = self.pid_ax1.Kd
         gheader["ZEROPT"] = nan_or_none(guider_solution.zero_point, 3)
 
-        if guider_solution.mf_wcs:
-            gheader.extend(guider_solution.mf_wcs.to_header())
+        if guider_solution.wcs:
+            gheader.extend(guider_solution.wcs.to_header())
 
         guider_hdul = fits.HDUList([fits.PrimaryHDU()])
         guider_hdul.append(fits.ImageHDU(data=None, header=gheader, name="GUIDERDATA"))

@@ -26,7 +26,7 @@ __all__ = ["set_pixel", "reset_pixel"]
 @click.argument("PIXEL-X", type=float)
 @click.argument("PIXEL-Z", type=float)
 async def set_pixel(command: GuiderCommand, pixel_x: float, pixel_z: float):
-    """Sets the master frame pixel coordinates on which to guide.
+    """Sets the full frame pixel coordinates on which to guide.
 
     This command can be issued during active guiding to change the pointing
     of the telescope.
@@ -43,7 +43,7 @@ async def set_pixel(command: GuiderCommand, pixel_x: float, pixel_z: float):
 
 @lvmguider_parser.command()
 async def reset_pixel(command: GuiderCommand):
-    """Resets the master frame pixel on which to guide to the central pixel..
+    """Resets the full frame pixel on which to guide to the central pixel..
 
     This command can be issued during active guiding to change the pointing
     of the telescope.

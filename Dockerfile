@@ -15,4 +15,7 @@ RUN pip3 install -U pip setuptools wheel
 RUN cd lvmguider && pip3 install .
 RUN rm -Rf lvmguider
 
+# Set umask so that new files inherit the parent folder permissions.
+RUN echo "umask 0002" >> /etc/bash.bashrc
+
 ENTRYPOINT lvmguider actor start --debug

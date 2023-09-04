@@ -3,12 +3,7 @@
 import pathlib
 import warnings
 
-from astropy.wcs import FITSFixedWarning
-
 from sdsstools import Configuration, get_logger, get_package_version
-
-
-warnings.simplefilter("ignore", category=FITSFixedWarning)
 
 
 NAME = "lvmguider"

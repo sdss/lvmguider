@@ -10,14 +10,16 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import os.path
 import pathlib
 import re
 import warnings
+from collections import defaultdict
 from contextlib import contextmanager
 from functools import partial
 from time import time
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Sequence
 
 import nptyping
 import numpy
@@ -26,13 +28,16 @@ import peewee
 import pgpasslib
 import sep
 from astropy.io import fits
+from astropy.stats import sigma_clip
 from astropy.table import Table
+from astropy.time import Time, TimezoneInfo
 from psycopg2 import OperationalError
 
 from sdsstools import read_yaml_file
+from sdsstools.time import get_sjd
 
 from lvmguider import config, log
-from lvmguider.types import ARRAY_2D_F32
+from lvmguider.types import ARRAY_1D_F32, ARRAY_2D_F32
 
 
 if TYPE_CHECKING:
@@ -188,7 +193,7 @@ def elapsed_time(command: GuiderCommand, task_name: str = "unnamed"):
     command.actor.log.debug(f"Elapsed time for task {task_name!r}: {time()-t0:.3f} s")
 
 
-def get_frameno(file: pathlib.Path | str) -> int:
+def get_frameno(file: os.PathLike | str) -> int:
     """Returns the frame number for a frame."""
 
     match = re.match(r"^.+?([0-9]+)\.fits$", str(file))
@@ -410,6 +415,10 @@ def get_gaia_sources(
 
     df = pandas.DataFrame.from_records(data)
 
+    # Cast to correct types
+    for column in ["pmra", "pmdec", "phot_g_mean_mag", "lmag_ab", "lflux"]:
+        df[column] = df[column].astype(numpy.float32)
+
     return df
 
 
@@ -460,35 +469,47 @@ def estimate_zeropoint(
     # of an object that produces 1 count per second on the detector.
     # For an arbitrary object producing DT counts per second then
     # m = -2.5 x log10(DN) - ZP
-    zp = -2.5 * numpy.log10(flux_adu * gain) - sources.lmag_ab
+    valid = flux_adu > 0
+    zp = -2.5 * numpy.log10(flux_adu[valid] * gain) - sources.lmag_ab[valid]
 
-    df = pandas.DataFrame()
-    df["ap_flux"] = flux_adu
-    df["ap_fluxerr"] = fluxerr_adu
-    df["zp"] = zp
+    df = pandas.DataFrame(columns=["ap_flux", "ap_fluxerr", "zp"], dtype=numpy.float32)
+
+    # There is a weirdness in Pandas that if flux_adu is a single value then the
+    # .loc[:, "ap_flux"] would not set any values. So we replace the entire column
+    # but endure the dtypes.
+    df["ap_flux"] = flux_adu.astype(numpy.float32)
+    df["ap_fluxerr"] = fluxerr_adu.astype(numpy.float32)
+    df.loc[valid, "zp"] = zp.astype(numpy.float32)
 
     df.index = sources.index
 
     return df
 
 
-def get_dark_subtrcted_data(file: pathlib.Path | str) -> tuple[ARRAY_2D_F32, bool]:
+def get_dark_subtracted_data(file: pathlib.Path | str) -> tuple[ARRAY_2D_F32, bool]:
     """Returns a background or dark subtracted image."""
 
-    hdul = fits.open(str(file))
+    path = pathlib.Path(file)
+
+    hdul = fits.open(str(path))
 
     exptime = hdul["RAW"].header["EXPTIME"]
 
     # Data in counts per second.
     data: ARRAY_2D_F32 = hdul["RAW"].data.copy().astype("f4") / exptime
 
-    # Get data and subtract dark or fit background.
-    dirname = hdul["PROC"].header["DIRNAME"]
-    dark_file = hdul["PROC"].header["DARKFILE"]
+    if "PROC" in hdul:
+        # Get data and subtract dark or fit background.
+        dirname = hdul["PROC"].header.get("DIRNAME", path.parent)
+        dark_file = hdul["PROC"].header.get("DARKFILE", "")
 
-    dark_path = pathlib.Path(dirname) / dark_file
+        dark_path = pathlib.Path(dirname) / dark_file
 
-    if dark_file != "" and dark_path.exists():
+    else:
+        dark_file = ""
+        dark_path = None
+
+    if dark_file != "" and dark_path is not None and dark_path.exists():
         dark: ARRAY_2D_F32 = fits.getdata(str(dark_path), "RAW").astype("f4")
         dark_exptime: float = fits.getval(str(dark_path), "EXPTIME", "RAW")
         data = data - dark / dark_exptime
@@ -500,3 +521,246 @@ def get_dark_subtrcted_data(file: pathlib.Path | str) -> tuple[ARRAY_2D_F32, boo
         dark_sub = False
 
     return data, dark_sub
+
+
+def get_files_in_time_range(
+    path: pathlib.Path,
+    time0: Time,
+    time1: Time,
+    pattern: str = "*",
+):
+    """Returns all files in a directory with modification time in the time range.
+
+    Parameters
+    ----------
+    path
+        The path on which to search for files.
+    tile0,time1
+        The range of times, as astropy ``Time`` objects.
+    pattern
+        A pattern to use to subset the files in the directory. Defaults to
+        search all files.
+
+    Returns
+    -------
+    files
+        A list of paths to files in the directory that where last modified in the
+        selected time range.
+
+    """
+
+    files = path.glob(pattern)
+
+    tz = TimezoneInfo()
+    dt0 = time0.to_datetime(tz).timestamp()
+    dt1 = time1.to_datetime(tz).timestamp()
+
+    return [
+        file
+        for file in files
+        if os.path.getmtime(file) > dt0 and os.path.getmtime(file) < dt1
+    ]
+
+
+def get_agcam_in_time_range(
+    path: pathlib.Path,
+    time0: Time,
+    time1: Time,
+    pattern: str = "*.fits",
+):
+    """Similar to `.get_files_in_time_range` but uses the keyword ``DATE-OBS``."""
+
+    files = path.glob(pattern)
+
+    matched: list[pathlib.Path] = []
+    for file in files:
+        try:
+            hdul = fits.open(file)
+        except Exception:
+            continue
+
+        if "RAW" in hdul:
+            header = hdul["RAW"].header
+        else:
+            header = hdul[0].header
+
+        if "DATE-OBS" not in header:
+            continue
+
+        time = Time(header["DATE-OBS"], format="isot")
+        # print(time, time0, time1, time < time1, time > time0)
+        if time > time0 and time < time1:
+            matched.append(file)
+
+    return matched
+
+
+def get_guider_files_from_spec(
+    spec_file: str | pathlib.Path,
+    telescope: str | None = None,
+    agcam_path: str | pathlib.Path = "/data/agcam",
+    camera: str | None = None,
+    use_time_range: bool | None = None,
+):
+    """Returns the AG files taken during a spectrograph exposure.
+
+    A convenience function that reads the header of the spectrograph frame,
+    extracts the guide frames range and returns a list of those frames
+    filenames (missing frames are skipped).
+
+    Parameters
+    ----------
+    spec_file
+        The path to the spectrograph frame to use to determine the range.
+    telescope
+        The telescope for which to extract the range of guide/AG frames.
+        Defaults to the value in the configuration file.
+    agcam_path
+        The ``agcam`` path where AG frames are ordered by SJD.
+    camera
+        The camera, east or west, for which to select frames. If not provided
+        selects both cameras.
+    use_time_range
+        By default (``time_time_range=None``) the function will check the
+        ``G{telescope}FR0`` and ``G{telescope}FRN`` keywords to determine the
+        range of guider frames. If those keywords are not present, the AG
+        files that were last modified in the range of the integration will
+        be found. With `True`, the last modification range method will always
+        be used.
+
+    Returns
+    -------
+    frames
+        A list of AG file names that match the range of guide frames
+        taken during the spectrograph exposure. Missing frames in the
+        range are not included.
+
+    """
+
+    spec_file = pathlib.Path(spec_file)
+    if not spec_file.exists():
+        raise FileExistsError(f"Cannot find file {spec_file!s}")
+
+    header = fits.getheader(str(spec_file))
+
+    if telescope is None:
+        telescope = config["telescope"]
+
+    assert isinstance(telescope, str)
+
+    sjd = get_sjd("LCO", date=Time(header["OBSTIME"], format="isot").to_datetime())
+
+    agcam_path = pathlib.Path(agcam_path) / str(sjd)
+    if not agcam_path.exists():
+        raise FileExistsError(f"Cannot find agcam path {agcam_path!s}")
+
+    frame0 = header.get(f"G{telescope.upper()}FR0", None)
+    frame1 = header.get(f"G{telescope.upper()}FRN", None)
+
+    if use_time_range is True or (frame0 is None or frame1 is None):
+        log.warning(f"Matching guider frames by date for file {spec_file.name}")
+
+        time0 = Time(header["INTSTART"])
+        time1 = Time(header["INTEND"])
+        files = get_agcam_in_time_range(
+            agcam_path,
+            time0,
+            time1,
+            pattern=f"lvm.{telescope}.*.fits",
+        )
+
+        if len(files) == 0:
+            raise ValueError(f"Cannot find guider frames for {spec_file!s}")
+
+        return sorted(files)
+
+    return get_frame_range(agcam_path, telescope, frame0, frame1, camera=camera)
+
+
+def get_frame_range(
+    path: str | pathlib.Path,
+    telescope: str,
+    frameno0: int,
+    frameno1: int,
+    camera: str | None = None,
+) -> list[pathlib.Path]:
+    """Returns a list of AG frames in a frame number range.
+
+    Parameters
+    ----------
+    path
+        The directory where the files are written to.
+    telescope
+        The telescope for which to select frames.
+    frameno0
+        The initial frame number.
+    frameno1
+        The final frame number.
+    camera
+        The camera, east or west, for which to select frames. If not provided
+        selects all cameras.
+
+    Returns
+    -------
+    frames
+        A sorted list of frames in the desired range.
+
+    """
+
+    if camera is None:
+        files = pathlib.Path(path).glob(f"lvm.{telescope}.agcam.*.fits")
+    else:
+        files = pathlib.Path(path).glob(f"lvm.{telescope}.agcam.{camera}_*.fits")
+
+    selected: list[pathlib.Path] = []
+    for file in files:
+        frameno = get_frameno(file)
+        if frameno >= frameno0 and frameno <= frameno1:
+            selected.append(file)
+
+    return list(sorted(selected))
+
+
+def polyfit_with_sigclip(
+    x: ARRAY_1D_F32,
+    y: ARRAY_1D_F32,
+    sigma: int = 3,
+    deg: int = 1,
+):
+    """Fits a polynomial to data after sigma-clipping the dependent variable."""
+
+    valid = ~sigma_clip(y, sigma=sigma, masked=True).mask  # type:ignore
+
+    return numpy.polyfit(x[valid], y[valid], deg)
+
+
+def nan_or_none(value: float | None, precision: int | None = None):
+    """Replaces ``NaN`` with `None`. If the value is not ``NaN``, rounds up."""
+
+    if value is None or numpy.isnan(value):
+        return None
+
+    if precision is not None:
+        return numpy.round(value, precision)
+
+    return value
+
+
+def sort_files_by_camera(files: Sequence[str | os.PathLike]):
+    """Returns a dictionary of camera name to list of files."""
+
+    camera_to_files: defaultdict[str, list[pathlib.Path]] = defaultdict(list)
+    for file in files:
+        for camera in ["east", "west"]:
+            if camera in str(file):
+                camera_to_files[camera].append(pathlib.Path(file))
+                break
+
+    return camera_to_files
+
+
+def angle_difference(angle1: float, angle2: float):
+    """Calculates the shorted difference between two angles."""
+
+    diff = (angle2 - angle1 + 180) % 360 - 180
+    return diff + 360 if diff < -180 else diff
