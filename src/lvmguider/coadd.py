@@ -317,8 +317,9 @@ def create_global_coadd(
         log.debug(f"Writing frame data to {frames_path!s}")
         frame_data.to_parquet(frames_path)
 
-    if generate_qa:
-        plot_qa(gs)
+        if generate_qa:
+            log.info(f"Generating QA plots for {path.absolute()!s}")
+            plot_qa(gs)
 
     return gs
 
@@ -549,13 +550,15 @@ def create_framedata(
     except Exception:
         guiderv = "0.0.0"
 
-    if Version(guiderv) < Version("0.3.0a0"):
-        path = reprocess_agcam(
+    if Version(guiderv) < Version("0.4.0a0"):
+        new_path = reprocess_agcam(
             path,
             db_connection_params=db_connection_params,
             overwrite=overwrite_reprocess,
         )
-        reprocessed = True
+        if new_path is not None:
+            reprocessed = True
+            path = new_path
 
     with fits.open(str(path)) as hdul:
         # RAW header
@@ -681,7 +684,7 @@ def get_guider_solutions(root: pathlib.Path, telescope: str, frameno: int):
 
     filename = f"lvm.{telescope}.guider_{frameno:08d}.fits"
 
-    log_h = f"{telescope}-{frameno}:"
+    log_h = f"Frame {telescope}-{frameno}:"
 
     path = root / filename
     if not path.exists():
@@ -842,6 +845,9 @@ def create_global_header(solution: GlobalSolution):
     frame_data = solution.frame_data()
     guider_data = solution.guider_data()
 
+    if len(frame_data) == 0 or len(guider_data) == 0:
+        raise RuntimeError("No frame or guider data to combine.")
+
     guiding = guider_data.loc[guider_data.guide_mode == "guide"]
 
     frame0 = frame_data.frameno.min()
@@ -995,9 +1001,13 @@ def reprocess_agcam(file: AnyPath, overwrite: bool = False, db_connection_params
         log.debug(f"Found reprocessed file {reproc_path!s}")
         return reproc_path
 
-    log.warning(f"File {file!s} is too old and will be reprocessed.")
-
     hdul_orig = fits.open(file)
+
+    if "PROC" not in hdul_orig:
+        # Just return, there's an informative error later.
+        return
+
+    log.warning(f"File {file!s} is too old and will be reprocessed.")
 
     if "RAW" in hdul_orig:
         raw = hdul_orig["RAW"].header

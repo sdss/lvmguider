@@ -180,7 +180,14 @@ def save_subplot(
     fig.savefig(str(path), bbox_inches=extent)
 
 
-def get_camera_figure():
+def get_camera_figure(
+    left: float = 0.1,
+    right: float = 0.9,
+    bottom: float = 0.075,
+    top: float = 0.91,
+    wspace: float = 0.1,
+    hspace: float = 0.3,
+):
     """Returns a customised figure and axes."""
 
     fig, axd = plt.subplot_mosaic(
@@ -188,12 +195,12 @@ def get_camera_figure():
         figsize=(11, 8),
     )
     fig.subplots_adjust(
-        left=0.1,
-        right=0.9,
-        bottom=0.075,
-        top=0.91,
-        wspace=0.4,
-        hspace=0.25,
+        left=left,
+        right=right,
+        bottom=bottom,
+        top=top,
+        wspace=wspace,
+        hspace=hspace,
     )
 
     for name, ax in axd.items():
@@ -219,7 +226,7 @@ def plot_position_angle(
 ):
     """Plots the position angle."""
 
-    fig, axd = get_camera_figure()
+    fig, axd = get_camera_figure(wspace=0.4)
 
     # Plot top panels with the East and West camera PA and PA error.
     for camera_solution in solution.coadd_solutions:
@@ -294,7 +301,13 @@ def _plot_pa_axes(
 ):
     """Plot PA axes."""
 
+    ax.ticklabel_format(useOffset=True)
+
     pa_threshold = config["coadds"]["warnings"]["pa_error"]
+
+    # Create right axis for the PA error.
+    right_ax = ax.twinx()
+    right_ax.ticklabel_format(useOffset=True)
 
     # Plot absolute position angle.
     (pa_plot,) = ax.plot(
@@ -304,10 +317,6 @@ def _plot_pa_axes(
         zorder=20,
         label="Position angle",
     )
-
-    # Create right axis for the PA error.
-    right_ax = ax.twinx()
-    right_ax.grid(False)
 
     # For the cameras we calculate the error wrt the mean PA.
     # For the full frame PAs we use the initial PA and calculate the "drift".
@@ -329,8 +338,8 @@ def _plot_pa_axes(
     abs_error = (ref_pa - data.pa).abs().max()
     if abs_error > pa_threshold:
         right_ax.axhspan(
-            ymin=-0.0025,
-            ymax=0.0025,
+            ymin=-pa_threshold,
+            ymax=pa_threshold,
             facecolor="red",
             edgecolor="None",
             linestyle="None",
@@ -339,11 +348,18 @@ def _plot_pa_axes(
         )
 
     if legend:
-        right_ax.legend(
+        ax.legend(
             handles=[pa_plot, pa_error_plot],
             loc="upper left",
         ).set_zorder(100)
         ax.margins(0.05, 0.2)
+
+    # The left and right y-axis are different z-stacks so it's not possible to mix
+    # and match. This moves the right y-axis to the background.
+    right_ax.set_zorder(-1)
+    ax.patch.set_visible(False)  # type: ignore
+    ax.grid(False)
+    right_ax.patch.set_visible(True)  # type: ignore
 
     ax.set_xlabel("Frame number")
     ax.set_ylabel("Position angle [deg]", labelpad=10)
@@ -391,6 +407,7 @@ def plot_zero_point_or_fwhm(
 
         # Move the West camera y-axis to the right to unclutter the central section.
         if camera == "west":
+            ax.yaxis.tick_right()
             ax.yaxis.set_label_position("right")
 
         if save_subplots:
@@ -509,7 +526,7 @@ def plot_guider_offsets(
         right=0.9,
         bottom=0.075,
         top=0.93,
-        wspace=0.45,
+        wspace=0.1,
         hspace=0.3,
     )
 
@@ -522,38 +539,38 @@ def plot_guider_offsets(
     sep_data = gdata.loc[:, ["frameno", "separation"]]
 
     sep_ax = axd["sep"]  # type: ignore
-    sep_ax.plot(sep_data.frameno, sep_data.separation, "b-", label="Separation")
+    (sep_plot,) = sep_ax.plot(sep_data.frameno, sep_data.separation, "b-")
     sep_ax.set_xlabel("Frame number")
     sep_ax.set_ylabel("Separation [arcsec]", labelpad=10)
 
     sep_ax_r = sep_ax.twinx()
     sep_ax_r.grid(False)
-    sep_ax_r.plot(sep_data.index, gdata.pa_field - gdata.pa, "g-", label="PA error")
+    (pa_off_plot,) = sep_ax_r.plot(sep_data.frameno, gdata.pa_off, "g-")
     sep_ax_r.set_ylabel("Position angle error [deg]", labelpad=10)
+    sep_ax_r.legend(
+        handles=[sep_plot, pa_off_plot],
+        labels=["Separation", "PA error"],
+        loc="upper right",
+    )
 
-    # Bottom left panel. Plot the measured offsets in RA, Dec, and PA.
+    # Bottom left panel. Plot the measured offsets in RA, Dec..
     meas_ax = axd["meas"]  # type: ignore
-    meas_ax.plot(gdata.frameno, gdata.ra_off, "b-")
-    meas_ax.plot(gdata.frameno, gdata.dec_off, "r-")
+    meas_ax.plot(gdata.frameno, gdata.ra_off, "b-", label="RA", linewidth=0.5)
+    meas_ax.plot(gdata.frameno, gdata.dec_off, "r-", label="Dec", linewidth=0.5)
+    meas_ax.legend(loc="lower left")
     meas_ax.set_xlabel("Frame number")
-    meas_ax.set_ylabel("RA/Dec measured error [arcsec]", labelpad=10)
+    meas_ax.set_ylabel("Measured error [arcsec]", labelpad=10)
 
-    meas_ax_r = meas_ax.twinx()
-    meas_ax_r.grid(False)
-    meas_ax_r.plot(gdata.frameno, gdata.pa_off, "g-")
-    meas_ax_r.set_ylabel("PA measured error [deg]")
-
-    # Bottom right panel. Plot the applied corrections in RA, Dec, and PA.
+    # Bottom right panel. Plot the applied corrections in RA, Dec.
+    # No point in plotting PA corrections since they are not applied
+    # during guiding and we have excluded acquisition.
     appl_ax = axd["applied"]  # type: ignore
-    appl_ax.plot(gdata.frameno, gdata.ax0_applied, "b-")
-    appl_ax.plot(gdata.frameno, gdata.ax1_applied, "r-")
+    appl_ax.plot(gdata.frameno, gdata.ax0_applied, "b-", linewidth=0.5)
+    appl_ax.plot(gdata.frameno, gdata.ax1_applied, "r-", linewidth=0.5)
     appl_ax.set_xlabel("Frame number")
     appl_ax.set_ylabel("Applied offset [arcsec]")
-
-    appl_ax_r = appl_ax.twinx()
-    appl_ax_r.grid(False)
-    appl_ax_r.plot(gdata.frameno, gdata.rot_applied, "g-")
-    appl_ax_r.set_ylabel("PA applied offset [deg]", labelpad=10)
+    appl_ax.yaxis.tick_right()
+    appl_ax.yaxis.set_label_position("right")
 
     if save_subplots:
         save_subplot(
@@ -565,14 +582,14 @@ def plot_guider_offsets(
 
         save_subplot(
             fig,
-            [meas_ax, meas_ax_r],
+            [meas_ax],
             get_subplot_path(outpath, "_measured"),
             bbox_range=[0.0, 0.0, 0.505, 0.48],
         )
 
         save_subplot(
             fig,
-            [appl_ax, appl_ax_r],
+            [appl_ax],
             get_subplot_path(outpath, "_applied"),
             bbox_range=[0.505, 0.0, 1.0, 0.48],
         )

@@ -118,7 +118,7 @@ class CameraSolution(BaseSolution):
             raise ValueError("Guider version not found.")
 
         guiderv = Version(proc["GUIDERV"])
-        if guiderv < Version("0.3.0a0"):
+        if guiderv < Version("0.4.0a0"):
             raise ValueError(
                 "The file was generated with an unsupported version of lvmguider."
             )
@@ -254,7 +254,7 @@ class GuiderSolution(BaseSolution):
             raise ValueError("Guider version not found.")
 
         guiderv = Version(guider_data["GUIDERV"])
-        if guiderv < Version("0.3.0a0"):
+        if guiderv < Version("0.4.0a0"):
             raise ValueError(
                 "The file was generated with an unsupported version of lvmguider."
             )
