@@ -249,6 +249,7 @@ class Guider:
 
         guider_solution.ra_off = offset_radec[0]
         guider_solution.dec_off = offset_radec[1]
+        guider_solution.pa_off = offset_pa
         guider_solution.axis0_off = offset_motax[0]
         guider_solution.axis1_off = offset_motax[1]
 
