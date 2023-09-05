@@ -241,7 +241,7 @@ class Guider:
         else:
             try:
                 assert guider_solution.sources is not None
-                ff_wcs = wcs_from_gaia(guider_solution.sources, ["x_ff", "y_ff"])
+                ff_wcs = wcs_from_gaia(guider_solution.sources, ["x_ff", "z_ff"])
                 guider_solution.wcs = ff_wcs
 
             except RuntimeError as err:

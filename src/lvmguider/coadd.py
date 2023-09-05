@@ -298,7 +298,7 @@ def create_global_coadd(
     sources = gs.sources
     if telescope != "spec":
         if len(sources.ra.dropna()) > 5:
-            gs.wcs = wcs_from_gaia(sources, xy_cols=["x_ff", "y_ff"])
+            gs.wcs = wcs_from_gaia(sources, xy_cols=["x_ff", "z_ff"])
         else:
             log.warning("Unable to fit global WCS. Not enough matched sources.")
 
@@ -745,7 +745,7 @@ def process_camera_coadd(
     # Add global frame pixels.
     xy = coadd_sources.loc[:, ["x", "y"]].to_numpy()
     ff_locs, _ = ag_to_full_frame(f"{frame.telescope}-{frame.camera[0]}", xy)
-    coadd_sources.loc[:, ["x_ff", "y_ff"]] = ff_locs
+    coadd_sources.loc[:, ["x_ff", "z_ff"]] = ff_locs
 
     # Match with Gaia sources.
     coadd_sources, n_matches = match_with_gaia(
@@ -1271,7 +1271,7 @@ def reprocess_legacy_guider_frame(
 
     sources_concat = pandas.concat(sources)
     if len(sources_concat.ra.dropna()) > 5:
-        wcs = wcs_from_gaia(sources_concat, xy_cols=["x_ff", "y_ff"])
+        wcs = wcs_from_gaia(sources_concat, xy_cols=["x_ff", "z_ff"])
     else:
         log.warning(f"Insufficient Gaia matches for {proc_file!s}. Cannot fit WCS.")
         wcs = None
