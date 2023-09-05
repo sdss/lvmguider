@@ -544,14 +544,15 @@ def plot_guider_offsets(
     sep_ax.set_ylabel("Separation [arcsec]", labelpad=10)
 
     sep_ax_r = sep_ax.twinx()
-    sep_ax_r.grid(False)
-    (pa_off_plot,) = sep_ax_r.plot(sep_data.frameno, gdata.pa_off, "g-")
+    pa_off = gdata.pa_field - (gdata.pa - 180)
+    (pa_off_plot,) = sep_ax_r.plot(gdata.frameno, pa_off, "g-")
     sep_ax_r.set_ylabel("Position angle error [deg]", labelpad=10)
     sep_ax_r.legend(
         handles=[sep_plot, pa_off_plot],
         labels=["Separation", "PA error"],
         loc="upper right",
     )
+    sep_ax_r.grid(False)
 
     # Bottom left panel. Plot the measured offsets in RA, Dec..
     meas_ax = axd["meas"]  # type: ignore
