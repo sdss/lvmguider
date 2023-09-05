@@ -671,7 +671,7 @@ def get_guider_files_from_spec(
             agcam_path,
             time0,
             time1,
-            pattern=f"lvm.{telescope}.*.fits",
+            pattern=f"lvm.{telescope}.agcam*.fits",
         )
 
         if len(files) == 0:
