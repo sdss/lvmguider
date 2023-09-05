@@ -100,6 +100,7 @@ class CameraSolution(BaseSolution):
     sources: pandas.DataFrame | None = None
     ref_frame: pathlib.Path | None = None
     wcs_mode: WCS_MODE_T = "none"
+    guider_version: Version = Version("0.0.0")
 
     @classmethod
     def open(cls, file: str | pathlib.Path):
@@ -146,6 +147,7 @@ class CameraSolution(BaseSolution):
             wcs_mode=wcs_mode,
             matched=len(sources.ra.dropna()) > 0 if sources is not None else False,
             ref_frame=ref_frame,
+            guider_version=guiderv,
         )
 
 
@@ -173,6 +175,7 @@ class GuiderSolution(BaseSolution):
     correction_applied: bool = False
     correction: list[float] = field(default_factory=lambda: [0.0, 0.0, 0.0])
     guide_mode: str = "guide"
+    guider_version: Version = Version("0.0.0")
 
     @property
     def sources(self):
@@ -295,6 +298,7 @@ class GuiderSolution(BaseSolution):
                 guider_data["AX1CORR"],
                 guider_data["PACORR"],
             ],
+            guider_version=guiderv,
         )
 
 
