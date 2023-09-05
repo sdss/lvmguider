@@ -323,7 +323,12 @@ def update_fits(
             return
 
         hdu.data = data
-        hdu.header.update(header)
+
+        if isinstance(header, fits.Header):
+            hdu.header.update(header)
+        elif header is not None:
+            for key, value in header.items():
+                hdu.header[key] = value
 
 
 def get_gaia_sources(
