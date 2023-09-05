@@ -66,8 +66,10 @@ AnyPath = str | os.PathLike
 MULTIPROCESS_MODE: Literal["frames"] | Literal["cameras"] = "frames"
 MULTIPROCESS_NCORES: dict[str, int] = {"frames": 4, "cameras": 2}
 
+TELESCOPES: list[str] = ["sci", "spec", "skye", "skyw"]
 
-def process_all_spec_frames(path: AnyPath, **kwargs):
+
+def process_all_spec_frames(path: AnyPath, create_summary: bool = True, **kwargs):
     """Processes all the spectrograph frames in a directory.
 
     Parameters
@@ -75,6 +77,9 @@ def process_all_spec_frames(path: AnyPath, **kwargs):
     path
         The path to the directory to process. This is usually a
         ``/data/spectro/<MJD>`` directory.
+    create_summary
+        Generates a single table file with all the guider data for
+        the processed files.
     kwargs
         Keyword arguments to pass to `.coadd_from_spec_frame`.
 
@@ -83,11 +88,19 @@ def process_all_spec_frames(path: AnyPath, **kwargs):
     path = pathlib.Path(path)
     spec_files = sorted(path.glob("sdR-*-b1-*.fits.gz"))
 
+    if len(spec_files) == 0:
+        return
+
+    date_obs = fits.getval(spec_files[0], "OBSTIME")
+    sjd = get_sjd("LCO", Time(date_obs, format="isot").to_datetime())
+
+    all_paths: dict[int, list[pathlib.Path]] = {}
+
     for file in spec_files:
-        # Skip cals and frames without any guider information.
-
         header = fits.getheader(str(file))
+        specno = int(file.name.split("-")[-1].split(".")[0])
 
+        # Skip cals and frames without any guider information.
         if header["IMAGETYP"] != "object":
             continue
 
@@ -95,13 +108,38 @@ def process_all_spec_frames(path: AnyPath, **kwargs):
             log.warning(f"Spec frame {file.name!s} is too short. Skipping.")
             continue
 
-        coadd_from_spec_frame(file, **kwargs)
+        paths = coadd_from_spec_frame(file, **kwargs)
+        all_paths[specno] = paths
+
+    if create_summary:
+        gs_paths: list[pathlib.Path] = []
+        spec_nos: list[int] = []
+
+        for spec_no in all_paths:
+            gs_paths += all_paths[spec_no]
+            spec_nos += [spec_no] * len(all_paths[spec_no])
+
+        g_fs = [pp.with_name(pp.stem + "_guiderdata.parquet") for pp in gs_paths]
+        g_fs = [path for path in g_fs if path.exists()]
+        if len(g_fs) > 0:
+            base_path = g_fs[0].parent
+            outpath = base_path / f"lvm.guider.mjd_{sjd}_guiderdata.parquet"
+            log.info(f"Saving MJD summary file to {outpath!s}")
+            create_summary_file(g_fs, outpath, list(spec_nos))
+
+        f_fs = [pp.with_name(pp.stem + "_frames.parquet") for pp in gs_paths]
+        f_fs = [path for path in f_fs if path.exists()]
+        if len(f_fs) > 0:
+            base_path = f_fs[0].parent
+            outpath = base_path / f"lvm.guider.mjd_{sjd}_frames.parquet"
+            log.info(f"Saving MJD summary file to {outpath!s}")
+            create_summary_file(f_fs, outpath, list(spec_nos))
 
 
 def coadd_from_spec_frame(
     file: AnyPath,
     outpath: str | None = None,
-    telescopes: list[str] = ["sci", "spec", "skye", "skyw"],
+    telescopes: list[str] = TELESCOPES,
     use_time_range: bool | None = None,
     **kwargs,
 ):
@@ -135,6 +173,8 @@ def coadd_from_spec_frame(
     specno = int(file.name.split("-")[-1].split(".")[0])
     outpath = outpath.format(specno=specno)
 
+    paths: list[pathlib.Path] = []
+
     for telescope in telescopes:
         log.info(
             f"Generating co-added frame for {telescope!r} for "
@@ -157,12 +197,23 @@ def coadd_from_spec_frame(
             continue
 
         try:
-            create_global_coadd(frames, telescope=telescope, outpath=outpath, **kwargs)
+            gs = create_global_coadd(
+                frames,
+                telescope=telescope,
+                outpath=outpath,
+                **kwargs,
+            )
+
+            if gs.path is not None:
+                paths.append(gs.path)
+
         except Exception as err:
             log.critical(
                 f"Failed generating co-added frames for {file!s} on "
                 f"telescope {telescope!r}: {err}"
             )
+
+    return paths
 
 
 def create_global_coadd(
@@ -307,9 +358,9 @@ def create_global_coadd(
 
         # Write guider data.
         guider_data = gs.guider_data()
-        frames_path = path.with_name(path.stem + "_guiderdata.parquet")
-        log.debug(f"Writing guide data to {frames_path!s}")
-        guider_data.to_parquet(frames_path)
+        guider_path = path.with_name(path.stem + "_guiderdata.parquet")
+        log.debug(f"Writing guide data to {guider_path!s}")
+        guider_data.to_parquet(guider_path)
 
         # Write frame data.
         frame_data = gs.frame_data()
@@ -322,6 +373,53 @@ def create_global_coadd(
             plot_qa(gs)
 
     return gs
+
+
+def create_summary_file(
+    files: Sequence[AnyPath],
+    outpath: AnyPath,
+    spec_framenos: list[int] | None = None,
+):
+    """Concatenates the guider data from a list of files.
+
+    Parameters
+    ----------
+    files
+        The list of files to concatenate. These must be the
+        ``lvm.{telescope}.guider_{seqno}.parquet`` with one row corresponding
+        to each guide step in the sequence.
+    outpath
+        The ``parquet`` table file where to save the data.
+    spec_framenos
+        A list of spectrograph frame numbers. The length must match
+        the number of ``files``. If provided, a column ``spec_frameno`` will
+        be added to each file table.
+
+    Returns
+    -------
+    data
+        A data frame with the concatenated data.
+
+    """
+
+    dfs: list[pandas.DataFrame] = []
+    for ii, file in enumerate(files):
+        df = pandas.read_parquet(file)
+
+        if spec_framenos is not None and len(spec_framenos) > 0:
+            df["spec_frameno"] = spec_framenos[ii]
+            df["spec_frameno"] = df["spec_frameno"].astype("Int16")
+
+        dfs.append(df)
+
+    df_concat = pandas.concat(dfs)
+
+    outpath = pathlib.Path(outpath)
+    outpath.parent.mkdir(parents=True, exist_ok=True)
+
+    df_concat.to_parquet(str(outpath))
+
+    return df_concat
 
 
 def coadd_camera(
