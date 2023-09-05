@@ -336,7 +336,11 @@ class Guider:
             # offsets in the k-mirror, so if the offset_pa is < 0 we've gone
             # too far and we cannot easily fix it. That's why here we don't
             # take abs(offset_pa) since self.pa_tolerance is positive.
-            pa_reached = numpy.isnan(offset_pa) or offset_pa < self.pa_tolerance
+            pa_reached: bool
+            if self.config["has_kmirror"] and self.config["guide_in_rot"]:
+                pa_reached = numpy.isnan(offset_pa) or offset_pa < self.pa_tolerance
+            else:
+                pa_reached = True
 
             # If the separation is > certain threshold (which usually is larger
             # than the threshold for considering we are guiding in the first place)
