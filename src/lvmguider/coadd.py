@@ -897,7 +897,7 @@ def create_coadd_header(solution: CoAdd_CameraSolution):
     header["OBSTIMEN"] = frame_data.iloc[-1].date_obs
     header["FWHM0"] = nan_or_none(fwhm0, 3)
     header["FWHMN"] = nan_or_none(fwhmn, 3)
-    header["FHHMMED"] = nan_or_none(fwhm_median, 3)
+    header["FWHMMED"] = nan_or_none(fwhm_median, 3)
 
     if telescope != "spec":
         header["COFWHM"] = nan_or_none(cofwhm, 3)
@@ -1025,7 +1025,7 @@ def create_global_header(solution: GlobalSolution):
 
     header["FWHM0"] = nan_or_none(fwhm0, 3)
     header["FWHMN"] = nan_or_none(fwhmn, 3)
-    header["FHHMMED"] = nan_or_none(fwhm_median, 3)
+    header["FWHMMED"] = nan_or_none(fwhm_median, 3)
 
     if telescope != "spec":
         header["PACOEFFA"] = nan_or_none(pa_coeffs[0])
