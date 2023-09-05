@@ -526,8 +526,8 @@ class Guider:
         if numpy.isnan(solution.pa):
             offset_pa = numpy.nan
         else:
-            pointing_pa = (solution.pa - 180) % 360
-            offset_pa = (field_pa - pointing_pa) % 360
+            pointing_pa = solution.pa - 180
+            offset_pa = field_pa - pointing_pa
 
         return ((ra_arcsec, dec_arcsec), (saz_diff_d, sel_diff_d), offset_pa)
 
