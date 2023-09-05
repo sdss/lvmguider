@@ -163,7 +163,7 @@ class Focuser:
 
             asources["dt"] = focus_position
 
-            fwhm = asources["fwhm"].median()
+            fwhm = float(asources["fwhm"].median())
             command.info(
                 focus_point=dict(
                     focus=round(focus_position, 2),
