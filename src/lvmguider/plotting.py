@@ -234,7 +234,9 @@ def plot_position_angle(
             continue
 
         camera = camera_solution.camera
+
         frame_data = camera_solution.frame_data()
+        frame_data = frame_data.loc[frame_data.wcs_mode == "gaia"]
 
         if len(frame_data.pa.dropna()) < 2:
             continue
@@ -270,11 +272,12 @@ def plot_position_angle(
     # Now use the PAs from the guider data (i.e., full frame).
     guider_data = solution.guider_data()
     guider_data = guider_data.loc[guider_data.guide_mode == "guide"]
+
     if len(guider_data.pa.dropna()) >= 2:
         ax = axd["global"]  # type: ignore
         ax.axis("on")
 
-        _plot_pa_axes(ax, guider_data, pa_error_mode="first", legend=True)
+        _plot_pa_axes(ax, guider_data, pa_error_mode="mean", legend=True)
 
         if save_subplots:
             create_subplot(
@@ -282,7 +285,7 @@ def plot_position_angle(
                 get_subplot_path(outpath),
                 guider_data,
                 title="Full frame",
-                pa_error_mode="first",
+                pa_error_mode="mean",
                 legend=True,
             )
 
