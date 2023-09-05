@@ -345,6 +345,7 @@ def create_global_coadd(
                 fits.CompImageHDU(
                     data=coadd.coadd_image,
                     header=create_coadd_header(coadd),
+                    name=f"COADD_{coadd.camera.upper()}",
                 )
             )
 
