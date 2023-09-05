@@ -236,7 +236,10 @@ def plot_position_angle(
         camera = camera_solution.camera
 
         frame_data = camera_solution.frame_data()
-        frame_data = frame_data.loc[frame_data.wcs_mode == "gaia"]
+        reprocessed = camera_solution.frames[0].reprocessed
+
+        if not reprocessed:
+            frame_data = frame_data.loc[frame_data.wcs_mode == "gaia"]
 
         if len(frame_data.pa.dropna()) < 2:
             continue
