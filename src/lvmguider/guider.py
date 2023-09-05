@@ -685,6 +685,7 @@ class Guider:
         gheader["XFFPIX"] = guider_solution.guide_pixel[0]
         gheader["ZFFPIX"] = guider_solution.guide_pixel[1]
         gheader["SOLVED"] = guider_solution.solved
+        gheader["NCAMSOL"] = guider_solution.n_cameras_solved
         gheader["RAMEAS"] = nan_or_none(guider_solution.pointing[0], 6)
         gheader["DECMEAS"] = nan_or_none(guider_solution.pointing[1], 6)
         gheader["PAMEAS"] = nan_or_none(guider_solution.pa, 4)

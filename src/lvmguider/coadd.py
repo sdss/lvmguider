@@ -1038,6 +1038,7 @@ def create_global_header(solution: GlobalSolution):
     header["ZEROPT"] = nan_or_none(solution.zero_point, 3)
 
     header["SOLVED"] = solution.solved
+    header["NCAMSOL"] = solution.n_cameras_solved
     header.insert("FRAME0", ("", "/*** GLOBAL FRAME PARAMETERS ***/"))
 
     # Pointing
@@ -1242,6 +1243,7 @@ def reprocess_legacy_guider_frame(
     # Get the sources. Try first the location of the new-style sources file.
     # Otherwise check if there's a reprocessed file.
     sources: list[pandas.DataFrame] = []
+    n_solved: int = 0
     for key in ["FILE0", "FILE1"]:
         filex = proc.get(key, None)
         if filex is None:
@@ -1266,8 +1268,16 @@ def reprocess_legacy_guider_frame(
             else:
                 gdata_header["FILEWEST"] = filex
 
+            hdul = fits.open(filex)
+            if "PROC" in hdul and hdul["PROC"].header["WCSMODE"] != "none":
+                n_solved += 1
+
+            hdul.close()
+
     if len(sources) == 0:
         raise RuntimeError(f"No sources found for guider frame {proc_file!s}")
+
+    gdata_header["NCAMSOLVED"] = n_solved
 
     sources_concat = pandas.concat(sources)
     if len(sources_concat.ra.dropna()) > 5:

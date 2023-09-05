@@ -383,6 +383,12 @@ class GlobalSolution(BaseSolution):
     matched: bool = True
 
     @property
+    def n_cameras_solved(self):
+        """Returns the number of cameras solved."""
+
+        return len([cs for cs in self.coadd_solutions if cs.solved])
+
+    @property
     def sources(self):
         """Concatenates sources from the co-added solutions."""
 
@@ -425,6 +431,7 @@ class GlobalSolution(BaseSolution):
                 pa=numpy.float32(pa),
                 zero_point=numpy.float32(gs.zero_point),
                 solved=int(gs.solved),
+                n_cameras_solved=int(gs.n_cameras_solved),
                 guide_mode=gs.guide_mode,
                 x_ff_pixel=numpy.float32(gs.guide_pixel[0]),
                 z_ff_pixel=numpy.float32(gs.guide_pixel[1]),

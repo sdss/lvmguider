@@ -84,6 +84,7 @@ GUIDERDATA_HEADER:
   DIRNAME: [null, 'Original file directory']
   SOURCESF: [null, 'Sources file']
   SOLVED: [False, 'Astrometric solution found?']
+  NCAMSOL: [0, 'Number of cameras combined for the WCS']
   XFFPIX: [null, 'The x pixel of the full frame']
   ZFFPIX: [null, 'The z pixel of the full frame']
   RAFIELD: [null, '[deg] Field RA']
@@ -130,6 +131,7 @@ GUIDERDATA_FRAME:
   frameno: 'Int16'
   telescope: 'S4'
   solved: 'Int8'
+  n_cameras_solved: 'Int8'
   guide_mode: 'S12'
   fwhm: 'f4'
   zero_point: 'f4'
@@ -204,6 +206,7 @@ GLOBAL_COADD:
   PADRIFT: [null, '[deg] PA drift in frame range']
   ZEROPT: [null, '[mag] Instrumental zero-point']
   SOLVED: [false, 'Was the global frame astrometrically solved?']
+  NCAMSOL: [0, 'Number of co-add cameras used for the WCS']
   XFFPIX: [null, 'The x pixel of the full frame']
   ZFFPIX: [null, 'The z pixel of the full frame']
   RAFIELD: [null, '[deg] Field RA']
