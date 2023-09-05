@@ -606,9 +606,12 @@ class Guider:
 
         guide_in_rot = self.config["has_kmirror"] and self.config["guide_in_rot"]
 
-        if guide_in_rot and self.is_rot_offset_allowed():
+        if guide_in_rot and not self.is_guiding():
             if off_rot > max_rot_correction:
                 self.command.warning("Requested rotator correction is too big.")
+
+            # Note that we do not take abs(off_rot) here because we cannot apply
+            # correction in negative direction. This prevents that.
             elif off_rot > min_rot_correction:
                 km = f"lvm.{telescope}.km"
                 cmd_km_str = f"slewAdjust --offset_angle {off_rot:.6f}"
@@ -620,35 +623,6 @@ class Guider:
                     applied_rot = off_rot
 
         return applied_radec, applied_motax, applied_rot
-
-    def is_rot_offset_allowed(self):
-        """Checks if it is possible to offset in PA.
-
-        The k-mirror takes ~20 seconds to apply a correction (the interval at
-        which updated trajectories are sent to the controller). So we don't want
-        to be sending multiple corrections until the previous one is done.
-
-        """
-
-        if self.is_guiding():
-            return False
-
-        ROT_MIN_ITERATIONS: int = 3
-
-        if len(self.solutions) <= 1:
-            return True
-
-        n_last_rot_correction: int = 0
-        for frameno in list(self.solutions)[::-1]:
-            n_last_rot_correction += 1
-
-            if abs(self.solutions[frameno].correction[-1]) > 0:
-                return n_last_rot_correction >= ROT_MIN_ITERATIONS
-
-            if n_last_rot_correction >= ROT_MIN_ITERATIONS:
-                return True
-
-        return False
 
     async def update_fits(self, guider_solution: GuiderSolution):
         """Updates the ``lvm.agcam`` files and creates the ``lvm.guider`` file."""
