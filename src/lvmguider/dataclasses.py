@@ -125,7 +125,7 @@ class CameraSolution(BaseSolution):
             )
 
         sources: pandas.DataFrame | None = None
-        if proc["SOURCESF"] != "":
+        if proc["SOURCESF"]:
             dirname = file.parent
             sources = pandas.read_parquet(dirname / proc["SOURCESF"])
 
