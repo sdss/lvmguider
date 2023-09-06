@@ -46,6 +46,9 @@ if TYPE_CHECKING:
     from lvmguider.actor import GuiderCommand
 
 
+_DATEOBS_CACHE: dict[str, Time | None] = {}
+
+
 async def run_in_executor(fn, *args, catch_warnings=False, executor="thread", **kwargs):
     """Runs a function in an executor.
 
@@ -572,28 +575,41 @@ def get_agcam_in_time_range(
     time0: Time,
     time1: Time,
     pattern: str = "*.fits",
+    use_cache: bool = True,
 ):
     """Similar to `.get_files_in_time_range` but uses the keyword ``DATE-OBS``."""
+
+    global _DATEOBS_CACHE
 
     files = path.glob(pattern)
 
     matched: list[pathlib.Path] = []
     for file in files:
-        try:
-            hdul = fits.open(file)
-        except Exception:
-            continue
+        abs_path_str = str(file.absolute())
 
-        if "RAW" in hdul:
-            header = hdul["RAW"].header
+        if use_cache and abs_path_str in _DATEOBS_CACHE:
+            time = _DATEOBS_CACHE[abs_path_str]
+            if time is None:
+                continue
+
         else:
-            header = hdul[0].header
+            try:
+                hdul = fits.open(file)
+            except Exception:
+                continue
 
-        if "DATE-OBS" not in header:
-            continue
+            if "RAW" in hdul:
+                header = hdul["RAW"].header
+            else:
+                header = hdul[0].header
 
-        time = Time(header["DATE-OBS"], format="isot")
-        # print(time, time0, time1, time < time1, time > time0)
+            if "DATE-OBS" not in header:
+                _DATEOBS_CACHE[abs_path_str] = None
+                continue
+
+            time = Time(header["DATE-OBS"], format="isot")
+            _DATEOBS_CACHE[abs_path_str] = time
+
         if time > time0 and time < time1:
             matched.append(file)
 
@@ -606,6 +622,7 @@ def get_guider_files_from_spec(
     agcam_path: str | pathlib.Path = "/data/agcam",
     camera: str | None = None,
     use_time_range: bool | None = None,
+    use_cache: bool = True,
 ):
     """Returns the AG files taken during a spectrograph exposure.
 
@@ -632,6 +649,10 @@ def get_guider_files_from_spec(
         files that were last modified in the range of the integration will
         be found. With `True`, the last modification range method will always
         be used.
+    use_cache
+        If it is necessary to use the file time range, whether it should
+        cache the file ``DATE-OBS`` to prevent multiple access to the same
+        file.
 
     Returns
     -------
@@ -672,6 +693,7 @@ def get_guider_files_from_spec(
             time0,
             time1,
             pattern=f"lvm.{telescope}.agcam*.fits",
+            use_cache=use_cache,
         )
 
         if len(files) == 0:
