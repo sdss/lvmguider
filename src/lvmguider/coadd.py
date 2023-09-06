@@ -1268,7 +1268,7 @@ def reprocess_legacy_guider_frame(
             else:
                 gdata_header["FILEWEST"] = filex
 
-            hdul = fits.open(filex)
+            hdul = fits.open(root / filex)
             if "PROC" in hdul and hdul["PROC"].header["WCSMODE"] != "none":
                 n_solved += 1
 
