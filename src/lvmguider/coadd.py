@@ -1116,6 +1116,7 @@ def reprocess_agcam(file: AnyPath, overwrite: bool = False, db_connection_params
 
     proc = hdul_orig["PROC"].header if "PROC" in hdul_orig else {}
 
+    data_sub, _ = get_dark_subtracted_data(file)
     sources = extract_sources(file)
 
     solution: AstrometrySolution = solve_camera_with_astrometrynet(
@@ -1133,6 +1134,9 @@ def reprocess_agcam(file: AnyPath, overwrite: bool = False, db_connection_params
             concat=True,
             db_connection_params=db_connection_params,
         )
+
+        zp = estimate_zeropoint(data_sub, sources)
+        sources.update(zp)
 
     darkfile = proc.get("DARKFILE", None)
     if darkfile:
