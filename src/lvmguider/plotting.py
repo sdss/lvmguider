@@ -387,12 +387,27 @@ def plot_zero_point_or_fwhm(
 
     fig, axd = get_camera_figure()
 
+    # Get guider data first. We'll use this to select camera frames to use.
+    guider_data = solution.guider_data()
+    guider_data = guider_data.loc[guider_data.guide_mode == "guide"]
+
     # Plot top panels with the East and West camera zero point or FWHM.
     for camera_solution in solution.coadd_solutions:
         camera = camera_solution.camera
 
         # Get all the frames and the ZP/FWHM value of the co-added camera image.
         frame_data = camera_solution.frame_data()
+
+        # We want to reject the frames in which we were acquiring since those may
+        # have starts blurred or moving. If there's at least one "gaia" in the
+        # wcs_mode, use that. Otherwise this must be a reprocessed set of frames
+        # which all have "astrometry.net". Then use the guider_data framenos.
+        if "gaia" in frame_data.wcs_mode.values:
+            frame_data = frame_data.loc[frame_data.wcs_mode == "gaia", :]
+        else:
+            valid = numpy.in1d(frame_data.frameno, guider_data.frameno)
+            frame_data = frame_data.loc[valid]
+
         coadd_value = getattr(camera_solution, column)
 
         if len(frame_data) == 0 and numpy.isnan(coadd_value):
@@ -428,8 +443,6 @@ def plot_zero_point_or_fwhm(
             )
 
     # Now do the full frame. Almost identical to above.
-    guider_data = solution.guider_data()
-    guider_data = guider_data.loc[guider_data.guide_mode == "guide"]
     global_value = getattr(solution, column)
 
     if len(guider_data.zero_point.dropna()) >= 2 or not numpy.isnan(global_value):
