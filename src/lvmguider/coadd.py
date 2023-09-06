@@ -1277,7 +1277,7 @@ def reprocess_legacy_guider_frame(
     if len(sources) == 0:
         raise RuntimeError(f"No sources found for guider frame {proc_file!s}")
 
-    gdata_header["NCAMSOLVED"] = n_solved
+    gdata_header["NCAMSOL"] = n_solved
 
     sources_concat = pandas.concat(sources)
     if len(sources_concat.ra.dropna()) > 5:
