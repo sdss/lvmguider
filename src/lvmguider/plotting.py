@@ -186,7 +186,7 @@ def get_camera_figure(
     bottom: float = 0.075,
     top: float = 0.91,
     wspace: float = 0.1,
-    hspace: float = 0.3,
+    hspace: float = 0.2,
 ):
     """Returns a customised figure and axes."""
 
@@ -261,6 +261,8 @@ def plot_position_angle(
             axes[1].set_ylabel("")
         else:
             axes[0].set_ylabel("")
+
+        ax.set_xlabel("")
 
         if save_subplots:
             create_subplot(
@@ -431,6 +433,8 @@ def plot_zero_point_or_fwhm(
         if camera == "west":
             ax.yaxis.tick_right()
             ax.yaxis.set_label_position("right")
+
+        ax.set_xlabel("")
 
         if save_subplots:
             create_subplot(
