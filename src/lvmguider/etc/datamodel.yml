@@ -183,8 +183,9 @@ CAMERA_COADD:
   ZEROPT: [null, '[mag] Instrumental zero-point']
   SOLVED: [false, 'Was the co-added frame astrometrically solved?']
   WARNPADR: [null, 'PA drift > 0.1 degrees']
-  WARNTRAN: [null, 'Transparency N magnitudes above photometric']
+  WARNTRAN: [null, 'Poor transparency warning']
   WARNMATC: [null, 'Co-added frame could not be matched with Gaia']
+  WARNFWHM: [null, 'Co-added FWHM significantly above median']
 
 GLOBAL_COADD:
   TELESCOP: [null, 'Telescope that took the data']
@@ -217,4 +218,6 @@ GLOBAL_COADD:
   PAMEAS: [null, '[deg] Position angle from full frame WCS']
   WARNPA: [null, 'PA pointing error > 0.7 arcmin']
   WARNPADR: [null, 'PA drift > 0.7 arcmin']
-  WARNTRAN: [null, 'Transparency N magnitudes above photometric']
+  WARNTRAN: [null, 'Poor transparency warning']
+  WARNMATC: [null, 'Co-added frame could not be matched with Gaia']
+  WARNFWHM: [null, 'Co-added FWHM significantly above median']

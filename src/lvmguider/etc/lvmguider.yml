@@ -41,6 +41,9 @@ coadds:
   warnings:
     pa_error: 0.012
     pa_drift: 0.012
+    nominal_zp: -23.25
+    zp_overmag_warning: 1.5
+    fwhm_factor_warning: 1.5
 
 site:
   lon: -70.70166667

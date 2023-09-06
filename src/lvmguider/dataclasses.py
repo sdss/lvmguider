@@ -28,6 +28,24 @@ from lvmguider.transformations import get_crota2
 from lvmguider.types import ARRAY_2D_F32
 
 
+# if TYPE_CHECKING:
+
+#     class WarningsMixInProtocol(Protocol):
+#         """Typing protocol for the warnings mixin."""
+
+#         @property
+#         def zero_point(self) -> float:
+#             ...
+
+#         @property
+#         def sources(self) -> pandas.DataFrame:
+#             ...
+
+#         @property
+#         def fwhm(self) -> float:
+#             ...
+
+
 __all__ = ["CameraSolution", "GuiderSolution", "FrameData"]
 
 
@@ -329,8 +347,41 @@ class FrameData:
         return self.solution.sources
 
 
+class CoAddWarningsMixIn:
+    """Methods to calculate warnings for co-added data classes."""
+
+    zero_point: float
+    fwhm: float
+    sources: pandas.DataFrame
+
+    def transp_warning(self):
+        """Determines whether to raise a transparency warning."""
+
+        # We raise a transparency warning when the median ZP is > some nominal plus
+        # a number of magnitudes. The nominal ZP corresponds to a photometric night.
+        nominal_zp = config["coadds"]["warnings"]["nominal_zp"]
+        zp_overmag_warning = config["coadds"]["warnings"]["zp_overmag_warning"]
+
+        if numpy.isnan(self.zero_point):
+            return True
+        else:
+            return self.zero_point > (nominal_zp + zp_overmag_warning)
+
+    def fwhm_warning(self):
+        """Determines whether to raise a transparency warning."""
+
+        # Similarly, for FWHM we raise a warning if the co-added FWHM
+        # is > factor * median FWHM. This may indicate that there was a jump
+        # during guiding.
+        if numpy.isnan(self.zero_point):
+            return True
+        else:
+            fwhm_factor_warn = config["coadds"]["warnings"]["fwhm_factor_warning"]
+            return self.fwhm > self.sources.fwhm.dropna().median() * fwhm_factor_warn
+
+
 @dataclass(kw_only=True)
-class CoAdd_CameraSolution(CameraSolution):
+class CoAdd_CameraSolution(CameraSolution, CoAddWarningsMixIn):
     """A camera solution for a co-added frame."""
 
     path: pathlib.Path = pathlib.Path("")
@@ -374,7 +425,7 @@ class CoAdd_CameraSolution(CameraSolution):
 
 
 @dataclass(kw_only=True)
-class GlobalSolution(BaseSolution):
+class GlobalSolution(BaseSolution, CoAddWarningsMixIn):
     """A global solution from co-added frames."""
 
     coadd_solutions: list[CoAdd_CameraSolution]

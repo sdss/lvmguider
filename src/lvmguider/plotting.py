@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     import pandas
     from matplotlib.figure import Figure
 
-    from lvmguider.dataclasses import GlobalSolution
+    from lvmguider.dataclasses import CoAdd_CameraSolution, GlobalSolution
 
 
 matplotlib.use("agg")
@@ -420,6 +420,7 @@ def plot_zero_point_or_fwhm(
         # Plot data.
         ax = _plot_zero_point_or_fwhm_axes(
             ax,
+            camera_solution,
             frame_data,
             coadd_value,
             column=column,
@@ -435,6 +436,7 @@ def plot_zero_point_or_fwhm(
             create_subplot(
                 _plot_zero_point_or_fwhm_axes,
                 get_subplot_path(outpath, f"_{camera}"),
+                camera_solution,
                 frame_data,
                 coadd_value,
                 column=column,
@@ -451,6 +453,7 @@ def plot_zero_point_or_fwhm(
 
         _plot_zero_point_or_fwhm_axes(
             ax,
+            solution,
             guider_data,
             global_value,
             column=column,
@@ -461,6 +464,7 @@ def plot_zero_point_or_fwhm(
             create_subplot(
                 _plot_zero_point_or_fwhm_axes,
                 get_subplot_path(outpath),
+                solution,
                 guider_data,
                 global_value,
                 column=column,
@@ -480,6 +484,7 @@ def plot_zero_point_or_fwhm(
 
 def _plot_zero_point_or_fwhm_axes(
     ax: Axes,
+    solution: GlobalSolution | CoAdd_CameraSolution,
     data: pandas.DataFrame,
     coadd: float,
     column="zero_point",
@@ -509,6 +514,24 @@ def _plot_zero_point_or_fwhm_axes(
             alpha=0.5,
         )
         handles.append(median_line)
+
+    # Add label with warnings.
+    if column == "zero_point":
+        warn = solution.transp_warning()
+    else:
+        warn = solution.fwhm_warning()
+
+    if warn:
+        ax.text(
+            0.98,
+            0.94,
+            "WARNING",
+            transform=ax.transAxes,
+            fontsize=14,
+            ha="right",
+            va="center",
+            color="r",
+        )
 
     if legend:
         loc = "lower right" if column == "zero_point" else "upper left"

@@ -917,8 +917,9 @@ def create_coadd_header(solution: CoAdd_CameraSolution):
 
     # Warnings
     header["WARNPADR"] = drift_warn
-    header["WARNTRAN"] = False
+    header["WARNTRAN"] = solution.transp_warning()
     header["WARNMATC"] = not solution.matched if telescope != "spec" else False
+    header["WARNFWHM"] = solution.fwhm_warning()
     header.insert("WARNPADR", ("", "/*** WARNINGS ***/"))
 
     if solution.wcs is not None:
@@ -1055,7 +1056,9 @@ def create_global_header(solution: GlobalSolution):
     # Warnings
     header["WARNPA"] = pa_warn
     header["WARNPADR"] = drift_warn
-    header["WARNTRAN"] = False
+    header["WARNTRAN"] = solution.transp_warning()
+    header["WARNMATC"] = solution.wcs is None if telescope != "spec" else False
+    header["WARNFWHM"] = solution.fwhm_warning()
     header.insert("WARNPA", ("", "/*** WARNINGS ***/"))
 
     if solution.wcs is not None:
