@@ -648,6 +648,7 @@ class Guider:
                 "PA": pa if not numpy.isnan(pa) else None,
                 "ZEROPT": zeropt if not numpy.isnan(zeropt) else None,
                 "REFFILE": reffile,
+                "SOLVED": solution.solved,
                 "WCSMODE": solution.wcs_mode,
                 **wcs_cards,
             }

@@ -10,7 +10,8 @@ PROC:
   ORIGFILE: [null, 'Original file name']
   REPROC: [false, 'Has this file been reprocessed?']
   REFFILE: [null, 'Reference file for astrometric solution']
-  WCSMODE: ['none', 'Source of astrometric solution']
+  SOLVED: [false, 'Was an astrometric solution found?']
+  WCSMODE: ['none', 'Method for fitting the astrometric solution']
 
 SOURCES:
   thresh: 'f8'
