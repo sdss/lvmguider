@@ -28,24 +28,6 @@ from lvmguider.transformations import get_crota2
 from lvmguider.types import ARRAY_2D_F32
 
 
-# if TYPE_CHECKING:
-
-#     class WarningsMixInProtocol(Protocol):
-#         """Typing protocol for the warnings mixin."""
-
-#         @property
-#         def zero_point(self) -> float:
-#             ...
-
-#         @property
-#         def sources(self) -> pandas.DataFrame:
-#             ...
-
-#         @property
-#         def fwhm(self) -> float:
-#             ...
-
-
 __all__ = ["CameraSolution", "GuiderSolution", "FrameData"]
 
 
