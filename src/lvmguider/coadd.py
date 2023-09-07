@@ -247,7 +247,7 @@ def coadd_from_spec_frame(
     outpath = outpath.format(specno=specno)
 
     paths: list[pathlib.Path | None] = []
-    print(multiprocess_mode)
+
     coadd_telescope_p = partial(
         coadd_telescope,
         file,
@@ -258,8 +258,6 @@ def coadd_from_spec_frame(
     )
     if multiprocess_mode == "telescopes":
         with multiprocessing.Pool(MULTIPROCESS_NCORES["telescopes"]) as pool:
-            print("here")
-
             paths += pool.map(coadd_telescope_p, telescopes)
     else:
         for telescope in telescopes:
