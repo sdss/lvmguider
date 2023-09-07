@@ -134,6 +134,11 @@ class CameraSolution(BaseSolution):
             wcs_mode = proc["WCSMODE"]
             wcs = WCS(proc) if wcs_mode != "none" else None
 
+            # Fix cases when WCSMODE is not "none" but the WCS is not valid.
+            if wcs is not None and not wcs.is_celestial:
+                log.warning(f"Invalid WCS found for {file!s}.")
+                wcs = None
+
         ref_file = proc["REFFILE"]
         ref_frame = pathlib.Path(ref_file) if ref_file is not None else None
 

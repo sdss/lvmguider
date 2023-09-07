@@ -724,7 +724,7 @@ def process_camera_coadd(
 
     frame: FrameData | None = None
     for fd in framedata[::-1]:  # In reverse order. Last file is likely to be guiding.
-        if fd.solution.solved and (fd.solution.wcs_mode == "gaia" or fd.reprocessed):
+        if fd.solution.solved:
             frame = fd
             break
 

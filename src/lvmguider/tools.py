@@ -367,12 +367,9 @@ def get_gaia_sources(
         raise RuntimeError(f"Cannot connect to database: {err}")
 
     # Get RA/Dec of centre of frame.
-    skyc = wcs.pixel_to_world(*XZ_AG_FRAME)
-    ra: float = skyc.ra.deg
-    dec: float = skyc.dec.deg
+    ra, dec = wcs.pixel_to_world_values(*XZ_AG_FRAME)
 
     # Query lvm_magnitude and gaia_dr3_source in a radial query around RA/Dec.
-
     gdr3_sch, gdr3_table = config["database"]["gaia_dr3_source_table"].split(".")
     lmag_sch, lmag_table = config["database"]["lvm_magnitude_table"].split(".")
     GDR3 = peewee.Table(gdr3_table, schema=gdr3_sch).bind(conn)
@@ -385,7 +382,15 @@ def get_gaia_sources(
                 LMAG.c.lmag_ab,
                 LMAG.c.lflux,
             )
-            .where(peewee.fn.q3c_radial_query(LMAG.c.ra, LMAG.c.dec, ra, dec, CAM_FOV))
+            .where(
+                peewee.fn.q3c_radial_query(
+                    LMAG.c.ra,
+                    LMAG.c.dec,
+                    float(ra),
+                    float(dec),
+                    CAM_FOV,
+                )
+            )
             .cte("cte", materialized=True)
         )
 
@@ -412,7 +417,15 @@ def get_gaia_sources(
                 GDR3.c.pmdec,
                 GDR3.c.phot_g_mean_mag,
             )
-            .where(peewee.fn.q3c_radial_query(GDR3.c.ra, GDR3.c.dec, ra, dec, CAM_FOV))
+            .where(
+                peewee.fn.q3c_radial_query(
+                    GDR3.c.ra,
+                    GDR3.c.dec,
+                    float(ra),
+                    float(dec),
+                    CAM_FOV,
+                )
+            )
             .dicts()
         )
 
