@@ -49,6 +49,9 @@ if TYPE_CHECKING:
 _DATEOBS_CACHE: dict[str, Time | None] = {}
 
 
+AnyPath = os.PathLike | str
+
+
 async def run_in_executor(fn, *args, catch_warnings=False, executor="thread", **kwargs):
     """Runs a function in an executor.
 
@@ -804,3 +807,11 @@ def angle_difference(angle1: float, angle2: float):
 
     diff = (angle2 - angle1 + 180) % 360 - 180
     return diff + 360 if diff < -180 else diff
+
+
+def get_spec_frameno(file: AnyPath):
+    """Returns the spectrograph sequence number for a spectrograph file."""
+
+    file = pathlib.Path(file)
+
+    return int(file.name.split("-")[-1].split(".")[0])

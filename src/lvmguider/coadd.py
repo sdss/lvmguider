@@ -12,7 +12,9 @@ import multiprocessing
 import os
 import os.path
 import pathlib
+import time
 from functools import partial
+from threading import Lock
 
 from typing import TYPE_CHECKING, Literal, Sequence
 
@@ -22,6 +24,8 @@ from astropy.io import fits
 from astropy.stats import sigma_clip
 from astropy.time import Time
 from packaging.version import Version
+from watchdog.events import FileCreatedEvent, PatternMatchingEventHandler
+from watchdog.observers.polling import PollingObserver
 
 from sdsstools.time import get_sjd
 
@@ -41,6 +45,7 @@ from lvmguider.tools import (
     get_dark_subtracted_data,
     get_frameno,
     get_guider_files_from_spec,
+    get_spec_frameno,
     header_from_model,
     nan_or_none,
     polyfit_with_sigclip,
@@ -110,7 +115,7 @@ def process_all_spec_frames(
 
     for file in spec_files:
         header = fits.getheader(str(file))
-        specno = int(file.name.split("-")[-1].split(".")[0])
+        specno = get_spec_frameno(file)
 
         # Skip cals and frames without any guider information.
         if header["IMAGETYP"] != "object":
@@ -243,7 +248,7 @@ def coadd_from_spec_frame(
     if not file.exists():
         raise FileExistsError(f"File {file!s} not found.")
 
-    specno = int(file.name.split("-")[-1].split(".")[0])
+    specno = get_spec_frameno(file)
     outpath = outpath.format(specno=specno)
 
     paths: list[pathlib.Path | None] = []
@@ -467,6 +472,7 @@ def create_summary_file(
         dfs.append(df)
 
     df_concat = pandas.concat(dfs)
+    df_concat.sort_values(["telescope", "frameno"])
 
     outpath = pathlib.Path(outpath)
     outpath.parent.mkdir(parents=True, exist_ok=True)
@@ -1367,3 +1373,110 @@ def reprocess_legacy_guider_frame(
     sources_concat.to_parquet(guider_sources_file)
 
     return guider_file
+
+
+def watch_for_files(base_path: str = "/data/spectro"):
+    """Watches and processes guider frames for new spectrograph images."""
+
+    AG_PATH = pathlib.Path("/data/agcam")
+
+    sjd = get_sjd("LCO")
+
+    (AG_PATH / str(sjd) / "coadds").mkdir(parents=True, exist_ok=True)
+    log.start_file_logger(str(AG_PATH / f"{sjd}/coadds/coadds_{sjd}.log"))
+
+    observer = PollingObserver(timeout=5)
+    handler = SpecPatternEventHandler()
+    observer.schedule(handler, f"{base_path}/{sjd}")
+
+    log.info(f"Watching directory {base_path}/{sjd}")
+    observer.start()
+
+    try:
+        while True:
+            time.sleep(1)
+
+            # Check if the SJD has changed.
+            new_sjd = get_sjd("LCO")
+            if new_sjd != sjd:
+                (AG_PATH / str(sjd) / "coadds").mkdir(parents=True, exist_ok=True)
+                log.start_file_logger(str(AG_PATH / f"{sjd}/coadds/coadds_{sjd}.log"))
+
+                log.info(f"Switching SJD to {new_sjd}")
+                sjd = new_sjd
+
+                observer.unschedule_all()
+                observer.schedule(handler, f"{base_path}/{sjd}")
+
+                log.info(f"Watching directory {base_path}/{sjd}")
+
+    except KeyboardInterrupt:
+        observer.stop()
+    except Exception as err:
+        print(err)
+
+    observer.join()
+
+
+class SpecPatternEventHandler(PatternMatchingEventHandler):
+    """Handles newly created spectrograph files."""
+
+    def __init__(self):
+        self.lock = Lock()
+
+        super().__init__(
+            patterns=["*-b1-*.fits.gz"],
+            ignore_directories=True,
+            case_sensitive=True,
+        )
+
+    def on_created(self, event: FileCreatedEvent):
+        """Runs the co-add code when a new file is created."""
+
+        # Do not process more than one file at the same time.
+        while self.lock.locked():
+            time.sleep(1)
+
+        self.lock.acquire()
+
+        try:
+            new_file = event.src_path
+
+            if new_file is None or new_file == "":
+                return
+
+            path = pathlib.Path(new_file).absolute()
+
+            if not path.exists():
+                log.warning(f"Detected file {path!s} does not exist!")
+                return
+
+            log.info(f"Processing spectrograph frame {get_spec_frameno(path)}")
+            outpaths = coadd_from_spec_frame(path, multiprocess_mode="telescopes")
+
+            # Recreate the summary files.
+            log.info("Updating summary files.")
+
+            sjd = get_sjd("LCO")
+            parent_coadds = outpaths[0].parent
+
+            for table in ["frames", "guiderdata"]:
+                cfs = parent_coadds.glob("lvm.*.coadd*.fits")
+                tfs = [pp.with_name(pp.stem + f"_{table}.parquet") for pp in cfs]
+                spec_nos = [int(ff.name.split("_")[-2][1:]) for ff in tfs]
+
+                if len(spec_nos) > 0:
+                    create_summary_file(
+                        tfs,
+                        parent_coadds / f"lvm.guider.mjd_{sjd}_{table}.parquet",
+                        spec_framenos=spec_nos,
+                    )
+
+            log.info(f"All done for {path}")
+
+        except Exception as err:
+            log.error(f"Error found while processing file: {err}")
+
+        finally:
+            # Release the lock so other files can be processed.
+            self.lock.release()

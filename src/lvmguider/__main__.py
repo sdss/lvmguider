@@ -18,6 +18,7 @@ from sdsstools.daemonizer import DaemonGroup, cli_coro
 
 from lvmguider import __version__
 from lvmguider.actor.actor import LVMGuiderActor
+from lvmguider.coadd import MULTIPROCESS_NCORES, watch_for_files
 
 
 @click.group(
@@ -72,9 +73,29 @@ async def actor(ctx):
     await lvmguider_actor.run_forever()
 
 
+@lvmguider.command()
+@click.option(
+    "--root",
+    type=click.Path(exists=True, file_okay=False),
+    default="/data/spectro",
+    help="Path to look for spectrograph files (must exclude MKD)",
+)
+@click.option(
+    "--n-cores",
+    type=int,
+    default=2,
+    help="Number of cores to use for multiprocessing",
+)
+def coadds_watch(root: str = "/data/spectro", n_cores: int = 2):
+    """Watches for new spectrograph files and co-adds the associated guider frames."""
+
+    MULTIPROCESS_NCORES["telescopes"] = n_cores
+    watch_for_files(root)
+
+
 def main():
     lvmguider(auto_envvar_prefix="LVMGUIDER")
 
 
 if __name__ == "__main__":
-    lvmguider()
+    main()
