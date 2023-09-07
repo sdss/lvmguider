@@ -62,14 +62,18 @@ if TYPE_CHECKING:
 
 AnyPath = str | os.PathLike
 
-
-MULTIPROCESS_MODE: Literal["frames"] | Literal["cameras"] = "frames"
-MULTIPROCESS_NCORES: dict[str, int] = {"frames": 4, "cameras": 2}
+MULTIPROCESS_MODE_TYPE = Literal["frames"] | Literal["cameras"] | Literal["telescopes"]
+MULTIPROCESS_NCORES: dict[str, int] = {"frames": 4, "cameras": 2, "telescopes": 4}
 
 TELESCOPES: list[str] = ["sci", "spec", "skye", "skyw"]
 
 
-def process_all_spec_frames(path: AnyPath, create_summary: bool = True, **kwargs):
+def process_all_spec_frames(
+    path: AnyPath,
+    create_summary: bool = True,
+    multiprocess_mode: MULTIPROCESS_MODE_TYPE | None = "telescopes",
+    **kwargs,
+):
     """Processes all the spectrograph frames in a directory.
 
     Parameters
@@ -80,6 +84,14 @@ def process_all_spec_frames(path: AnyPath, create_summary: bool = True, **kwargs
     create_summary
         Generates a single table file with all the guider data for
         the processed files.
+    multiprocess_mode
+        Defines how to use parallel processing when processing multiple
+        images. Options are ``telescopes`` which will process each telescope
+        for a spectrograph image in parallel, ``cameras``, which will process
+        each camera in parallel, and ``frames`` which will process frames within
+        one camera in parallel. The number of cores used by each one of
+        these modes can be adjusted by modifying the `.MULTIPROCESS_NCORES`
+        dictionary.
     kwargs
         Keyword arguments to pass to `.coadd_from_spec_frame`.
 
@@ -108,7 +120,11 @@ def process_all_spec_frames(path: AnyPath, create_summary: bool = True, **kwargs
             log.warning(f"Spec frame {file.name!s} is too short. Skipping.")
             continue
 
-        paths = coadd_from_spec_frame(file, **kwargs)
+        paths = coadd_from_spec_frame(
+            file,
+            multiprocess_mode=multiprocess_mode,
+            **kwargs,
+        )
         all_paths[specno] = paths
 
     if create_summary:
@@ -136,11 +152,66 @@ def process_all_spec_frames(path: AnyPath, create_summary: bool = True, **kwargs
             create_summary_file(f_fs, outpath, list(spec_nos))
 
 
+def coadd_telescope(
+    file: pathlib.Path,
+    outpath: str | None,
+    telescope: str,
+    use_time_range: bool = False,
+    **kwargs,
+):
+    """A helper function that processes one telescopes for a spectrograph image.
+
+    This function is called by `.coadd_from_spec_frame` for a given ``file``
+    and ``telescope``. It's split from the code from that function to allow
+    parallelisation.
+
+    """
+
+    log.info(
+        f"Generating co-added frame for {telescope!r} for "
+        f"spectrograph file {file!s}"
+    )
+
+    try:
+        log.debug("Identifying guider frames.")
+        frames = get_guider_files_from_spec(
+            file,
+            telescope=telescope,
+            use_time_range=use_time_range,
+        )
+    except Exception as err:
+        log.error(f"Cannot process {telescope!r} for {file!s}: {err}")
+        return
+
+    if len(frames) < 4:
+        log.warning(f"No guider frames found for {telescope!r} in {file!s}")
+        return
+
+    try:
+        gs = create_global_coadd(
+            frames,
+            telescope=telescope,
+            outpath=outpath,
+            **kwargs,
+        )
+
+        if gs.path is not None:
+            return gs.path
+
+    except Exception as err:
+        log.critical(
+            f"Failed generating co-added frames for {file!s} on "
+            f"telescope {telescope!r}: {err}"
+        )
+        return None
+
+
 def coadd_from_spec_frame(
     file: AnyPath,
     outpath: str | None = None,
     telescopes: list[str] = TELESCOPES,
     use_time_range: bool | None = None,
+    multiprocess_mode: MULTIPROCESS_MODE_TYPE | None = "telescopes",
     **kwargs,
 ):
     """Processes the guider frames associated with an spectrograph file.
@@ -159,6 +230,8 @@ def coadd_from_spec_frame(
     use_time_range
         If `True`, selects guider frames from their timestamps instead
         of using the headers in the spectro file.
+    multiprocess_mode
+        See `.process_all_spec_frames`.
     kwargs
         Keyword arguments to pass to `.create_global_coadd`.
 
@@ -173,47 +246,26 @@ def coadd_from_spec_frame(
     specno = int(file.name.split("-")[-1].split(".")[0])
     outpath = outpath.format(specno=specno)
 
-    paths: list[pathlib.Path] = []
+    paths: list[pathlib.Path | None] = []
+    print(multiprocess_mode)
+    coadd_telescope_p = partial(
+        coadd_telescope,
+        file,
+        outpath,
+        use_time_range=use_time_range,
+        multiprocess_mode=multiprocess_mode,
+        **kwargs,
+    )
+    if multiprocess_mode == "telescopes":
+        with multiprocessing.Pool(MULTIPROCESS_NCORES["telescopes"]) as pool:
+            print("here")
 
-    for telescope in telescopes:
-        log.info(
-            f"Generating co-added frame for {telescope!r} for "
-            f"spectrograph file {file!s}"
-        )
+            paths += pool.map(coadd_telescope_p, telescopes)
+    else:
+        for telescope in telescopes:
+            paths.append(coadd_telescope_p(telescope))
 
-        try:
-            log.debug("Identifying guider frames.")
-            frames = get_guider_files_from_spec(
-                file,
-                telescope=telescope,
-                use_time_range=use_time_range,
-            )
-        except Exception as err:
-            log.error(f"Cannot process {telescope!r} for {file!s}: {err}")
-            continue
-
-        if len(frames) < 4:
-            log.warning(f"No guider frames found for {telescope!r} in {file!s}")
-            continue
-
-        try:
-            gs = create_global_coadd(
-                frames,
-                telescope=telescope,
-                outpath=outpath,
-                **kwargs,
-            )
-
-            if gs.path is not None:
-                paths.append(gs.path)
-
-        except Exception as err:
-            log.critical(
-                f"Failed generating co-added frames for {file!s} on "
-                f"telescope {telescope!r}: {err}"
-            )
-
-    return paths
+    return [path for path in paths if path is not None]
 
 
 def create_global_coadd(
@@ -247,6 +299,8 @@ def create_global_coadd(
         Whether to write to disk the individual co-added images for each camera.
     coadd_camera_kwargs
         Arguments to pass to `.coadd_camera` for each set of camera frames.
+        It includes the ``multiprocess_mode`` parameter which if set to ``cameras``
+        will process each camera in parallel.
 
     Returns
     -------
@@ -272,7 +326,8 @@ def create_global_coadd(
     # Co-add each camera independently.
     coadd_camera_partial = partial(coadd_camera, **coadd_camera_kwargs)
 
-    if MULTIPROCESS_MODE == "cameras":
+    multiprocess_mode = coadd_camera_kwargs.get("multiprocess_mode", None)
+    if multiprocess_mode == "cameras":
         with multiprocessing.Pool(MULTIPROCESS_NCORES["cameras"]) as pool:
             coadd_solutions = list(pool.map(coadd_camera_partial, camera_files))
     else:
@@ -282,7 +337,7 @@ def create_global_coadd(
     root = pathlib.Path(files[0]).parent
 
     get_guider_solutions_p = partial(get_guider_solutions, root, telescope)
-    if MULTIPROCESS_MODE == "cameras":
+    if multiprocess_mode == "cameras":
         with multiprocessing.Pool(MULTIPROCESS_NCORES["cameras"]) as pool:
             guider_solutions = list(pool.map(get_guider_solutions_p, list(frame_nos)))
     else:
@@ -431,6 +486,7 @@ def coadd_camera(
     database_profile: str = "default",
     database_params: dict = {},
     overwrite_reprocess: bool = False,
+    multiprocess_mode: MULTIPROCESS_MODE_TYPE | None = None,
 ):
     """Co-adds a series of AG camera frames.
 
@@ -475,6 +531,8 @@ def coadd_camera(
         Additional database parameters used to override the profile.
     overwrite_reprocess
         Whether to overwrite reprocessed files or use already existing ones.
+    multiprocess_mode
+        See `.process_all_spec_frames`.
 
     Returns
     -------
@@ -515,7 +573,7 @@ def coadd_camera(
         overwrite_reprocess=overwrite_reprocess,
     )
 
-    if MULTIPROCESS_MODE == "frames":
+    if multiprocess_mode == "frames":
         with multiprocessing.Pool(MULTIPROCESS_NCORES["frames"]) as pool:
             _frames = list(pool.map(create_framedata_partial, paths))
     else:
