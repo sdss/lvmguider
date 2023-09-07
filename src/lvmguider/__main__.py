@@ -16,7 +16,7 @@ from click_default_group import DefaultGroup
 
 from sdsstools.daemonizer import DaemonGroup, cli_coro
 
-from lvmguider import __version__
+from lvmguider import __version__, log
 from lvmguider.actor.actor import LVMGuiderActor
 from lvmguider.coadd import MULTIPROCESS_NCORES, watch_for_files
 
@@ -90,6 +90,8 @@ def coadds_watch(root: str = "/data/spectro", n_cores: int = 2):
     """Watches for new spectrograph files and co-adds the associated guider frames."""
 
     MULTIPROCESS_NCORES["telescopes"] = n_cores
+
+    log.info(f"Starting to watch files in root path {root}")
     watch_for_files(root)
 
 

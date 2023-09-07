@@ -1380,16 +1380,12 @@ def watch_for_files(base_path: str = "/data/spectro"):
 
     AG_PATH = pathlib.Path("/data/agcam")
 
-    sjd = get_sjd("LCO")
-
-    (AG_PATH / str(sjd) / "coadds").mkdir(parents=True, exist_ok=True)
-    log.start_file_logger(str(AG_PATH / f"{sjd}/coadds/coadds_{sjd}.log"))
+    sjd: int = 0
 
     observer = PollingObserver(timeout=5)
     handler = SpecPatternEventHandler()
-    observer.schedule(handler, f"{base_path}/{sjd}")
 
-    log.info(f"Watching directory {base_path}/{sjd}")
+    observer.schedule(handler, "/data/agcam")
     observer.start()
 
     try:
@@ -1398,14 +1394,19 @@ def watch_for_files(base_path: str = "/data/spectro"):
 
             # Check if the SJD has changed.
             new_sjd = get_sjd("LCO")
+
             if new_sjd != sjd:
+                observer.unschedule_all()
+
+                if not os.path.exists(f"{base_path}/{new_sjd}"):
+                    continue
+
                 (AG_PATH / str(sjd) / "coadds").mkdir(parents=True, exist_ok=True)
                 log.start_file_logger(str(AG_PATH / f"{sjd}/coadds/coadds_{sjd}.log"))
 
                 log.info(f"Switching SJD to {new_sjd}")
                 sjd = new_sjd
 
-                observer.unschedule_all()
                 observer.schedule(handler, f"{base_path}/{sjd}")
 
                 log.info(f"Watching directory {base_path}/{sjd}")
