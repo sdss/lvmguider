@@ -1401,11 +1401,11 @@ def watch_for_files(base_path: str = "/data/spectro"):
                 if not os.path.exists(f"{base_path}/{new_sjd}"):
                     continue
 
+                log.info(f"Switching to SJD {new_sjd}")
+                sjd = new_sjd
+
                 (AG_PATH / str(sjd) / "coadds").mkdir(parents=True, exist_ok=True)
                 log.start_file_logger(str(AG_PATH / f"{sjd}/coadds/coadds_{sjd}.log"))
-
-                log.info(f"Switching SJD to {new_sjd}")
-                sjd = new_sjd
 
                 observer.schedule(handler, f"{base_path}/{sjd}")
 
