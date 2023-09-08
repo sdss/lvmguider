@@ -15,12 +15,13 @@ COPY docker/matplotlibrc /root/.config/matplotlib/
 COPY docker/LiberationSerif-Regular.ttf /usr/share/fonts/
 
 # Refresh system font cache
+RUN apt update -y
+RUN apt install -y fontconfig
 RUN fc-cache -f -v
 
 # Refresh matplotlib font cache
 RUN rm -fr ~/.cache/matplotlib
 
-RUN apt update -y
 RUN apt install -y build-essential
 RUN apt install -y astrometry.net
 
