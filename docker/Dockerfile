@@ -8,7 +8,7 @@ WORKDIR /opt
 COPY . lvmguider
 
 # Copy matplotlibrc
-RUN mkdir -r /root/.config/matplotlib
+RUN mkdir -p /root/.config/matplotlib
 COPY docker/matplotlibrc /root/.config/matplotlib/
 
 # Install MS fonts
