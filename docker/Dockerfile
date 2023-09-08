@@ -12,6 +12,7 @@ RUN mkdir -p /root/.config/matplotlib
 COPY docker/matplotlibrc /root/.config/matplotlib/
 
 # Install MS fonts
+RUN sed -i'.bak' 's/$/ contrib/' /etc/apt/sources.list
 RUN apt-get update; apt-get install -y ttf-mscorefonts-installer fontconfig
 
 # Refresh system font cache
