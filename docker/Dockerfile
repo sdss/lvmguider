@@ -11,9 +11,8 @@ COPY . lvmguider
 RUN mkdir -p /root/.config/matplotlib
 COPY docker/matplotlibrc /root/.config/matplotlib/
 
-# Install MS fonts
-RUN sed -r -i 's/^deb(.*)$/deb\1 contrib/g' /etc/apt/sources.list
-RUN apt-get update; apt-get install -y ttf-mscorefonts-installer fontconfig
+# Copy serif font
+COPY docker/LiberationSerif-Regular.ttf /usr/share/fonts/
 
 # Refresh system font cache
 RUN fc-cache -f -v
