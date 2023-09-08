@@ -1452,10 +1452,10 @@ class SpecPatternEventHandler(PatternMatchingEventHandler):
                 log.warning(f"Detected file {path!s} does not exist!")
                 return
 
-            image_type = fits.getval(str(path), 'IMAGETYP')
-            exptime = fits.getval(str(path), 'EXPTIME')
-            if image_type != 'object' or exptime < 60:
-                log.info(f'Detected file {path}. Not an object image, skipping.')
+            image_type = fits.getval(str(path), "IMAGETYP")
+            exptime = fits.getval(str(path), "EXPTIME")
+            if image_type != "object" or exptime < 60:
+                log.info(f"Detected file {path}. Not an object image, skipping.")
                 return
 
             log.info(f"Processing spectrograph frame {get_spec_frameno(path)}")
