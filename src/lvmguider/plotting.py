@@ -520,7 +520,7 @@ def _plot_zero_point_or_fwhm_axes(
         handles.append(median_line)
 
     # Add label with warnings.
-    if len(data) > 0 and data["telescope"][0] != "spec":
+    if len(data) > 0 and data["telescope"].iloc[0] != "spec":
         if column == "zero_point":
             warn = solution.transp_warning()
         else:
