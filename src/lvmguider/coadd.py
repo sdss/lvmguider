@@ -45,6 +45,7 @@ from lvmguider.tools import (
     get_dark_subtracted_data,
     get_frameno,
     get_guider_files_from_spec,
+    get_raw_extension,
     get_spec_frameno,
     header_from_model,
     nan_or_none,
@@ -362,7 +363,8 @@ def create_global_coadd(
 
     if outpath is not None:
         # Create the path for the output file.
-        date_obs = fits.getval(files[0], "DATE-OBS", "RAW")
+        sample_raw_hdu = get_raw_extension(files[0])
+        date_obs = sample_raw_hdu.header["DATE-OBS"]
         sjd = get_sjd("LCO", Time(date_obs, format="isot").to_datetime())
 
         frameno0 = min(frame_nos)
@@ -557,7 +559,7 @@ def coadd_camera(
     frame_nos = sorted([get_frameno(path) for path in paths])
 
     # Use the first file to get some common data (or at least it should be common!)
-    sample_raw_header = fits.getheader(paths[0], "RAW")
+    sample_raw_header = get_raw_extension(paths[0]).header
 
     camname: str = sample_raw_header["CAMNAME"]
     telescope: str = sample_raw_header["TELESCOP"]
@@ -791,7 +793,7 @@ def process_camera_coadd(
             break
 
     if frame is None or frame.solution.wcs is None:
-        raise RuntimeError("Cannot find WCS solutions for coadded frame.")
+        raise RuntimeError("Cannot find WCS reference solution for coadded frame.")
 
     # Extract sources in the co-added frame.
     coadd_sources = extract_marginal(

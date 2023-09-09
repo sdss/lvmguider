@@ -19,7 +19,7 @@ from contextlib import contextmanager
 from functools import partial
 from time import time
 
-from typing import TYPE_CHECKING, Any, Sequence
+from typing import TYPE_CHECKING, Any, Sequence, cast
 
 import nptyping
 import numpy
@@ -510,17 +510,24 @@ def estimate_zeropoint(
     return df
 
 
-def get_dark_subtracted_data(file: pathlib.Path | str) -> tuple[ARRAY_2D_F32, bool]:
+def get_dark_subtracted_data(
+    file: pathlib.Path | str,
+    hdul: fits.HDUList | None = None,
+) -> tuple[ARRAY_2D_F32, bool]:
     """Returns a background or dark subtracted image."""
 
     path = pathlib.Path(file)
 
-    hdul = fits.open(str(path))
+    if hdul is None:
+        hdul = fits.open(str(path))
 
-    exptime = hdul["RAW"].header["EXPTIME"]
+    assert hdul is not None
+
+    raw = get_raw_extension(hdul)
+    exptime = raw.header["EXPTIME"]
 
     # Data in counts per second.
-    data: ARRAY_2D_F32 = hdul["RAW"].data.copy().astype("f4") / exptime
+    data: ARRAY_2D_F32 = raw.data.copy().astype("f4") / exptime
 
     if "PROC" in hdul:
         # Get data and subtract dark or fit background.
@@ -534,8 +541,10 @@ def get_dark_subtracted_data(file: pathlib.Path | str) -> tuple[ARRAY_2D_F32, bo
         dark_path = None
 
     if dark_file != "" and dark_path is not None and dark_path.exists():
-        dark: ARRAY_2D_F32 = fits.getdata(str(dark_path), "RAW").astype("f4")
-        dark_exptime: float = fits.getval(str(dark_path), "EXPTIME", "RAW")
+        dark_raw = get_raw_extension(str(dark_path))
+
+        dark: ARRAY_2D_F32 = dark_raw.data.astype("f4")
+        dark_exptime: float = dark_raw.header["EXPTIME"]
         data = data - dark / dark_exptime
 
         dark_sub = True
@@ -543,6 +552,8 @@ def get_dark_subtracted_data(file: pathlib.Path | str) -> tuple[ARRAY_2D_F32, bo
     else:
         data = data - sep.Background(data).back()
         dark_sub = False
+
+    hdul.close()
 
     return data, dark_sub
 
@@ -815,3 +826,19 @@ def get_spec_frameno(file: AnyPath):
     file = pathlib.Path(file)
 
     return int(file.name.split("-")[-1].split(".")[0])
+
+
+def get_raw_extension(file: AnyPath | fits.HDUList):
+    """Returns the ``RAW`` extension from an ``agcam`` file."""
+
+    if isinstance(file, fits.HDUList):
+        hdul = file
+    else:
+        hdul = fits.open(str(file))
+
+    hdul = cast(Any, hdul)
+
+    if "RAW" in hdul:
+        return hdul["RAW"]
+    else:
+        return hdul[0]

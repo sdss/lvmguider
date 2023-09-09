@@ -22,7 +22,11 @@ from matplotlib import pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 from numpy.typing import NDArray
 
-from lvmguider.tools import dataframe_from_model
+from lvmguider.tools import (
+    dataframe_from_model,
+    get_dark_subtracted_data,
+    get_raw_extension,
+)
 
 
 __all__ = ["sextractor_quick", "extract_marginal", "extract_sources"]
@@ -501,18 +505,9 @@ def extract_sources(filename: str | pathlib.Path, subtract_dark: bool = True):
 
     from lvmguider.transformations import ag_to_full_frame
 
-    hdus = fits.open(filename)
-
-    # Initially use raw data.
-    data = hdus["RAW"].data / hdus["RAW"].header["EXPTIME"]
-
-    if subtract_dark and "PROC" in hdus:
-        darkfile = hdus["PROC"].header["DARKFILE"]
-        if darkfile and pathlib.Path(darkfile).exists():
-            dark_data = fits.getdata(darkfile).astype(numpy.float32)
-            dark_exptime = fits.getheader(darkfile, "RAW")["EXPTIME"]
-
-            data = data - (dark_data / dark_exptime)
+    hdul = fits.open(filename)
+    raw = get_raw_extension(hdul)
+    data, _ = get_dark_subtracted_data(filename, hdul)
 
     sources = extract_marginal(
         data,
@@ -522,8 +517,8 @@ def extract_sources(filename: str | pathlib.Path, subtract_dark: bool = True):
         sextractor_quick_options={"minarea": 5},
     )
 
-    camname = hdus["RAW"].header["CAMNAME"]
-    telescope = hdus["RAW"].header["TELESCOP"]
+    camname = raw.header["CAMNAME"]
+    telescope = raw.header["TELESCOP"]
 
     sources["camera"] = camname
     sources["telescope"] = telescope
@@ -531,5 +526,7 @@ def extract_sources(filename: str | pathlib.Path, subtract_dark: bool = True):
     xy = sources.loc[:, ["x", "y"]].to_numpy()
     ff_locs, _ = ag_to_full_frame(f"{telescope}-{camname[0]}", xy)
     sources.loc[:, ["x_ff", "z_ff"]] = ff_locs
+
+    hdul.close()
 
     return sources
