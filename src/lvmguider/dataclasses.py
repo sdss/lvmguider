@@ -364,7 +364,8 @@ class CoAddWarningsMixIn:
             return True
         else:
             fwhm_factor_warn = config["coadds"]["warnings"]["fwhm_factor_warning"]
-            return self.fwhm > self.sources.fwhm.dropna().median() * fwhm_factor_warn
+            sources_fwhm = self.sources.loc[self.sources.valid == 1, "fwhm"]
+            return self.fwhm > sources_fwhm.dropna().median() * fwhm_factor_warn
 
 
 @dataclass(kw_only=True)

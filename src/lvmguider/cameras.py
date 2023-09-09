@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING
 import numpy
 import pandas
 from astropy.io import fits
+from astropy.stats import sigma_clip
 
 from sdsstools.time import get_sjd
 
@@ -168,6 +169,11 @@ class Cameras:
 
         if len(sources) > 0:
             all_sources = pandas.concat(sources)
+
+            # Reject non-stellar objects and mark them as invalid.
+            fwhm_masked = sigma_clip(all_sources.fwhm.to_numpy(), sigma=3)
+            all_sources.loc[fwhm_masked.mask, "valid"] = 0  # type: ignore
+
             valid = all_sources.loc[all_sources.valid == 1]
             fwhm = float(numpy.median(valid["fwhm"])) if len(valid) > 0 else None
         else:
