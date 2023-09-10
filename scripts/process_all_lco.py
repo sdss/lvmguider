@@ -35,7 +35,11 @@ def process_all_lco():
         log.info(f"Processing files in {spectro_path} ...")
 
         (ag_mjd_path / "coadds").mkdir(parents=True, exist_ok=True)
-        log.start_file_logger(str(ag_mjd_path / "coadds" / f"coadds_{mjd}.log"))
+        log.start_file_logger(
+            str(ag_mjd_path / "coadds" / f"coadds_{mjd}.log"),
+            mode="w",
+            rotating=False,
+        )
 
         process_all_spec_frames(spectro_path)
 
