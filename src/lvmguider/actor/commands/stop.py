@@ -13,8 +13,6 @@ from contextlib import suppress
 
 from typing import TYPE_CHECKING
 
-import click
-
 from lvmguider.actor import lvmguider_parser
 from lvmguider.maskbits import GuiderStatus
 
@@ -27,25 +25,20 @@ __all__ = ["stop"]
 
 
 @lvmguider_parser.command()
-@click.option("--now", is_flag=True, help="Aggressively stops the loop.")
-async def stop(command: GuiderCommand, now=False):
+async def stop(command: GuiderCommand):
     """Stops the guide loop."""
 
-    status = command.actor.status
-    if status & GuiderStatus.IDLE:
+    if command.actor.guide_task is None or command.actor.guide_task.done():
+        command.actor.status = GuiderStatus.IDLE
         return command.finish("Guider is not active.")
 
-    if now:
-        if command.actor.guide_task and not command.actor.guide_task.done():
-            command.actor.guide_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await command.actor.guide_task
-        command.actor.guider = None
-        command.actor.status = GuiderStatus.IDLE
-        return command.finish("Guider was forcibly stopped.")
+    command.actor.guide_task.cancel()
+    with suppress(asyncio.CancelledError):
+        await command.actor.guide_task
 
-    if command.actor.status & GuiderStatus.STOPPING:
-        return command.fail("Guider loop is already stopping.")
+    command.actor.guider = None
+    command.actor.guide_task = None
 
-    command.actor.status |= GuiderStatus.STOPPING
-    return command.finish("Stopping the guide loop.")
+    command.actor.status = GuiderStatus.IDLE
+
+    return command.finish("Guider has been stopped.")

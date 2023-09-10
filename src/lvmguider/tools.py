@@ -842,3 +842,7 @@ def get_raw_extension(file: AnyPath | fits.HDUList):
         return hdul["RAW"]
     else:
         return hdul[0]
+
+
+# async def wait_until_cameras_are_idle(command: GuiderCommand, timeout:float|None=None):
+#     """Blocks until all the AG cameras for the telescope are idle."""
