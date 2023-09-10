@@ -18,6 +18,7 @@ import sep
 from astropy.io import fits
 from astropy.modeling.fitting import LevMarLSQFitter
 from astropy.modeling.models import Gaussian1D
+from astropy.stats import sigma_clip
 from matplotlib import pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 from numpy.typing import NDArray
@@ -305,7 +306,7 @@ def extract_marginal(
         dtype = detections.dtypes[column]
         detections[column] = sex_detections[column].astype(dtype)
 
-    detections.loc[:, "valid"] = 0
+    detections.loc[:, "valid"] = 1
 
     if exclude_border:
         detections = detections.loc[
@@ -327,7 +328,9 @@ def extract_marginal(
         return detections
 
     back = sep.Background(data)
+
     sub = data - back.back()
+    assert sub is not None
 
     for axis in [1, 0]:
         ax = "x" if axis == 1 else "y"
@@ -351,13 +354,17 @@ def extract_marginal(
             dtype = detections.dtypes[column]
             detections[column] = fit_df[column].astype(dtype)
 
-    valid = (detections.xfitvalid == 1) & (detections.yfitvalid == 1)
-    detections.loc[:, "valid"] = valid.astype(numpy.int8)
-
     # Calculate FWHM as average of xstd and ystd.
     detections.loc[:, "fwhm"] = 0.5 * (detections.xstd + detections.ystd).astype("f4")
 
-    assert sub is not None
+    invalid = (detections.xfitvalid == 0) | (detections.yfitvalid == 0)
+    detections.loc[invalid, "valid"] = 0
+
+    # Reject non-stellar objects and mark them as invalid.
+    valid_fwhm = detections.loc[detections.valid == 1, "fwhm"]
+    fwhm_masked = sigma_clip(valid_fwhm.to_numpy(), sigma=2)
+    invalid_index = valid_fwhm.index[fwhm_masked.mask]  # type: ignore
+    detections.loc[invalid_index, "valid"] = 0
 
     if plot is not None:
         if not isinstance(plot, pathlib.Path) and not isinstance(plot, str):
