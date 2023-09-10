@@ -844,5 +844,31 @@ def get_raw_extension(file: AnyPath | fits.HDUList):
         return hdul[0]
 
 
-# async def wait_until_cameras_are_idle(command: GuiderCommand, timeout:float|None=None):
-#     """Blocks until all the AG cameras for the telescope are idle."""
+async def wait_until_cameras_are_idle(
+    command: GuiderCommand, timeout: float | None = 30.0, interval: float = 2.0
+):
+    """Blocks until all the AG cameras for the telescope are idle."""
+
+    agcam: str = f"lvm.{command.actor.telescope}.agcam"
+    elapsed: float = 0.0
+
+    while True:
+        status_cmd = await command.send_command(agcam, "status", internal=True)
+        if status_cmd.status.did_fail:
+            raise ValueError(f"Command '{agcam} status' failed.")
+
+        states: list[str] = []
+        for reply in status_cmd.replies:
+            if "status" in reply.message:
+                states.append(reply.message["status"]["camera_state"])
+
+        if all([state == "idle" for state in states]):
+            return True
+
+        if elapsed == 0:
+            command.warning("Waiting until cameras are idle.")
+        elif timeout is not None and elapsed >= timeout:
+            raise TimeoutError("Timed out waiting for cameras to become idle.")
+
+        await asyncio.sleep(interval)
+        elapsed += interval

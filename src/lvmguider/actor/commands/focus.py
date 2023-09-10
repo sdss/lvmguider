@@ -14,6 +14,7 @@ import click
 
 from lvmguider.actor import lvmguider_parser
 from lvmguider.focus import Focuser
+from lvmguider.tools import wait_until_cameras_are_idle
 
 
 if TYPE_CHECKING:
@@ -67,6 +68,8 @@ async def focus(
     exposure_time: float = 10,
 ):
     """Performs a focus sweep."""
+
+    await wait_until_cameras_are_idle(command)
 
     # Force the cameras to check the last image.
     command.actor.cameras.reset_seqno()

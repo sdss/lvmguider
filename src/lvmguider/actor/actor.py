@@ -20,8 +20,6 @@ from lvmguider.maskbits import GuiderStatus
 
 
 if TYPE_CHECKING:
-    from clu.model import Property
-
     from lvmguider.guider import Guider
 
 
@@ -67,22 +65,6 @@ class LVMGuiderActor(AMQPActor):
         # Track model of the cameras and focuser associated to this telescope.
         self.models.actors.append(f"lvm.{self.telescope}.foc")
 
-        agcam = f"lvm.{self.telescope}.agcam"
-        self._agcam_state: dict[str, str] = {"east": "unknown", "west": "unknown"}
-        self.models.actors.append(agcam)
-        self.models[agcam]["exposure_state"].register_callback(self.track_agcam_state)
-        self.models[agcam]["status"].register_callback(self.track_agcam_state)
-
-    async def start(self, **kwargs):
-        """Starts the actor."""
-
-        await super().start(**kwargs)
-
-        # Poll the cameras to update the exposure state.
-        await self.send_command(f"lvm.{self.telescope}.agcam", "status")
-
-        return self
-
     @property
     def status(self):
         """Returns the guider status."""
@@ -103,26 +85,3 @@ class LVMGuiderActor(AMQPActor):
                 },
                 internal=True,
             )
-
-    def agcam_is_idle(self):
-        """Returns `True` if the cameras are idle."""
-
-        if self.telescope == "spec":
-            return self._agcam_state["east"] == "idle"
-
-        return all([val == "idle" for val in self._agcam_state.values()])
-
-    async def track_agcam_state(self, prop: Property):
-        """Updates the expose state of the cameras."""
-
-        if prop.name not in ["status", "exposure_state"]:
-            return
-
-        camera = prop.value["camera"]
-
-        if prop.name == "status":
-            self._agcam_state[camera] = prop.value["camera_state"]
-        else:
-            self._agcam_state[camera] = prop.value["state"]
-
-        print(self._agcam_state)
