@@ -1076,7 +1076,6 @@ def create_global_header(solution: GlobalSolution):
 
     # Basic info
     header["TELESCOP"] = frame_data.iloc[0].telescope
-    header["CAMNAME"] = frame_data.iloc[0].camera
     header["MJD"] = sjd
     header.insert("TELESCOP", ("", "/*** BASIC DATA ***/"))
 
