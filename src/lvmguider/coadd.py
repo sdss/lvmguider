@@ -12,6 +12,7 @@ import multiprocessing
 import os
 import os.path
 import pathlib
+import re
 import time
 from functools import partial
 from threading import Lock
@@ -41,6 +42,7 @@ from lvmguider.extraction import extract_marginal, extract_sources
 from lvmguider.plotting import plot_qa
 from lvmguider.tools import (
     angle_difference,
+    dataframe_to_database,
     estimate_zeropoint,
     get_dark_subtracted_data,
     get_frameno,
@@ -48,6 +50,7 @@ from lvmguider.tools import (
     get_raw_extension,
     get_spec_frameno,
     header_from_model,
+    isot_to_sjd,
     nan_or_none,
     polyfit_with_sigclip,
     sort_files_by_camera,
@@ -77,6 +80,7 @@ TELESCOPES: list[str] = ["sci", "spec", "skye", "skyw"]
 def process_all_spec_frames(
     path: AnyPath,
     create_summary: bool = True,
+    write_to_database: bool = True,
     multiprocess_mode: MULTIPROCESS_MODE_TYPE | None = "telescopes",
     **kwargs,
 ):
@@ -90,6 +94,8 @@ def process_all_spec_frames(
     create_summary
         Generates a single table file with all the guider data for
         the processed files.
+    write_to_database
+        Whether to load the co-added data to the database.
     multiprocess_mode
         Defines how to use parallel processing when processing multiple
         images. Options are ``telescopes`` which will process each telescope
@@ -129,6 +135,7 @@ def process_all_spec_frames(
         paths = coadd_from_spec_frame(
             file,
             multiprocess_mode=multiprocess_mode,
+            write_to_database=write_to_database,
             **kwargs,
         )
         all_paths[specno] = paths
@@ -163,6 +170,7 @@ def coadd_telescope(
     outpath: str | None,
     telescope: str,
     use_time_range: bool = False,
+    write_to_database: bool = True,
     **kwargs,
 ):
     """A helper function that processes one telescopes for a spectrograph image.
@@ -193,6 +201,9 @@ def coadd_telescope(
         log.warning(f"No guider frames found for {telescope!r} in {file!s}")
         return
 
+    exposure_match = re.search("[0-9]{8}", file.name)
+    exposure_no = int(exposure_match.group(0)) if exposure_match else None
+
     try:
         gs = create_global_coadd(
             frames,
@@ -202,6 +213,8 @@ def coadd_telescope(
         )
 
         if gs.path is not None:
+            if write_to_database and exposure_no is not None:
+                coadd_to_database(gs.path, exposure_no=exposure_no)
             return gs.path
 
     except Exception as err:
@@ -217,6 +230,7 @@ def coadd_from_spec_frame(
     outpath: str | None = None,
     telescopes: list[str] = TELESCOPES,
     use_time_range: bool | None = None,
+    write_to_database: bool = True,
     multiprocess_mode: MULTIPROCESS_MODE_TYPE | None = "telescopes",
     **kwargs,
 ):
@@ -260,6 +274,7 @@ def coadd_from_spec_frame(
         outpath,
         use_time_range=use_time_range,
         multiprocess_mode=multiprocess_mode,
+        write_to_database=write_to_database,
         **kwargs,
     )
     if multiprocess_mode == "telescopes":
@@ -1500,3 +1515,126 @@ class SpecPatternEventHandler(PatternMatchingEventHandler):
         finally:
             # Release the lock so other files can be processed.
             self.lock.release()
+
+
+def coadd_to_database(
+    coadd_file: AnyPath,
+    exposure_no: int | None = None,
+    **db_connection_params,
+):
+    """Loads the co-add data into the databse."""
+
+    coadd_file = pathlib.Path(coadd_file)
+
+    log.info("Ingesting co-added files into the database.")
+
+    if not coadd_file.exists():
+        raise RuntimeError(f"Cannot find co-add file {coadd_file}")
+
+    global_h = fits.getheader(coadd_file, "GLOBAL")
+    sjd = global_h["MJD"]
+
+    delete_columns: list[str] = ["telescope"]
+    if exposure_no is not None:
+        delete_columns.append("exposure_no")
+
+    # Load global coadd data.
+    log.debug("Loading coadd data to database.")
+    cards = [
+        "mjd",
+        "frame0",
+        "framen",
+        "nframes",
+        "obstime0",
+        "obstimen",
+        "fwhm0",
+        "fwhmn",
+        "fwhmmed",
+        "pacoeffa",
+        "pacoeffb",
+        "pamin",
+        "pamax",
+        "padrift",
+        "zeropt",
+        "solved",
+        "ncamsol",
+        "xffpix",
+        "zffpix",
+        "rafield",
+        "decfield",
+        "pafield",
+        "rameas",
+        "decmeas",
+        "pameas",
+        "warnpa",
+        "warnpadr",
+        "warntran",
+        "warnmatc",
+        "warnfwhm",
+    ]
+    try:
+        global_df = pandas.DataFrame()
+        for card in cards:
+            global_df[card] = [global_h[card]]
+        global_df["telescope"] = global_h["TELESCOP"]
+        if exposure_no:
+            global_df["exposure_no"] = exposure_no
+
+        table_name = config["database"]["guider_coadd_table"]
+        dataframe_to_database(
+            global_df,
+            table_name,
+            delete_columns=delete_columns,
+            **db_connection_params,
+        )
+    except Exception as err:
+        log.error(f"Failed loading frames to database: {str(err).strip()}")
+
+    # Load AG frames.
+    ag_frames_file = coadd_file.with_name(coadd_file.stem + "_frames.parquet")
+    if ag_frames_file.exists():
+        log.debug("Loading AG frames to database.")
+        try:
+            ag_frames = pandas.read_parquet(ag_frames_file)
+            if exposure_no:
+                ag_frames["exposure_no"] = exposure_no
+            if len(ag_frames) > 0:
+                ag_frames_mjd = isot_to_sjd(ag_frames["date_obs"].iloc[0])
+                ag_frames["mjd"] = ag_frames_mjd
+                ag_frames["stacked"] = ag_frames.stacked.astype(bool)
+                ag_frames["solved"] = ag_frames.solved.astype(bool)
+                table_name = config["database"]["agcam_frame_table"]
+                dataframe_to_database(
+                    ag_frames,
+                    table_name,
+                    delete_columns=delete_columns,
+                    **db_connection_params,
+                )
+        except Exception as err:
+            log.error(f"Failed loading frames to database: {str(err).strip()}")
+    else:
+        log.error(f"Cannot find AG frames file {ag_frames_file}")
+
+    # Load guider data.
+    guider_frames_file = coadd_file.with_name(coadd_file.stem + "_guiderdata.parquet")
+    if guider_frames_file.exists():
+        log.debug("Loading guider frames to database.")
+        try:
+            guider_frames = pandas.read_parquet(guider_frames_file)
+            if exposure_no:
+                guider_frames["exposure_no"] = exposure_no
+            if len(guider_frames) > 0:
+                guider_frames["mjd"] = sjd
+                guider_frames["solved"] = guider_frames.solved.astype(bool)
+                guider_frames["applied"] = guider_frames.applied.astype(bool)
+                table_name = config["database"]["guider_frame_table"]
+                dataframe_to_database(
+                    guider_frames,
+                    table_name,
+                    delete_columns=delete_columns,
+                    **db_connection_params,
+                )
+        except Exception as err:
+            log.error(f"Failed loading frames to database: {str(err).strip()}")
+    else:
+        log.error(f"Cannot find guider frames file {guider_frames_file}")

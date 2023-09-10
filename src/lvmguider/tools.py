@@ -842,3 +842,71 @@ def get_raw_extension(file: AnyPath | fits.HDUList):
         return hdul["RAW"]
     else:
         return hdul[0]
+
+
+def isot_to_sjd(isot: str):
+    """Converts ISOT format to SJD."""
+
+    return get_sjd("LCO", Time(isot, format="isot").to_datetime())
+
+
+def dataframe_to_database(
+    df: pandas.DataFrame,
+    table_name: str,
+    delete_columns: str | list[str] | None = None,
+    **connection_params,
+):
+    """Loads a data frame to a database table.
+
+    Parameters
+    ----------
+    df
+        The data frame to load to the database. It is expected that all the columns
+        in the data frame have matching columns in the database table and that the
+        types are compatible.
+    table_name
+        The table in the database where to insert the data. Can be in the format
+        ``schema.table_name``.
+    delete_columns
+        If set, a column or list of columns in the data frame for removing existing
+        entries in the database table. For each unique value in the column, entries
+        with that value on the database are removed before inserting.
+    connection_params
+        Connection parameters to pass to `.get_db_connection`.
+
+    """
+
+    df = df.copy()
+    conn = get_db_connection(**connection_params)
+
+    try:
+        conn.connect()
+    except OperationalError as err:
+        raise RuntimeError(f"Cannot connect to database: {err}")
+
+    records = df.to_dict(orient="records")
+
+    schema: str | None
+    if "." in table_name:
+        schema, table_name = table_name.split(".")
+    else:
+        schema = None
+        table_name = table_name
+
+    table = peewee.Table(table_name, schema=schema, columns=list(df.columns))
+    table.bind(conn)
+
+    if delete_columns is not None:
+        if isinstance(delete_columns, str):
+            delete_columns = [delete_columns]
+
+        uniq = list(zip(*[df[col].astype("object").unique() for col in delete_columns]))
+        for values in uniq:
+            query = table.delete()
+            for icol, value in enumerate(values):
+                query = query.where(getattr(table, delete_columns[icol]) == value)
+            query.execute()
+
+    table.insert(records).execute()
+
+    conn.close()
