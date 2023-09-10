@@ -68,3 +68,6 @@ database:
     dbname: sdss5db
   lvm_magnitude_table: catalogdb.lvm_magnitude
   gaia_dr3_source_table: catalogdb.gaia_dr3_source
+  guider_frame_table: lvmopsdb.guider_frame
+  agcam_frame_table: lvmopsdb.agcam_frame
+  guider_coadd_table: lvmopsdb.guider_coadd
