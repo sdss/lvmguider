@@ -415,18 +415,21 @@ def create_global_coadd(
         if gs.sources is not None:
             sources_path = path.with_name(path.stem + "_sources.parquet")
             log.debug(f"Writing co-added sources to {sources_path!s}")
+            gs.sources.reset_index(drop=True, inplace=True)
             gs.sources.to_parquet(sources_path)
 
         # Write guider data.
         guider_data = gs.guider_data()
         guider_path = path.with_name(path.stem + "_guiderdata.parquet")
         log.debug(f"Writing guide data to {guider_path!s}")
+        guider_data.reset_index(drop=True, inplace=True)
         guider_data.to_parquet(guider_path)
 
         # Write frame data.
         frame_data = gs.frame_data()
         frames_path = path.with_name(path.stem + "_frames.parquet")
         log.debug(f"Writing frame data to {frames_path!s}")
+        frame_data.reset_index(drop=True, inplace=True)
         frame_data.to_parquet(frames_path)
 
         if generate_qa:
@@ -479,6 +482,7 @@ def create_summary_file(
     outpath = pathlib.Path(outpath)
     outpath.parent.mkdir(parents=True, exist_ok=True)
 
+    df_concat.reset_index(drop=True, inplace=True)
     df_concat.to_parquet(str(outpath))
 
     return df_concat
@@ -682,12 +686,14 @@ def coadd_camera(
         if coadd_solution.sources is not None:
             sources_path = path.with_name(path.stem + "_sources.parquet")
             log.debug(f"Writing co-added sources to {sources_path!s}")
+            coadd_solution.sources.reset_index(drop=True, inplace=True)
             coadd_solution.sources.to_parquet(sources_path)
 
         # Write frame data.
         frame_data = coadd_solution.frame_data()
         frames_path = path.with_name(path.stem + "_frames.parquet")
         log.debug(f"Writing frame data to {frames_path!s}")
+        frame_data.reset_index(drop=True, inplace=True)
         frame_data.to_parquet(frames_path)
 
     return coadd_solution
@@ -1236,6 +1242,7 @@ def reprocess_agcam(file: AnyPath, overwrite: bool = False, db_connection_params
     hdul.writeto(str(reproc_path), overwrite=True)
     hdul.close()
 
+    sources.reset_index(drop=True, inplace=True)
     sources.to_parquet(sources_path)
 
     return reproc_path
@@ -1371,6 +1378,7 @@ def reprocess_legacy_guider_frame(
     )
     hdul.writeto(str(guider_file), overwrite=True)
 
+    sources_concat.reset_index(drop=True, inplace=True)
     sources_concat.to_parquet(guider_sources_file)
 
     return guider_file
