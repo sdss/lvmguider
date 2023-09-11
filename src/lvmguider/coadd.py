@@ -1429,7 +1429,10 @@ def watch_for_files(base_path: str = "/data/spectro"):
                 sjd = new_sjd
 
                 (AG_PATH / str(sjd) / "coadds").mkdir(parents=True, exist_ok=True)
-                log.start_file_logger(str(AG_PATH / f"{sjd}/coadds/coadds_{sjd}.log"))
+                log.start_file_logger(
+                    str(AG_PATH / f"{sjd}/coadds/coadds_{sjd}.log"),
+                    rotating=False,
+                )
 
                 observer.schedule(handler, f"{base_path}/{sjd}")
 
