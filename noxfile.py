@@ -42,7 +42,7 @@ def docs_live(session):
                 # for sphinx
                 "-b=dirhtml",
                 "-a",
-                "--watch=../../src/trurl",
+                "--watch=../../src/lvmguider",
                 docs_dir,
                 destination,
                 external=True,

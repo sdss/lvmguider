@@ -8,11 +8,6 @@ This is the documentation for the SDSS Python product ``lvmguider``. The current
 
   $ pip install lvmguider
 
-``lvmguider`` provides the library ``trurl``::
-
-  >> from trurl import __version__
-  >> __version__
-  0.1.0a0
 
 Contents
 --------
@@ -20,7 +15,6 @@ Contents
 .. toctree::
   :maxdepth: 2
 
-  getting-started
   Changelog <changelog>
 
 

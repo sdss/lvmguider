@@ -1,6 +1,6 @@
 # Changelog
 
-## Next version
+## 0.4.0b1 - September 12, 2023
 
 ### 🚀 New
 
@@ -10,7 +10,18 @@
   * Average zero points and PAs are output.
   * All the metadata is carried out in two dataclasess, `CameraSolution` and `GuiderSolution`.
   * The output data model has changed. Former `proc-` files are now named `lvm.{telescope}.guider`, and sources are saved as `parquet` tables. The latter allows to preserve the column types in the presence of missing data.
-* [#6](https://github.com/sdss/lvmguider/pull/6) Major improvements to co-adding code.
+* [#6](https://github.com/sdss/lvmguider/pull/6) Major improvements to co-adding code. QA plots generated during the co-adding process and the results are loaded to the database.
+* Implemented guiding in rotation/PA.
+* Added script to reprocess all MJDs at LCO and generate co-added products.
+* Added file watcher to generate co-adds during the night. Updated the container image to support running the file watcher as a Kubernetes service.
+
+### ✨ Improved
+
+* Improved the sigma clipping of FWHM outliers.
+
+### 🏷️ Changed
+
+* Renamed references to "master frame" to "full frame". Coordinates are now referred to as `x_ff` and `y_ff`.
 
 
 ## 0.3.0 - September 1, 2023
