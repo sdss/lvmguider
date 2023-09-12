@@ -529,16 +529,16 @@ def get_dark_subtracted_data(
     # Data in counts per second.
     data: ARRAY_2D_F32 = raw.data.copy().astype("f4") / exptime
 
+    dark_file = ""
+    dark_path = None
+
     if "PROC" in hdul:
         # Get data and subtract dark or fit background.
         dirname = hdul["PROC"].header.get("DIRNAME", path.parent)
         dark_file = hdul["PROC"].header.get("DARKFILE", "")
 
-        dark_path = pathlib.Path(dirname) / dark_file
-
-    else:
-        dark_file = ""
-        dark_path = None
+        if dark_file and dark_file != "":
+            dark_path = pathlib.Path(dirname) / dark_file
 
     if dark_file != "" and dark_path is not None and dark_path.exists():
         dark_raw = get_raw_extension(str(dark_path))
@@ -842,6 +842,36 @@ def get_raw_extension(file: AnyPath | fits.HDUList):
         return hdul["RAW"]
     else:
         return hdul[0]
+
+
+async def wait_until_cameras_are_idle(
+    command: GuiderCommand, timeout: float | None = 30.0, interval: float = 2.0
+):
+    """Blocks until all the AG cameras for the telescope are idle."""
+
+    agcam: str = f"lvm.{command.actor.telescope}.agcam"
+    elapsed: float = 0.0
+
+    while True:
+        status_cmd = await command.send_command(agcam, "status", internal=True)
+        if status_cmd.status.did_fail:
+            raise ValueError(f"Command '{agcam} status' failed.")
+
+        states: list[str] = []
+        for reply in status_cmd.replies:
+            if "status" in reply.message:
+                states.append(reply.message["status"]["camera_state"])
+
+        if all([state == "idle" for state in states]):
+            return True
+
+        if elapsed == 0:
+            command.warning("Waiting until cameras are idle.")
+        elif timeout is not None and elapsed >= timeout:
+            raise TimeoutError("Timed out waiting for cameras to become idle.")
+
+        await asyncio.sleep(interval)
+        elapsed += interval
 
 
 def isot_to_sjd(isot: str):

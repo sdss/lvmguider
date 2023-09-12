@@ -22,6 +22,7 @@ from lvmguider.maskbits import GuiderStatus
 if TYPE_CHECKING:
     from lvmguider.guider import Guider
 
+
 __all__ = ["LVMGuiderActor"]
 
 
@@ -61,7 +62,7 @@ class LVMGuiderActor(AMQPActor):
         self.guider: Guider | None = None
         self.guide_task: asyncio.Task | None = None
 
-        # Track model of focuser associated to this telescope.
+        # Track model of the cameras and focuser associated to this telescope.
         self.models.actors.append(f"lvm.{self.telescope}.foc")
 
     @property

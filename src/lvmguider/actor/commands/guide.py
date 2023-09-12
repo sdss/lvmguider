@@ -18,6 +18,7 @@ import numpy
 from lvmguider.actor import lvmguider_parser
 from lvmguider.guider import CriticalGuiderError, Guider
 from lvmguider.maskbits import GuiderStatus
+from lvmguider.tools import wait_until_cameras_are_idle
 
 
 if TYPE_CHECKING:
@@ -85,6 +86,8 @@ async def guide(
 
     if actor.status & GuiderStatus.NON_IDLE:
         return command.finish("Guider is not idle. Stop the guide loop.")
+
+    await wait_until_cameras_are_idle(command)
 
     # Force the cameras to check the last image.
     command.actor.cameras.reset_seqno()

@@ -14,6 +14,7 @@ import click
 
 from lvmguider.actor import lvmguider_parser
 from lvmguider.maskbits import GuiderStatus
+from lvmguider.tools import wait_until_cameras_are_idle
 
 
 if TYPE_CHECKING:
@@ -50,6 +51,8 @@ async def expose(
     loop=False,
 ):
     """Exposes the cameras without guiding."""
+
+    await wait_until_cameras_are_idle(command)
 
     # Force the cameras to check the last image.
     command.actor.cameras.reset_seqno()
