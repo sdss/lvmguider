@@ -1,5 +1,14 @@
 # Changelog
 
+## Next version
+
+In addition to the changes listed under `0.4.0b1`, this version provides:
+
+### 🚀 New
+
+* [#7](https://github.com/sdss/lvmguider/pull/7) `stop` command now cancels the guider task for faster performance.
+
+
 ## 0.4.0b1 - September 12, 2023
 
 ### 🚀 New
