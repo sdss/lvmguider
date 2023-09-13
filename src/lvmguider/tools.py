@@ -845,7 +845,9 @@ def get_raw_extension(file: AnyPath | fits.HDUList):
 
 
 async def wait_until_cameras_are_idle(
-    command: GuiderCommand, timeout: float | None = 30.0, interval: float = 2.0
+    command: GuiderCommand,
+    timeout: float | None = 30.0,
+    interval: float = 2.0,
 ):
     """Blocks until all the AG cameras for the telescope are idle."""
 
@@ -863,6 +865,12 @@ async def wait_until_cameras_are_idle(
                 states.append(reply.message["status"]["camera_state"])
 
         if all([state == "idle" for state in states]):
+            # After the exposure is complete basecam sleeps for 0.5 seconds to
+            # allow notification catchup and such. If a check happens during that
+            # time the cameras would be idle but the command not done, so if we
+            # try to issue an lvm.agcam expose command it will fail. So wait
+            # for a bit longer.
+            await asyncio.sleep(0.75)
             return True
 
         if elapsed == 0:
