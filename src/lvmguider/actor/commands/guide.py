@@ -105,6 +105,9 @@ async def guide(
         except CriticalGuiderError as err:
             command.actor.status |= GuiderStatus.FAILED
             return command.fail(f"Stopping the guide loop due to critical error: {err}")
+        except asyncio.CancelledError:
+            # This means that the stop command was issued. All good.
+            break
         except Exception as err:
             command.actor.status |= GuiderStatus.FAILED
             command.warning(f"Failed guiding with error: {err}")
@@ -113,7 +116,11 @@ async def guide(
                 exposure_time = numpy.round(exposure_time, 1)
                 command.warning(f"Exposure time increased to {exposure_time:.1f} s")
         finally:
-            if is_stopping(command):
+            if (
+                is_stopping(command)
+                or actor.guide_task is None
+                or actor.guide_task.done()
+            ):
                 break
 
         if one:
