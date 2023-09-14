@@ -1483,7 +1483,7 @@ class SpecPatternEventHandler(PatternMatchingEventHandler):
             elif event.event_type == "created":
                 new_file = event.src_path
             else:
-                log.debug(f"Not handling event {event}")
+                log.debug(f"Not handling event {event!r}")
                 return
 
             if new_file is None or new_file == "":
