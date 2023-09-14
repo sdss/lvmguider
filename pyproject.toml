@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "lvmguider"
-version = "0.4.0b2"
+version = "0.4.0b3"
 description = "Temporary package for LVM guiding and focusing"
 authors = ["José Sánchez-Gallego <gallegoj@uw.edu>"]
 license = "BSD-3-Clause"
