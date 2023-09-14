@@ -116,11 +116,7 @@ async def guide(
                 exposure_time = numpy.round(exposure_time, 1)
                 command.warning(f"Exposure time increased to {exposure_time:.1f} s")
         finally:
-            if (
-                is_stopping(command)
-                or actor.guide_task is None
-                or actor.guide_task.done()
-            ):
+            if is_stopping(command):
                 break
 
         if one:
