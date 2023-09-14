@@ -230,14 +230,12 @@ class Focuser:
         """Fits the data and returns the best focus and measured FWHM."""
 
         sources_valid = sources.loc[sources.valid == 1]
-        perc_25 = numpy.percentile(sources_valid.fwhm, 25)
-        sources_25 = sources_valid.loc[sources_valid.fwhm < perc_25]
 
         if fit_method == "parabola":
             a, b, c, R2 = fit_parabola(
-                sources_25.dt.tolist(),
-                sources_25.fwhm.tolist(),
-                sources_25.xrms.tolist(),
+                sources_valid.dt.tolist(),
+                sources_valid.fwhm.tolist(),
+                sources_valid.xrms.tolist(),
             )
 
             xmin = -b / 2 / a
@@ -246,11 +244,11 @@ class Focuser:
             return {"xmin": xmin, "ymin": ymin, "R2": R2, "coeffs": [a, b, c]}
 
         elif fit_method == "spline":
-            fwhm = sources_25.groupby("dt").apply(
+            fwhm = sources_valid.groupby("dt").apply(
                 lambda gg: pandas.Series(
                     {
-                        "fwhm": gg.fwhm.median(),
-                        "std": gg.fwhm.median(),
+                        "fwhm": numpy.percentile(gg.fwhm, 25),
+                        "std": gg.fwhm.std(),
                     }
                 )
             )
