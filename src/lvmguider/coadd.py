@@ -881,7 +881,7 @@ def get_guider_solutions(root: pathlib.Path, telescope: str, frameno: int):
         try:
             path = reprocess_legacy_guider_frame(root, frameno, telescope)
         except Exception:
-            log.error(f"{log_h} failed retrieving guider solution.")
+            log.warning(f"{log_h} failed retrieving guider solution.")
             return None
 
     guider_data = fits.getheader(path, "GUIDERDATA")
