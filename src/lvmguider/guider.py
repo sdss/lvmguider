@@ -429,8 +429,11 @@ class Guider:
                 matched_sources, _ = match_with_gaia(solution.wcs, sources, concat=True)
                 sources = matched_sources
                 matched = True
-
                 wcs = solution.wcs
+            else:
+                self.command.warning(
+                    f"Failed solving camera {camname} with astrometry.net."
+                )
 
         else:
             # This is now wcs_mode="gaia".
@@ -457,9 +460,11 @@ class Guider:
 
             if nmatches < 5:
                 self.command.warning(
-                    "Insufficient number of Gaia matches. "
-                    "Cannot generate astrometric solution."
+                    f"Failed solving camera {camname}: insufficient number of "
+                    "Gaia matches. Cannot generate astrometric solution. "
+                    "Trying astrometry.net"
                 )
+                return self.solve_camera(file, force_astrometry_net=True)
             else:
                 wcs = wcs_from_gaia(matched_sources)
                 wcs = wcs
@@ -476,7 +481,7 @@ class Guider:
             wcs_mode=wcs_mode,
             wcs=wcs,
             matched=matched,
-            ref_frame=ref_frame,
+            ref_frame=ref_frame if wcs is not None else None,
             telescope=self.telescope,
         )
 
