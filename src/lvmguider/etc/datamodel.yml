@@ -174,7 +174,7 @@ CAMERA_COADD:
   FWHM0: [null, '[arcsec] FWHM of sources in first frame']
   FWHMN: [null, '[arcsec] FWHM of sources in last frame']
   FWHMMED: [null, '[arcsec] Median of the FHWM of all frames']
-  COFWHM: [null, '[arcsec] Co-added median FWHM']
+  COFWHM: [null, '[arcsec] Co-added 25% percentile FWHM']
   COFWHMST: [null, '[arcsec] Co-added FWHM standard deviation']
   PACOEFFA: [null, 'Slope of PA fit']
   PACOEFFB: [null, 'Intercept of PA fit']

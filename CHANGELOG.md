@@ -11,6 +11,7 @@ In addition to the changes listed under `0.4.0b1`, this version provides:
 ### ✨ Improved
 
 * If a single camera fails to match with Gaia during guiding, retry that camera using astrometry.net.
+* Use 25% percentile to calculate the FWHM.
 
 ### 🔧 Fixed
 

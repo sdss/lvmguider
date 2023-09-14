@@ -933,7 +933,7 @@ def create_coadd_header(solution: CoAdd_CameraSolution):
 
     # Gets the FWHM of the sources extracted from the stacked image.
     cofwhm = solution.fwhm
-    cofwhmst = solution.sources.loc[solution.sources.valid == 1].fwhm.dropna().median()
+    cofwhmst = solution.sources.loc[solution.sources.valid == 1].fwhm.dropna().std()
 
     # Determine the PA drift due to k-mirror tracking.
     frame_pa = stacked.loc[:, ["frameno", "pa"]].dropna()

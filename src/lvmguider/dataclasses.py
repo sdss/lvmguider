@@ -75,7 +75,11 @@ class BaseSolution:
         """Returns the FWHM from the extracted sources."""
 
         if self.sources is not None:
-            return self.sources.loc[self.sources.valid == 1].fwhm.dropna().median()
+            fwhms = self.sources.loc[self.sources.valid == 1].fwhm.dropna()
+            if len(fwhms) == 0:
+                return numpy.nan
+            perc_25 = numpy.percentile(fwhms, 25)
+            return float(perc_25)
 
         return numpy.nan
 
@@ -365,8 +369,11 @@ class CoAddWarningsMixIn:
             return True
         else:
             fwhm_factor_warn = config["coadds"]["warnings"]["fwhm_factor_warning"]
-            sources_fwhm = self.sources.loc[self.sources.valid == 1, "fwhm"]
-            return self.fwhm > sources_fwhm.dropna().median() * fwhm_factor_warn
+            sources_fwhm = self.sources.loc[self.sources.valid == 1, "fwhm"].dropna()
+            if len(sources_fwhm) == 0:
+                return False
+            perc_25 = numpy.percentile(sources_fwhm, 25)
+            return self.fwhm > perc_25 * fwhm_factor_warn
 
 
 @dataclass(kw_only=True)
