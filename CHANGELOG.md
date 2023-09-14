@@ -1,12 +1,21 @@
 # Changelog
 
-## Next version
+## 0.4.0b2 - September 14, 2023
 
 In addition to the changes listed under `0.4.0b1`, this version provides:
 
 ### 🚀 New
 
 * [#7](https://github.com/sdss/lvmguider/pull/7) `stop` command now cancels the guider task for faster performance.
+
+### ✨ Improved
+
+* If a single camera fails to match with Gaia during guiding, retry that camera using astrometry.net.
+
+### 🔧 Fixed
+
+* The co-add file watcher seemed to skip files. Apparently this happens because some events are detected as a file being moved (from a temporary file to the final `.fits.gz` file) instead of a file creation. This version handles both kinds of events.
+* Various fixes for the co-added code when dealing with missing data.
 
 
 ## 0.4.0b1 - September 12, 2023
