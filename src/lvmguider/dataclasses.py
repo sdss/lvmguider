@@ -131,8 +131,9 @@ class CameraSolution(BaseSolution):
 
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", category=FITSFixedWarning)
+            solved = proc["SOLVED"]
             wcs_mode = proc["WCSMODE"].lower()
-            wcs = WCS(proc) if wcs_mode != "none" else None
+            wcs = WCS(proc) if solved and wcs_mode != "none" else None
 
             # Fix cases when WCSMODE is not "none" but the WCS is not valid.
             if wcs is not None and not wcs.is_celestial:
