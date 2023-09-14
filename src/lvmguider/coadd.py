@@ -732,9 +732,15 @@ def create_framedata(
     try:
         guiderv = fits.getval(str(path), "GUIDERV", "PROC")
     except Exception:
-        guiderv = "0.0.0"
+        guiderv = "0.0.1"
 
-    if Version(guiderv) < Version("0.4.0a0"):
+    # Guider version 0.0.1 means that there is not PROC extension.
+    # Guider version 0.0.0 means that the image was never processed by
+    #    the guider but otherwise has the right format so it does not need to
+    #    be reprocessed. Images with 0.0.0 have WCSMODE=none.
+    # Guider version 0.99.0 means it has been reprocessed.
+
+    if guiderv != "0.0.0" and Version(guiderv) < Version("0.4.0a0"):
         new_path = reprocess_agcam(
             path,
             db_connection_params=db_connection_params,
@@ -768,7 +774,7 @@ def create_framedata(
         if dark_sub is False:
             log.debug(f"{log_h} missing dark frame. Fitting and removing background.")
 
-        wcs_mode = proc_header["WCSMODE"]
+        wcs_mode = proc_header["WCSMODE"].lower()
         stacked = (wcs_mode == "gaia") or reprocessed
 
         try:
@@ -1361,7 +1367,7 @@ def reprocess_legacy_guider_frame(
                 gdata_header["FILEWEST"] = filex
 
             hdul = fits.open(root / filex)
-            if "PROC" in hdul and hdul["PROC"].header["WCSMODE"] != "none":
+            if "PROC" in hdul and hdul["PROC"].header["WCSMODE"].lower() != "none":
                 n_solved += 1
 
             hdul.close()

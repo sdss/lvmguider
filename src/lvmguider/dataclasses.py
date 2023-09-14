@@ -119,7 +119,7 @@ class CameraSolution(BaseSolution):
             raise ValueError("Guider version not found.")
 
         guiderv = Version(proc["GUIDERV"])
-        if guiderv < Version("0.4.0a0"):
+        if guiderv < Version("0.4.0a0") and guiderv != Version("0.0.0"):
             raise ValueError(
                 "The file was generated with an unsupported version of lvmguider."
             )
@@ -131,7 +131,7 @@ class CameraSolution(BaseSolution):
 
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", category=FITSFixedWarning)
-            wcs_mode = proc["WCSMODE"]
+            wcs_mode = proc["WCSMODE"].lower()
             wcs = WCS(proc) if wcs_mode != "none" else None
 
             # Fix cases when WCSMODE is not "none" but the WCS is not valid.
@@ -262,7 +262,7 @@ class GuiderSolution(BaseSolution):
             raise ValueError("Guider version not found.")
 
         guiderv = Version(guider_data["GUIDERV"])
-        if guiderv < Version("0.4.0a0"):
+        if guiderv < Version("0.4.0a0") and guiderv != Version("0.0.0"):
             raise ValueError(
                 "The file was generated with an unsupported version of lvmguider."
             )
