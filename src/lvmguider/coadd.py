@@ -1468,7 +1468,7 @@ class SpecPatternEventHandler(PatternMatchingEventHandler):
             case_sensitive=True,
         )
 
-    def on_any_event(self, event: FileCreatedEvent|FileMovedEvent):
+    def on_any_event(self, event: FileCreatedEvent | FileMovedEvent):
         """Runs the co-add code when a new file is created/moved."""
 
         # Do not process more than one file at the same time.
@@ -1478,13 +1478,12 @@ class SpecPatternEventHandler(PatternMatchingEventHandler):
         self.lock.acquire()
 
         try:
-
             if event.event_type == "moved":
                 new_file = event.dest_path  # type: ignore
-            elif event.event_type == 'created':
+            elif event.event_type == "created":
                 new_file = event.src_path
             else:
-                log.debug(f'Not handling event {event}')
+                log.debug(f"Not handling event {event}")
                 return
 
             if new_file is None or new_file == "":
