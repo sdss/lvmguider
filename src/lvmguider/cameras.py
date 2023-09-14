@@ -169,7 +169,7 @@ class Cameras:
         if len(sources) > 0:
             all_sources = pandas.concat(sources)
             valid = all_sources.loc[all_sources.valid == 1]
-            fwhm = float(numpy.median(valid["fwhm"])) if len(valid) > 0 else None
+            fwhm = numpy.percentile(valid["fwhm"], 25) if len(valid) > 0 else None
         else:
             valid = []
             fwhm = None
@@ -181,7 +181,7 @@ class Cameras:
                 "flavour": flavour,
                 "n_sources": len(valid),
                 "focus_position": round(focus_position, 1),
-                "fwhm": numpy.round(fwhm, 3) if fwhm else -999.0,
+                "fwhm": numpy.round(float(fwhm), 3) if fwhm else -999.0,
             }
         )
 
