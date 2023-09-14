@@ -1464,8 +1464,8 @@ class SpecPatternEventHandler(PatternMatchingEventHandler):
             case_sensitive=True,
         )
 
-    def on_created(self, event: FileCreatedEvent):
-        """Runs the co-add code when a new file is created."""
+    def on_any_event(self, event: FileCreatedEvent):
+        """Runs the co-add code when a new file is created/moved."""
 
         # Do not process more than one file at the same time.
         while self.lock.locked():
