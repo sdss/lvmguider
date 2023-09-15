@@ -357,6 +357,7 @@ def delta_radec2mot_axis(
     dec_ref,
     ra_new,
     dec_new,
+    date: datetime | None = None,
     site: EarthLocation | None = None,
 ):
     """RA/Dec offset to motor axes.
@@ -374,7 +375,8 @@ def delta_radec2mot_axis(
 
     assert isinstance(site, EarthLocation)
 
-    observing_time = Time(datetime.utcnow(), scale="utc", location=site)
+    date = date or datetime.utcnow()
+    observing_time = Time(date, scale="utc", location=site)
     lst = observing_time.sidereal_time("mean")
 
     ref_az_d, ref_el_d = radec2azel(ra_ref, dec_ref, lst.deg, site=site)
