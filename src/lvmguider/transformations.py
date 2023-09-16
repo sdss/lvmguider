@@ -272,7 +272,7 @@ def radec2azel(raD, decD, lstD, site: EarthLocation | None = None):
     ra,dec
         Right Ascension and Declination in decimal degrees.
     lst
-        Local Sideral Time in decimal degrees.
+        Local Sidereal Time in decimal degrees.
 
     Returns
     -------
