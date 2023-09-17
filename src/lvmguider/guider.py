@@ -20,6 +20,8 @@ from astropy.io import fits
 from astropy.time import Time
 from simple_pid import PID
 
+from sdsstools.time import get_sjd
+
 from lvmguider import __version__
 from lvmguider.dataclasses import CameraSolution, GuiderSolution
 from lvmguider.maskbits import GuiderStatus
@@ -673,6 +675,7 @@ class Guider:
         gheader["GUIDERV"] = __version__
         gheader["TELESCOP"] = self.telescope
         gheader["GUIDMODE"] = "guide" if self.is_guiding() else "acquisition"
+        gheader["MJD"] = get_sjd("LCO")
         gheader["DATE"] = Time.now().isot
         gheader["FRAMENO"] = guider_solution.frameno
 

@@ -12,7 +12,7 @@ import pathlib
 import warnings
 from dataclasses import dataclass, field
 
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import nptyping as npt
 import numpy
@@ -22,10 +22,17 @@ from astropy.time import Time
 from astropy.wcs import WCS, FITSFixedWarning
 from packaging.version import Version
 
+from sdsstools.time import get_sjd
+
 from lvmguider import config, log
 from lvmguider.tools import dataframe_from_model, get_frameno
 from lvmguider.transformations import get_crota2
-from lvmguider.types import ARRAY_2D_F32
+
+
+if TYPE_CHECKING:
+    from pandas._libs.missing import NAType
+
+    from lvmguider.types import ARRAY_2D_F32
 
 
 __all__ = ["CameraSolution", "GuiderSolution", "FrameData"]
@@ -101,6 +108,7 @@ class CameraSolution(BaseSolution):
     frameno: int
     camera: str
     path: pathlib.Path
+    date_obs: Time = field(default_factory=lambda: Time.now())
     sources: pandas.DataFrame | None = None
     ref_frame: pathlib.Path | None = None
     wcs_mode: WCS_MODE_T = "none"
@@ -151,6 +159,7 @@ class CameraSolution(BaseSolution):
             frameno=get_frameno(file),
             telescope=raw["TELESCOP"],
             camera=raw["CAMNAME"],
+            date_obs=Time(raw["DATE-OBS"], format="isot"),
             path=file.absolute(),
             sources=sources,
             wcs=wcs,
@@ -398,6 +407,7 @@ class CoAdd_CameraSolution(CameraSolution, CoAddWarningsMixIn):
         for ii, fd in enumerate(self.frames):
             new_row = dict(
                 frameno=fd.frameno,
+                mjd=fd.sjd,
                 date_obs=fd.date_obs.isot,
                 camera=fd.camera,
                 telescope=fd.telescope,
@@ -471,9 +481,18 @@ class GlobalSolution(BaseSolution, CoAddWarningsMixIn):
             pa = get_crota2(gs.wcs) if gs.wcs is not None else numpy.nan
             pointing = gs.pointing
 
+            date_obs: str = ""
+            mjd: int | NAType = pandas.NA
+
+            if len(gs.solutions) > 0:
+                date_obs = gs.solutions[0].date_obs.isot
+                mjd = get_sjd("LCO", gs.solutions[0].date_obs.to_datetime())
+
             new_row = dict(
                 frameno=gs.frameno,
                 telescope=gs.telescope,
+                mjd=mjd,
+                date_obs=date_obs,
                 fwhm=numpy.float32(gs.fwhm),
                 pa=numpy.float32(pa),
                 zero_point=numpy.float32(gs.zero_point),

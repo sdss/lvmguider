@@ -78,6 +78,7 @@ GUIDERDATA_HEADER:
   GUIDERV: [null, 'Version of lvmguider']
   TELESCOP: [null, 'Telescope that took the images']
   GUIDMODE: ['acquition', 'Acquisition or guiding?']
+  MJD: [null, 'SDSS MJD (MJD+0.4)']
   DATE: [null, 'Date of file creation']
   FRAMENO: [null, 'Frame number']
   FILEEAST: [null, 'AG east camera file']
@@ -117,6 +118,7 @@ FRAMEDATA:
   frameno: 'Int16'
   telescope: 'S4'
   camera: 'S4'
+  mjd: 'Int32'
   date_obs: 'S25'
   exptime: 'f4'
   kmirror_drot: 'f4'
@@ -131,6 +133,8 @@ FRAMEDATA:
 GUIDERDATA_FRAME:
   frameno: 'Int16'
   telescope: 'S4'
+  mjd: 'Int32'
+  date_obs: 'S25'
   solved: 'Int8'
   n_cameras_solved: 'Int8'
   guide_mode: 'S12'
