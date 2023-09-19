@@ -619,11 +619,8 @@ def coadd_camera(
     coadd_image: ARRAY_2D_F32 | None = None
     coadd_solution: CoAdd_CameraSolution
 
-    if len(data_stack) == 0 or telescope == "spec":
-        if telescope == "spec":
-            log.debug(f"Not stacking data for telecope {telescope!r}.")
-        else:
-            log.error(f"No data to stack for {telescope!r}.")
+    if len(data_stack) == 0:
+        log.error(f"No data to stack for {telescope!r}.")
 
         coadd_solution = CoAdd_CameraSolution(
             frameno=-1,
@@ -980,13 +977,12 @@ def create_coadd_header(solution: CoAdd_CameraSolution):
     header["FRAMEN"] = framen
     header["NFRAMES"] = framen - frame0 + 1
 
-    if telescope != "spec":
-        header["STACK0"] = stack0
-        header["STACKN"] = stackn
-        header["NSTACKED"] = stackn - stack0 + 1
-        header["COESTIM"] = "median"
-        header["SIGCLIP"] = solution.sigmaclip
-        header["SIGMA"] = solution.sigmaclip_sigma
+    header["STACK0"] = stack0
+    header["STACKN"] = stackn
+    header["NSTACKED"] = stackn - stack0 + 1
+    header["COESTIM"] = "median"
+    header["SIGCLIP"] = solution.sigmaclip
+    header["SIGMA"] = solution.sigmaclip_sigma
 
     header["OBSTIME0"] = frame_data.iloc[0].date_obs
     header["OBSTIMEN"] = frame_data.iloc[-1].date_obs
