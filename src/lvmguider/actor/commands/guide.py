@@ -81,7 +81,12 @@ async def guide(
     actor = command.actor
     MAX_EXPTIME: float = 18
 
-    guider = Guider(command, (ra, dec, pa), pixel=reference_pixel)
+    guider = Guider(
+        command,
+        (ra, dec, pa),
+        pixel=reference_pixel,
+        apply_corrections=apply_corrections,
+    )
     command.actor.guider = guider
 
     if actor.status & GuiderStatus.NON_IDLE:
@@ -98,7 +103,6 @@ async def guide(
                 guider.guide_one(
                     exposure_time,
                     guide_tolerance=guide_tolerance,
-                    apply_correction=apply_corrections,
                 )
             )
             await actor.guide_task
