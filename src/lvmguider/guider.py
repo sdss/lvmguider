@@ -466,7 +466,7 @@ class Guider:
                     "Gaia matches. Cannot generate astrometric solution. "
                     "Trying astrometry.net"
                 )
-                return self.solve_camera(file, force_astrometry_net=True)
+                return await self.solve_camera(file, force_astrometry_net=True)
             else:
                 wcs = wcs_from_gaia(matched_sources)
                 wcs = wcs
