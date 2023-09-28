@@ -23,6 +23,7 @@ max_rot_correction: 3
 guide_tolerance: 1
 pa_tolerance: 0.012
 revert_to_acquistion_threshold: 2
+apply_guider_corrections: true
 
 xz_full_frame: [2500.0, 1000.0]
 xz_ag_frame: [800.0, 550.0]

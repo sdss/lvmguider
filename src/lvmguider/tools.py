@@ -337,11 +337,7 @@ def update_fits(
                 hdu.header[key] = value
 
 
-def get_gaia_sources(
-    wcs: WCS,
-    db_connection_params: dict[str, Any] = {},
-    include_lvm_mags: bool = True,
-):
+def get_gaia_sources(wcs: WCS, db_connection_params: dict[str, Any] = {}):
     """Returns a data frame with Gaia source information from a WCS.
 
     Parameters
@@ -349,9 +345,6 @@ def get_gaia_sources(
     wcs
         A WCS associated with the image. Used to determine the centre of the
         image and perform a radial query in the database.
-    include_lvm_mags
-        If `True`, match to ``lvm_magnitude`` and return LVM AG passband
-        magnitudes and fluxes.
     db_connection_params
         A dictionary of DB connection parameters to pass to `.get_db_connection`.
 
@@ -378,59 +371,33 @@ def get_gaia_sources(
     GDR3 = peewee.Table(gdr3_table, schema=gdr3_sch).bind(conn)
     LMAG = peewee.Table(lmag_table, schema=lmag_sch).bind(conn)
 
-    if include_lvm_mags:
-        cte = (
-            LMAG.select(
-                LMAG.c.source_id,
-                LMAG.c.lmag_ab,
-                LMAG.c.lflux,
-            )
-            .where(
-                peewee.fn.q3c_radial_query(
-                    LMAG.c.ra,
-                    LMAG.c.dec,
-                    float(ra),
-                    float(dec),
-                    CAM_FOV,
-                )
-            )
-            .cte("cte", materialized=True)
+    query = (
+        GDR3.select(
+            GDR3.c.source_id,
+            GDR3.c.ra,
+            GDR3.c.dec,
+            GDR3.c.pmra,
+            GDR3.c.pmdec,
+            GDR3.c.phot_g_mean_mag,
+            LMAG.c.lmag_ab,
+            LMAG.c.lflux,
         )
-
-        query = (
-            cte.select(
-                cte.star,
+        .join(
+            LMAG,
+            on=(LMAG.c.source_id == GDR3.c.source_id),
+            join_type=peewee.JOIN.LEFT_OUTER,
+        )
+        .where(
+            peewee.fn.q3c_radial_query(
                 GDR3.c.ra,
                 GDR3.c.dec,
-                GDR3.c.pmra,
-                GDR3.c.pmdec,
-                GDR3.c.phot_g_mean_mag,
+                float(ra),
+                float(dec),
+                CAM_FOV,
             )
-            .join(GDR3, on=(cte.c.source_id == GDR3.c.source_id))
-            .with_cte(cte)
-            .dicts()
         )
-
-    else:
-        query = (
-            GDR3.select(
-                GDR3.c.ra,
-                GDR3.c.dec,
-                GDR3.c.pmra,
-                GDR3.c.pmdec,
-                GDR3.c.phot_g_mean_mag,
-            )
-            .where(
-                peewee.fn.q3c_radial_query(
-                    GDR3.c.ra,
-                    GDR3.c.dec,
-                    float(ra),
-                    float(dec),
-                    CAM_FOV,
-                )
-            )
-            .dicts()
-        )
+        .dicts()
+    )
 
     with conn.atomic():
         conn.execute_sql("SET LOCAL work_mem='2GB'")

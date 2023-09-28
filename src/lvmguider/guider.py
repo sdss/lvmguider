@@ -72,6 +72,9 @@ class Guider:
     pixel
         The ``(x,y)`` pixel of the full frame to use to determine the pointing.
         Default to the central pixel.
+    apply_corrections
+        Whether to apply the measured corrections. If `False`, outputs the
+        measurements but does not command the telescope.
 
     """
 
@@ -80,6 +83,7 @@ class Guider:
         command: GuiderCommand,
         field_centre: tuple[float, float, float],
         pixel: tuple[float, float] | None = None,
+        apply_corrections: bool = True,
     ):
         self.command = command
         self.telescope = command.actor.telescope
@@ -88,6 +92,7 @@ class Guider:
         self.config = command.actor.config
         self.guide_tolerance = self.config["guide_tolerance"]
         self.pa_tolerance = self.config["pa_tolerance"]
+        self.apply_corrections: bool = apply_corrections
 
         self.field_centre = field_centre
         self.pixel = pixel or self.config["xz_full_frame"]
@@ -160,7 +165,6 @@ class Guider:
         exposure_time: float = 5.0,
         force_astrometry_net: bool = False,
         guide_tolerance: float | None = None,
-        apply_correction: bool = True,
     ):
         """Performs one guide iteration.
 
@@ -194,9 +198,6 @@ class Guider:
             The separation between field RA/Dec and measured pointing at which
             to consider than acquisition has been completed and guiding begins.
             If `None`, defaults to the configuration file value.
-        apply_corrections
-            Whether to apply the measured corrections. If `False`, outputs the
-            measurements but does not command the telescope.
 
         """
 
@@ -298,10 +299,16 @@ class Guider:
 
         corr_rot = self.pid_rot(offset_pa) or 0.0
 
+        apply_guider_corrections = self.config["apply_guider_corrections"]
+        if self.is_guiding() and not apply_guider_corrections:
+            apply_correction_this = False
+        else:
+            apply_correction_this = self.apply_corrections
+
         applied_motax = numpy.array([0.0, 0.0])
         applied_rot: float = 0.0
         try:
-            if apply_correction:
+            if apply_correction_this:
                 self.command.actor.status &= ~GuiderStatus.PROCESSING
                 self.command.actor.status |= GuiderStatus.CORRECTING
 
