@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.0 - September 28, 2023
+
+In addition to the changes listed under `0.4.0b2`, this version provides:
+
+### 🚀 New
+
+* [#8](https://github.com/sdss/lvmguider/pull/8) Added `corrections` command.
+
+### 🔧 Fixed
+
+* Reported FWHM were actually Gaussian sigmas. This has not been fixed.
+* Improved matching of extracted sources with Gaia DR3.
+
+
 ## 0.4.0b2 - September 14, 2023
 
 In addition to the changes listed under `0.4.0b1`, this version provides:
