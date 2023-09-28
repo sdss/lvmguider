@@ -356,6 +356,7 @@ def extract_marginal(
 
     # Calculate FWHM as average of xstd and ystd.
     detections.loc[:, "fwhm"] = 0.5 * (detections.xstd + detections.ystd).astype("f4")
+    detections.fwhm *= 2.355
 
     invalid = (detections.xfitvalid == 0) | (detections.yfitvalid == 0)
     detections.loc[invalid, "valid"] = 0
