@@ -1139,9 +1139,9 @@ def create_global_header(solution: GlobalSolution):
         header["RAFIELD"] = nan_or_none(guider_data.ra_field.iloc[0], 6)
         header["DECFIELD"] = nan_or_none(guider_data.dec_field.iloc[0], 6)
         header["PAFIELD"] = nan_or_none(guider_data.pa_field.iloc[0], 4)
-        header["RAMEAS"] = nan_or_none(guider_data.ra.iloc[0], 6)
-        header["DECMEAS"] = nan_or_none(guider_data.dec.iloc[0], 6)
-        header["PAMEAS"] = nan_or_none(guider_data.pa.iloc[0], 4)
+        header["RAMEAS"] = nan_or_none(solution.pointing[0], 6)
+        header["DECMEAS"] = nan_or_none(solution.pointing[1], 6)
+        header["PAMEAS"] = nan_or_none(solution.pa, 4)
 
     # Warnings
     header["WARNPA"] = pa_warn
