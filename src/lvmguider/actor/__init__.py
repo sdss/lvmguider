@@ -14,6 +14,7 @@ from .actor import LVMGuiderActor
 
 GuiderCommand = Command["LVMGuiderActor"]
 
+from .commands.corrections import corrections
 from .commands.expose import expose
 from .commands.focus import focus
 from .commands.guide import guide
