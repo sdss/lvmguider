@@ -543,6 +543,10 @@ class Guider:
             pointing_pa = solution.pa - 180
             offset_pa = field_pa - pointing_pa
 
+            offset_pa %= 360
+            if offset_pa > 180:
+                offset_pa -= 360
+
         return ((ra_arcsec, dec_arcsec), (saz_diff_d, sel_diff_d), offset_pa)
 
     async def offset_telescope(
