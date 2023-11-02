@@ -753,7 +753,10 @@ def create_framedata(
 
     with fits.open(str(path)) as hdul:
         # RAW header
-        raw_header = hdul["RAW"].header
+        if "RAW" in hdul:
+            raw_header = hdul["RAW"].header
+        else:
+            raw_header = hdul[0].header
 
         frameno = get_frameno(path)
         telescope = raw_header["TELESCOP"]
@@ -881,8 +884,8 @@ def get_guider_solutions(root: pathlib.Path, telescope: str, frameno: int):
     if not path.exists():
         try:
             path = reprocess_legacy_guider_frame(root, frameno, telescope)
-        except Exception:
-            log.warning(f"{log_h} failed retrieving guider solution.")
+        except Exception as err:
+            log.warning(f"{log_h} failed retrieving guider solution: {err}")
             return None
 
     guider_data = fits.getheader(path, "GUIDERDATA")
