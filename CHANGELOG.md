@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.1 - November 5, 2023
+
+### 🔧 Fixed
+
+* Actually import the `corrections` command.
+* Use WCS to determine `RAMEAS`, `DECMEAS`, `PAMEAS` in co-added images.
+* Wrap `offset_pa` in the -180 to 180 range.
+
+
 ## 0.4.0 - September 28, 2023
 
 In addition to the changes listed under `0.4.0b2`, this version provides:
