@@ -1252,6 +1252,7 @@ def reprocess_agcam(file: AnyPath, overwrite: bool = False, db_connection_params
     new_proc["REPROC"] = (True, "Has this file been reprocessed?")
 
     if wcs is not None:
+        new_proc["SOLVED"] = True
         new_proc.extend(wcs.to_header())
 
     reproc_path.parent.mkdir(parents=True, exist_ok=True)
