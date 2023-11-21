@@ -132,7 +132,7 @@ def process_all_spec_frames(
         if header["IMAGETYP"] != "object":
             continue
 
-        if header["EXPTIME"] < 120:
+        if header["EXPTIME"] < 30:
             log.warning(f"Spec frame {file.name!s} is too short. Skipping.")
             continue
 
