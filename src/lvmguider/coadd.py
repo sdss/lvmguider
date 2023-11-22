@@ -783,7 +783,7 @@ def create_framedata(
 
         try:
             solution = CameraSolution.open(path)
-        except ValueError as err:
+        except Exception as err:
             log.error(f"{log_h} failed creating CameraSolution ({err})")
             return None
 
