@@ -132,10 +132,6 @@ def process_all_spec_frames(
         if header["IMAGETYP"] != "object":
             continue
 
-        if header["EXPTIME"] < 30:
-            log.warning(f"Spec frame {file.name!s} is too short. Skipping.")
-            continue
-
         paths = coadd_from_spec_frame(
             file,
             multiprocess_mode=multiprocess_mode,
@@ -1496,8 +1492,7 @@ class SpecPatternEventHandler(PatternMatchingEventHandler):
                 return
 
             image_type = fits.getval(str(path), "IMAGETYP")
-            exptime = fits.getval(str(path), "EXPTIME")
-            if image_type != "object" or exptime < 60:
+            if image_type != "object":
                 log.info(f"Detected file {path}. Not an object image, skipping.")
                 return
 
