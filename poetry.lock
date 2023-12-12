@@ -1684,6 +1684,7 @@ files = [
 numpy = [
     {version = ">=1.22.4,<2", markers = "python_version < \"3.11\""},
     {version = ">=1.23.2,<2", markers = "python_version == \"3.11\""},
+    {version = ">=1.26.0,<2", markers = "python_version >= \"3.12\""},
 ]
 python-dateutil = ">=2.8.2"
 pytz = ">=2020.1"
@@ -3473,5 +3474,5 @@ multidict = ">=4.0"
 
 [metadata]
 lock-version = "2.0"
-python-versions = "^3.10,<3.12"
-content-hash = "d48f66932c819bffdd6d223a7cecbc677e518375b610c16571c1e5b71c403b83"
+python-versions = "^3.10,<3.13"
+content-hash = "d0787651ae2fbc22e047717f9becb4c9b77b7b236d111c376e8fbd597672803a"
