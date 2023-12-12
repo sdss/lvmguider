@@ -91,6 +91,19 @@ class BaseSolution:
         return numpy.nan
 
     @property
+    def eccentricity(self):
+        """Returns the eccentricity from the extracted sources."""
+
+        if self.sources is not None:
+            valid = self.sources.loc[self.sources.valid == 1, ["a", "b"]].dropna()
+            if len(valid) == 0:
+                return numpy.nan
+
+            return numpy.median(numpy.sqrt(1 - valid.b**2 / valid.a**2))
+
+        return numpy.nan
+
+    @property
     def pointing(self) -> npt.NDArray[npt.Shape["2"], npt.Float64]:
         """Returns the camera pointing at its central pixel."""
 
@@ -415,6 +428,7 @@ class CoAdd_CameraSolution(CameraSolution, CoAddWarningsMixIn):
                 kmirror_drot=numpy.float32(fd.kmirror_drot),
                 focusdt=numpy.float32(fd.focusdt),
                 fwhm=numpy.float32(fd.solution.fwhm),
+                ecc=numpy.float32(fd.solution.eccentricity),
                 pa=numpy.float32(fd.solution.pa),
                 zero_point=numpy.float32(fd.solution.zero_point),
                 stacked=int(fd.stacked),
@@ -494,6 +508,7 @@ class GlobalSolution(BaseSolution, CoAddWarningsMixIn):
                 mjd=mjd,
                 date_obs=date_obs,
                 fwhm=numpy.float32(gs.fwhm),
+                ecc=numpy.float32(gs.eccentricity),
                 pa=numpy.float32(pa),
                 zero_point=numpy.float32(gs.zero_point),
                 solved=int(gs.solved),
