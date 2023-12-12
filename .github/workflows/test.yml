@@ -15,21 +15,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.11']
+        python-version: ['3.11', '3.12']
 
     steps:
-      - uses: actions/checkout@v3
-
-      - name: Cache Setup
-        uses: actions/cache@v3
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+      - uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: ${{ matrix.python-version }}
+          cache: 'pip'
 
       - name: Install dependencies
         run: |
@@ -54,4 +49,5 @@ jobs:
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v3
         with:
+          token: ${{ secrets.CODECOV_TOKEN }}
           file: ./coverage.xml
