@@ -25,6 +25,9 @@ RUN rm -fr ~/.cache/matplotlib
 RUN apt install -y build-essential
 RUN apt install -y astrometry.net
 
+# Ignore warnings about installing as packages with pip as root.
+ENV PIP_ROOT_USER_ACTION=ignore
+
 RUN pip3 install -U pip setuptools wheel
 RUN cd lvmguider && pip3 install .
 RUN rm -Rf lvmguider
