@@ -32,4 +32,4 @@ RUN rm -Rf lvmguider
 # Set umask so that new files inherit the parent folder permissions.
 RUN echo "umask 0002" >> /etc/bash.bashrc
 
-ENTRYPOINT lvmguider actor start --debug
+ENTRYPOINT pip3 install -U astropy-iers-data; lvmguider actor start --debug

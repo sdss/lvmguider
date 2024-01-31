@@ -29,7 +29,7 @@ from lvmguider.types import ARRAY_1D_F32, ARRAY_2D_F32
 
 
 # Prevent astropy from downloading data.
-conf.auto_download = False
+conf.auto_max_age = None
 conf.iers_degraded_accuracy = "ignore"
 
 

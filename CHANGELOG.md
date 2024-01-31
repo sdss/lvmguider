@@ -1,5 +1,12 @@
 # Changelog
 
+## Next version
+
+### ✨ Improved
+
+* Upgraded `astropy` to 6.0.0. The docker image now tries (but continues if it fails) to update the `astropy-iers-data` package before running the actor and internally `lvmguider` should never try to download IERS data over the internet.
+
+
 ## 0.4.1 - November 5, 2023
 
 ### 🔧 Fixed
