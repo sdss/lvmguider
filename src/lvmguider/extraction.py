@@ -533,7 +533,7 @@ def extract_sources(filename: str | pathlib.Path, subtract_dark: bool = True):
 
     xy = sources.loc[:, ["x", "y"]].to_numpy()
     ff_locs, _ = ag_to_full_frame(f"{telescope}-{camname[0]}", xy)
-    sources.loc[:, ["x_ff", "z_ff"]] = ff_locs
+    sources.loc[:, ["x_ff", "z_ff"]] = numpy.array(ff_locs, dtype="float32")
 
     hdul.close()
 
