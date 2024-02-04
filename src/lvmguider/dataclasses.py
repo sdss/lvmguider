@@ -139,7 +139,10 @@ class CameraSolution(BaseSolution):
         sources: pandas.DataFrame | None = None
         if proc["SOURCESF"]:
             dirname = file.parent
-            sources = pandas.read_parquet(dirname / proc["SOURCESF"])
+            sources = pandas.read_parquet(
+                dirname / proc["SOURCESF"],
+                dtype_backend="pyarrow",
+            )
 
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", category=FITSFixedWarning)

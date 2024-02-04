@@ -484,7 +484,7 @@ def create_summary_file(
 
     dfs: list[pandas.DataFrame] = []
     for ii, file in enumerate(files):
-        df = pandas.read_parquet(file)
+        df = pandas.read_parquet(file, dtype_backend="pyarrow")
 
         if spec_framenos is not None and len(spec_framenos) > 0:
             df["spec_frameno"] = spec_framenos[ii]
@@ -1353,12 +1353,12 @@ def reprocess_legacy_guider_frame(
         found: bool = False
         if (root / filex).with_suffix(".parquet").exists():
             sources_file = (root / filex).with_suffix(".parquet")
-            sources.append(pandas.read_parquet(sources_file))
+            sources.append(pandas.read_parquet(sources_file, dtype_backend="pyarrow"))
             found = True
 
         elif (root / "reprocessed" / filex).with_suffix(".parquet").exists():
             sources_file = (root / "reprocessed" / filex).with_suffix(".parquet")
-            sources.append(pandas.read_parquet(sources_file))
+            sources.append(pandas.read_parquet(sources_file, dtype_backend="pyarrow"))
             found = True
 
         if found:
@@ -1610,7 +1610,7 @@ def coadd_to_database(
     if ag_frames_file.exists():
         log.debug("Loading AG frames to database.")
         try:
-            ag_frames = pandas.read_parquet(ag_frames_file)
+            ag_frames = pandas.read_parquet(ag_frames_file, dtype_backend="pyarrow")
             if exposure_no:
                 ag_frames["exposure_no"] = exposure_no
             if len(ag_frames) > 0:
@@ -1635,7 +1635,10 @@ def coadd_to_database(
     if guider_frames_file.exists():
         log.debug("Loading guider frames to database.")
         try:
-            guider_frames = pandas.read_parquet(guider_frames_file)
+            guider_frames = pandas.read_parquet(
+                guider_frames_file,
+                dtype_backend="pyarrow",
+            )
             if exposure_no:
                 guider_frames["exposure_no"] = exposure_no
             if len(guider_frames) > 0:

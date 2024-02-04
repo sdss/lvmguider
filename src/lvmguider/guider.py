@@ -395,7 +395,7 @@ class Guider:
                 telescope=self.telescope,
             )
 
-        sources = pandas.read_parquet(sources_file)
+        sources = pandas.read_parquet(sources_file, dtype_backend="pyarrow")
         matched_sources = sources.copy()
 
         ra: float = hdul["RAW"].header["RA"]
