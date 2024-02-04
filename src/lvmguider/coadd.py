@@ -258,6 +258,7 @@ def coadd_from_spec_frame(
     """
 
     outpath = outpath or config["coadds"]["paths"]["coadd_spec_path"]
+    assert isinstance(outpath, str)
 
     file = pathlib.Path(file)
     if not file.exists():
