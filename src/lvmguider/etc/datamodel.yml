@@ -5,6 +5,9 @@ PROC:
   DIRNAME: [null, 'Original file directory']
   GUIDERV: [null, 'Version of lvmguider']
   SOURCESF: [null, 'Sources file']
+  FWHM: [null, '[arcsec] FWHM from sources']
+  RA: [null, '[deg] RA of central pixel from WCS']
+  DEC: [null, '[deg] Dec of central pixel from WCS']
   PA: [null, '[deg] Position angle from WCS']
   ZEROPT: [null, '[mag] Zero point of the LVM magnitude']
   ORIGFILE: [null, 'Original file name']
@@ -124,6 +127,8 @@ FRAMEDATA:
   kmirror_drot: 'f4[pyarrow]'
   focusdt: 'f4[pyarrow]'
   fwhm: 'f4[pyarrow]'
+  ra: 'f8[pyarrow]'
+  dec: 'f8[pyarrow]'
   pa: 'f4[pyarrow]'
   zero_point: 'f4[pyarrow]'
   stacked: 'int8[pyarrow]'

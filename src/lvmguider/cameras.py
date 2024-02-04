@@ -170,6 +170,8 @@ class Cameras:
             all_sources = pandas.concat(sources)
             valid = all_sources.loc[all_sources.valid == 1]
             fwhm = numpy.percentile(valid["fwhm"], 25) if len(valid) > 0 else None
+            for fn in filenames:
+                headers[fn]["FWHM"] = fwhm
         else:
             valid = []
             fwhm = None
