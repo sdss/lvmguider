@@ -149,7 +149,9 @@ class Cameras:
             header["GUIDERV"] = __version__
             header["WCSMODE"] = "none"
 
-            header.update(header_keywords)
+            for key, value in header_keywords.items():
+                header[key] = value
+
             headers[fn] = header
 
         sources: list[pandas.DataFrame] = []
