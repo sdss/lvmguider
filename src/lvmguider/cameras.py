@@ -13,7 +13,7 @@ import os
 import pathlib
 import re
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy
 import pandas
@@ -63,6 +63,7 @@ class Cameras:
         flavour: str = "object",
         extract_sources: bool = False,
         nretries: int = 3,
+        header_keywords: dict[str, Any] = {},
     ) -> tuple[list[pathlib.Path], int, list[pandas.DataFrame] | None]:
         """Exposes the cameras and returns the filenames."""
 
@@ -148,6 +149,7 @@ class Cameras:
             header["GUIDERV"] = __version__
             header["WCSMODE"] = "none"
 
+            header.update(header_keywords)
             headers[fn] = header
 
         sources: list[pandas.DataFrame] = []

@@ -144,6 +144,7 @@ class Focuser:
                 command,
                 exposure_time=exposure_time,
                 extract_sources=True,
+                header_keywords={"ISFSWEEP": True},
             )
 
             files += step_files
