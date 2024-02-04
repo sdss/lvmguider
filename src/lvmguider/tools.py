@@ -859,6 +859,7 @@ def dataframe_to_database(
     df: pandas.DataFrame,
     table_name: str,
     delete_columns: str | list[str] | None = None,
+    raise_on_error: bool = True,
     **connection_params,
 ):
     """Loads a data frame to a database table.
@@ -876,6 +877,9 @@ def dataframe_to_database(
         If set, a column or list of columns in the data frame for removing existing
         entries in the database table. For each unique value in the column, entries
         with that value on the database are removed before inserting.
+    raise_on_error
+        If `True`, raises an error if the connection to the database fails or the
+        ingestion produces an error. If `False`, logs the error and returns.
     connection_params
         Connection parameters to pass to `.get_db_connection`.
 
@@ -887,7 +891,11 @@ def dataframe_to_database(
     try:
         conn.connect()
     except OperationalError as err:
-        raise RuntimeError(f"Cannot connect to database: {err}")
+        if raise_on_error:
+            raise RuntimeError(f"Cannot connect to database: {err}")
+        else:
+            log.error(f"Cannot connect to database: {err}")
+            return
 
     records = df.to_dict(orient="records")
 
@@ -901,17 +909,25 @@ def dataframe_to_database(
     table = peewee.Table(table_name, schema=schema, columns=list(df.columns))
     table.bind(conn)
 
-    if delete_columns is not None:
-        if isinstance(delete_columns, str):
-            delete_columns = [delete_columns]
+    try:
+        if delete_columns is not None:
+            if isinstance(delete_columns, str):
+                delete_columns = [delete_columns]
 
-        uniq = list(zip(*[df[col].astype("object").unique() for col in delete_columns]))
-        for values in uniq:
-            query = table.delete()
-            for icol, value in enumerate(values):
-                query = query.where(getattr(table, delete_columns[icol]) == value)
-            query.execute()
+            uniq = zip(*[df[col].astype("object").unique() for col in delete_columns])
+            for values in list(uniq):
+                query = table.delete()
+                for icol, value in enumerate(values):
+                    query = query.where(getattr(table, delete_columns[icol]) == value)
+                query.execute()
 
-    table.insert(records).execute()
+        table.insert(records).execute()
 
-    conn.close()
+        conn.close()
+
+    except Exception as err:
+        if not raise_on_error:
+            log.error(f"Error inserting data into database: {err}")
+            return
+
+        raise

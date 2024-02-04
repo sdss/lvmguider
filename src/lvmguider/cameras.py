@@ -220,6 +220,7 @@ class Cameras:
                 pandas.concat(camera_frame_dfs, axis=0, ignore_index=True),
                 config["database"]["agcam_frame_table"],
                 delete_columns=["frameno", "telescope", "camera"],
+                raise_on_error=False,
             )
 
         return (list(filenames), next_seqno, list(sources) if extract_sources else None)
