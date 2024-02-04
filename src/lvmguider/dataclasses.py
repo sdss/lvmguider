@@ -73,7 +73,8 @@ class BaseSolution:
         """Returns the median zero point."""
 
         if self.sources is not None:
-            return float(self.sources.zp.dropna().median())
+            if len(data := self.sources.zp.dropna()) > 0:
+                return float(data.median())
 
         return numpy.nan
 
@@ -409,8 +410,8 @@ class FrameData:
             dec=numpy.float64(pointing[1]),
             pa=numpy.float32(self.solution.pa),
             zero_point=numpy.float32(self.solution.zero_point),
-            stacked=int(self.stacked),
-            solved=int(self.solution.solved),
+            stacked=bool(self.stacked),
+            solved=bool(self.solution.solved),
             wcs_mode=self.solution.wcs_mode,
         )
         df.loc[0, list(new_row)] = list(new_row.values())
@@ -549,7 +550,7 @@ class GlobalSolution(BaseSolution, CoAddWarningsMixIn):
                 fwhm=numpy.float32(gs.fwhm),
                 pa=numpy.float32(pa),
                 zero_point=numpy.float32(gs.zero_point),
-                solved=int(gs.solved),
+                solved=bool(gs.solved),
                 n_cameras_solved=int(gs.n_cameras_solved),
                 guide_mode=gs.guide_mode,
                 x_ff_pixel=numpy.float32(gs.guide_pixel[0]),
@@ -564,7 +565,7 @@ class GlobalSolution(BaseSolution, CoAddWarningsMixIn):
                 pa_off=numpy.float32(gs.pa_off),
                 axis0_off=numpy.float32(gs.axis0_off),
                 axis1_off=numpy.float32(gs.axis1_off),
-                applied=int(gs.correction_applied),
+                applied=bool(gs.correction_applied),
                 ax0_applied=numpy.float32(gs.correction[0]),
                 ax1_applied=numpy.float32(gs.correction[1]),
                 rot_applied=numpy.float32(gs.correction[2]),

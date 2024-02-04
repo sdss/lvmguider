@@ -132,8 +132,8 @@ FRAMEDATA:
   dec: 'f8[pyarrow]'
   pa: 'f4[pyarrow]'
   zero_point: 'f4[pyarrow]'
-  stacked: 'int8[pyarrow]'
-  solved: 'int8[pyarrow]'
+  stacked: 'bool[pyarrow]'
+  solved: 'bool[pyarrow]'
   wcs_mode: 'string[pyarrow]'
 
 GUIDERDATA_FRAME:
@@ -141,7 +141,7 @@ GUIDERDATA_FRAME:
   telescope: 'string[pyarrow]'
   mjd: 'int32[pyarrow]'
   date_obs: 'string[pyarrow]'
-  solved: 'int8[pyarrow]'
+  solved: 'bool[pyarrow]'
   n_cameras_solved: 'int8[pyarrow]'
   guide_mode: 'string[pyarrow]'
   fwhm: 'f4[pyarrow]'
@@ -159,7 +159,7 @@ GUIDERDATA_FRAME:
   pa_off: 'f4[pyarrow]'
   axis0_off: 'f4[pyarrow]'
   axis1_off: 'f4[pyarrow]'
-  applied: 'int8[pyarrow]'
+  applied: 'bool[pyarrow]'
   ax0_applied: 'f4[pyarrow]'
   ax1_applied: 'f4[pyarrow]'
   rot_applied: 'f4[pyarrow]'

@@ -21,10 +21,12 @@ from astropy.io import fits
 
 from sdsstools.time import get_sjd
 
-from lvmguider import __version__
+from lvmguider import __version__, config
+from lvmguider.dataclasses import CameraSolution
 from lvmguider.extraction import extract_sources as extract_sources_func
 from lvmguider.maskbits import GuiderStatus
 from lvmguider.tools import (
+    dataframe_to_database,
     elapsed_time,
     header_from_model,
     run_in_executor,
@@ -197,12 +199,27 @@ class Cameras:
         if not command.actor.status & GuiderStatus.NON_IDLE:
             command.actor.status |= GuiderStatus.IDLE
 
+        # Update FITS file PROC extension.
         with elapsed_time(command, "updating lvm.agcam file"):
             await asyncio.gather(
                 *[
                     run_in_executor(update_fits, fn, "PROC", header=headers[fn])
                     for fn in filenames
                 ]
+            )
+
+        # Store data to DB.
+        with elapsed_time(command, "storing lvm.agcam to DB"):
+            camera_frame_dfs = []
+            for fn in filenames:
+                cs = CameraSolution.open(fn)
+                camera_frame_dfs.append(cs.to_framedata().to_dataframe())
+
+            await run_in_executor(
+                dataframe_to_database,
+                pandas.concat(camera_frame_dfs, axis=0, ignore_index=True),
+                config["database"]["agcam_frame_table"],
+                delete_columns=["frameno", "telescope", "camera"],
             )
 
         return (list(filenames), next_seqno, list(sources) if extract_sources else None)
