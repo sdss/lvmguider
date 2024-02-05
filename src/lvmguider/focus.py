@@ -75,7 +75,7 @@ class Focuser:
         step_size: float = 0.5,
         steps: int = 7,
         exposure_time: float = 5.0,
-        fit_method="parabola",
+        fit_method="spline",
         plot: bool = True,
         plot_dir: str = "qa/focus",
         require_best_to_be_in_range: bool = True,
@@ -245,7 +245,7 @@ class Focuser:
         if cmd.replies.get("AtLimit") is True:
             raise RuntimeError("Hit a limit while focusing.")
 
-    def fit_focus(self, sources: pandas.DataFrame, fit_method: str = "parabola"):
+    def fit_focus(self, sources: pandas.DataFrame, fit_method: str = "spline"):
         """Fits the data and returns the best focus and measured FWHM."""
 
         sources_valid = sources.loc[sources.valid == 1]
