@@ -45,7 +45,7 @@ def fit_parabola(x_arr: list[float], y_arr: list[float], y_err: list[float]):
 def fit_spline(x: numpy.ndarray, y: numpy.ndarray, w: numpy.ndarray | None = None):
     """Fits a spline to data."""
 
-    spl = UnivariateSpline(x, y)
+    spl = UnivariateSpline(x, y, w=w)
 
     corr_matrix = numpy.corrcoef(y, spl(x))
     R2 = corr_matrix[0, 1] ** 2
