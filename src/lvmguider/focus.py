@@ -78,6 +78,7 @@ class Focuser:
         fit_method="parabola",
         plot: bool = True,
         plot_dir: str = "qa/focus",
+        require_best_to_be_in_range: bool = True,
     ) -> tuple[pandas.DataFrame, dict]:
         """Performs the focus routine.
 
@@ -106,6 +107,10 @@ class Focuser:
             ``{plot_dir}/focus_{telescope}_{frame0}_{frame1}.pdf`` where
             ``{frame0}`` and ``{frame1}`` are the first and last frame number
             of the sweep sequence.
+        require_best_to_be_in_range
+            If `True`, the best focus must be in the range of the focus sweep. If
+            that is not the case the focus sweep will be repeaded with the same
+            initial guess but twice the step size.
 
         """
 
@@ -179,11 +184,24 @@ class Focuser:
             raise ValueError("Insufficient number of focus points.")
 
         sources = pandas.concat(source_list)
+        fit_data = self.fit_focus(sources, fit_method=fit_method)
 
-        fit_data = self.fit_focus(
-            sources,
-            fit_method=fit_method,
-        )
+        focus = fit_data["xmin"]
+        if focus < numpy.min(focus_grid) or focus > numpy.max(focus_grid):
+            command.warning("Best focus is outside the range of the focus sweep.")
+            if require_best_to_be_in_range:
+                command.warning("Repeating the focus sweep with double step size.")
+                return await self.focus(
+                    command,
+                    initial_guess=initial_guess,
+                    step_size=step_size * 2,
+                    steps=steps,
+                    exposure_time=exposure_time,
+                    fit_method=fit_method,
+                    plot=plot,
+                    plot_dir=plot_dir,
+                    require_best_to_be_in_range=False,
+                )
 
         command.info(
             best_focus=dict(
