@@ -134,7 +134,10 @@ async def adjust_focus(
                 relative = False
         else:
             delta_t = c_temp - command.actor._reference_focus.temperature
-            command.debug(f"Setting focus based on delta temperare: {delta_t:.2f}")
+            command.debug(
+                f"Reference temperature: {c_temp:.2f} C. "
+                f"Delta temperature: {delta_t:.2f} C."
+            )
 
             focus_model_a: float = command.actor.config["focus.model.a"]
             focus_value = delta_t * focus_model_a
@@ -152,4 +155,4 @@ async def adjust_focus(
             time(),
         )
 
-    return command.finish(f"Focus adjusted to {focus_value:.2f}.")
+    return command.finish(f"Focus adjusted to {focus_value:.2f} DT.")
