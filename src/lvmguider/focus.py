@@ -217,7 +217,7 @@ class Focuser:
         current_temperature = await self.get_bench_temperature(command)
         command.actor._reference_focus = ReferenceFocus(
             focus=fit_data["xmin"],
-            temperature=current_temperature,
+            fwhm=fit_data["ymin"],
             timestamp=time(),
         )
 

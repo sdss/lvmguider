@@ -145,6 +145,11 @@ async def adjust_focus(
 
     await focuser.goto_focus_position(command, focus_value)
     if reference:
-        command.actor._reference_focus = ReferenceFocus(focus_value, c_temp, time())
+        command.actor._reference_focus = ReferenceFocus(
+            focus_value,
+            -999.0,
+            c_temp,
+            time(),
+        )
 
     return command.finish(f"Focus adjusted to {focus:.2f}.")

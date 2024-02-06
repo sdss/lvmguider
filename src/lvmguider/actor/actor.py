@@ -30,11 +30,15 @@ class ReferenceFocus(NamedTuple):
     """A named tuple to store the reference focus."""
 
     focus: float
+    fwhm: float
     temperature: float
     timestamp: float
 
     def __str__(self):
-        return f"focus={self.focus:.2f}, temperature={self.temperature:.2f}"
+        return (
+            f"focus={self.focus:.2f}, fwhm={self.fwhm: .2f}, "
+            "temperature={self.temperature:.2f}"
+        )
 
 
 class LVMGuiderActor(AMQPActor):
