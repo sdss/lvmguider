@@ -188,7 +188,7 @@ class Cameras:
                 "filenames": [str(fn) for fn in filenames],
                 "flavour": flavour,
                 "n_sources": len(valid),
-                "focus_position": round(focus_position, 1),
+                "focus_position": round(focus_position, 2),
                 "fwhm": numpy.round(float(fwhm), 3) if fwhm else -999.0,
             }
         )

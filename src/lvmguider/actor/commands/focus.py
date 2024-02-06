@@ -80,9 +80,6 @@ async def focus(
 
     focuser = Focuser(command.actor.telescope)
 
-    if guess is None:
-        guess = await focuser.get_from_temperature(command)
-
     try:
         await focuser.focus(
             command,
@@ -99,7 +96,7 @@ async def focus(
 
 
 @lvmguider_parser.command("adjust-focus")
-@click.argument("FOCUS_VALUE", type=float)
+@click.argument("FOCUS_VALUE", type=float, required=False)
 @click.option(
     "--relative",
     is_flag=True,
@@ -112,7 +109,7 @@ async def focus(
 )
 async def adjust_focus(
     command: GuiderCommand,
-    focus_value: float,
+    focus_value: float | None = None,
     relative: bool = False,
     reference: bool = False,
 ):
@@ -137,7 +134,10 @@ async def adjust_focus(
                 relative = False
         else:
             delta_t = c_temp - command.actor._reference_focus.temperature
-            focus_value = delta_t * command.actor.config["focus.model.a"]
+            command.debug(f"Setting focus based on delta temperare: {delta_t:.2f}")
+
+            focus_model_a: float = command.actor.config["focus.model.a"]
+            focus_value = delta_t * focus_model_a
             relative = True  # Always relative to the reference focus.
 
     if relative:
@@ -152,4 +152,4 @@ async def adjust_focus(
             time(),
         )
 
-    return command.finish(f"Focus adjusted to {focus:.2f}.")
+    return command.finish(f"Focus adjusted to {focus_value:.2f}.")

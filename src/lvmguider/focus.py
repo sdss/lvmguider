@@ -124,8 +124,8 @@ class Focuser:
             steps += 1
 
         if initial_guess is None:
-            initial_guess = await self.get_focus_position(command)
-            command.debug(f"Using focuser position: {initial_guess} DT")
+            initial_guess = await self.get_from_temperature(command)
+            command.debug(f"Using initial focus position: {initial_guess:.2f} DT")
 
         assert initial_guess is not None
 
@@ -205,19 +205,22 @@ class Focuser:
 
         await self.goto_focus_position(command, numpy.round(fit_data["xmin"], 2))
 
+        bench_temperature = await self.get_bench_temperature(command)
         command.info(
             best_focus=dict(
                 focus=numpy.round(fit_data["xmin"], 2),
                 fwhm=numpy.round(fit_data["ymin"], 2),
                 r2=numpy.round(fit_data["R2"], 3),
+                initial_guess=numpy.round(initial_guess, 2),
+                bench_temperature=numpy.round(bench_temperature, 2),
                 fit_method=fit_method,
             )
         )
 
-        current_temperature = await self.get_bench_temperature(command)
         command.actor._reference_focus = ReferenceFocus(
             focus=fit_data["xmin"],
             fwhm=fit_data["ymin"],
+            temperature=bench_temperature,
             timestamp=time(),
         )
 
@@ -269,7 +272,7 @@ class Focuser:
         focus_model = command.actor.config["focus.model"]
         new_focus = focus_model["a"] * temperature + focus_model["b"]
 
-        return new_focus + offset
+        return round(new_focus + offset, 2)
 
     async def get_bench_temperature(self, command: GuiderCommand) -> float:
         """Returns the current bench temperature."""
@@ -279,7 +282,7 @@ class Focuser:
         if telem_command.status.did_fail:
             raise RuntimeError("Failed retrieving temperature from telemetry.")
 
-        return telem_command.replies.get("sensor1")["temperature"]
+        return round(telem_command.replies.get("sensor1")["temperature"], 2)
 
     async def get_focus_position(self, command: GuiderCommand) -> float:
         """Returns the current focus position."""
@@ -288,17 +291,17 @@ class Focuser:
         if cmd.status.did_fail:
             raise RuntimeError("Failed retrieving position from focuser.")
 
-        return cmd.replies.get("Position")
+        return round(cmd.replies.get("Position"), 2)
 
     async def goto_focus_position(self, command: GuiderCommand, focus_position: float):
         """Moves the focuser to a position."""
 
         cmd = await command.send_command(
             self.foc_actor,
-            f"moveAbsolute {focus_position} DT",
+            f"moveAbsolute {round(focus_position, 3)} DT",
         )
         if cmd.status.did_fail:
-            raise RuntimeError(f"Failed reaching focus {focus_position:.2f} DT.")
+            raise RuntimeError(f"Failed reaching focus {focus_position:.3f} DT.")
         if cmd.replies.get("AtLimit") is True:
             raise RuntimeError("Hit a limit while focusing.")
 
