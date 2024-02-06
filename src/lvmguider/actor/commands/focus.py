@@ -134,14 +134,15 @@ async def adjust_focus(
                 relative = False
         else:
             delta_t = c_temp - command.actor._reference_focus.temperature
+            focus_model_a: float = command.actor.config["focus.model.a"]
+            focus_value = delta_t * focus_model_a
+            relative = True  # Always relative to the reference focus.
+
             command.debug(
                 f"Reference temperature: {c_temp:.2f} C. "
                 f"Delta temperature: {delta_t:.2f} C."
             )
-
-            focus_model_a: float = command.actor.config["focus.model.a"]
-            focus_value = delta_t * focus_model_a
-            relative = True  # Always relative to the reference focus.
+            command.debug(f"Focus will be adjusted by {focus_value:.2f} DT.")
 
     if relative:
         focus_value = c_focus + focus_value
@@ -155,4 +156,4 @@ async def adjust_focus(
             time(),
         )
 
-    return command.finish(f"Focus adjusted to {focus_value:.2f} DT.")
+    return command.finish(f"New focuser position: {focus_value:.2f} DT.")
