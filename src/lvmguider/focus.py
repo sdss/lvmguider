@@ -274,7 +274,7 @@ class Focuser:
     async def get_bench_temperature(self, command: GuiderCommand) -> float:
         """Returns the current bench temperature."""
 
-        telem_actor = f"lvm.{self.telescope}.telem"
+        telem_actor = f"lvm.{self.telescope}.telemetry"
         telem_command = await command.send_command(telem_actor, "status")
         if telem_command.status.did_fail:
             raise RuntimeError("Failed retrieving temperature from telemetry.")
