@@ -175,6 +175,26 @@ class CameraSolution(BaseSolution):
             hdul=hdul,
         )
 
+    @property
+    def is_focus_sweep(self):
+        """Returns whether the frame is part of a focus sweep."""
+
+        proc_ext = (
+            self.hdul["PROC"]
+            if self.hdul
+            and "PROC" in self.hdul
+            and "ISFSWEEP" in self.hdul["PROC"].header
+            else None
+        )
+        if proc_ext is None:
+            log.warning(
+                f"Cannot determine focus sweep status for {self.path!s}. "
+                "Returning False."
+            )
+            return False
+
+        return proc_ext.header["ISFSWEEP"]
+
     def to_framedata(self):
         """Returns a `.FrameData` instance."""
 
@@ -413,6 +433,7 @@ class FrameData:
             stacked=bool(self.stacked),
             solved=bool(self.solution.solved),
             wcs_mode=self.solution.wcs_mode,
+            is_focus_sweep=self.solution.is_focus_sweep,
         )
         df.loc[0, list(new_row)] = list(new_row.values())
 

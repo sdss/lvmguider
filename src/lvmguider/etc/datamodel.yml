@@ -135,6 +135,7 @@ FRAMEDATA:
   stacked: 'bool[pyarrow]'
   solved: 'bool[pyarrow]'
   wcs_mode: 'string[pyarrow]'
+  is_focus_sweep: 'bool[pyarrow]'
 
 GUIDERDATA_FRAME:
   frameno: 'int16[pyarrow]'
