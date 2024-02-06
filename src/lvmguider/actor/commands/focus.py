@@ -125,24 +125,32 @@ async def adjust_focus(
     c_temp = await focuser.get_bench_temperature(command)
     c_focus = await focuser.get_focus_position(command)
 
+    ref_focus = command.actor._reference_focus
+
     if focus_value is None:
-        if command.actor._reference_focus is None:
+        if ref_focus is None:
             focus_value = await focuser.get_from_temperature(command, c_temp)
             reference = True
             if relative:
                 command.warning("No reference focus found. Using bench temperature.")
                 relative = False
         else:
-            delta_t = c_temp - command.actor._reference_focus.temperature
+            delta_t = c_temp - ref_focus.temperature
             focus_model_a: float = command.actor.config["focus.model.a"]
-            focus_value = delta_t * focus_model_a
-            relative = True  # Always relative to the reference focus.
+            focus_value = ref_focus.focus + delta_t * focus_model_a
+            relative = False  # We always calculate an absolute focus here.
 
             command.debug(
                 f"Reference temperature: {c_temp:.2f} C. "
                 f"Delta temperature: {delta_t:.2f} C."
             )
-            command.debug(f"Focus will be adjusted by {focus_value:.2f} DT.")
+
+            delta_focus = round(focus_value - c_focus, 2)
+            if abs(delta_focus) > 0.01:
+                command.debug(f"Focus will be adjusted by {delta_focus:.2f} DT.")
+            else:
+                command.debug(f"Delta focus {delta_focus:.2f} DT is too small.")
+                return command.finish("Focus was not adjusted.")
 
     if relative:
         focus_value = c_focus + focus_value
