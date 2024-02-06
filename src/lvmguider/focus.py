@@ -203,12 +203,22 @@ class Focuser:
                     require_best_to_be_in_range=False,
                 )
 
+        await self.goto_focus_position(command, numpy.round(fit_data["xmin"], 2))
+
         command.info(
             best_focus=dict(
                 focus=numpy.round(fit_data["xmin"], 2),
                 fwhm=numpy.round(fit_data["ymin"], 2),
                 r2=numpy.round(fit_data["R2"], 3),
+                fit_method=fit_method,
             )
+        )
+
+        current_temperature = await self.get_bench_temperature(command)
+        command.actor._reference_focus = ReferenceFocus(
+            focus=fit_data["xmin"],
+            temperature=current_temperature,
+            timestamp=time(),
         )
 
         if plot:
@@ -228,15 +238,6 @@ class Focuser:
                     fit_params=fit_data,
                 )
             )
-
-        await self.goto_focus_position(command, numpy.round(fit_data["xmin"], 2))
-
-        current_temperature = await self.get_bench_temperature(command)
-        command.actor._reference_focus = ReferenceFocus(
-            focus=fit_data["xmin"],
-            temperature=current_temperature,
-            timestamp=time(),
-        )
 
         return sources, fit_data
 
