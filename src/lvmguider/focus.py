@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import pathlib
+from time import time
 
 from typing import TYPE_CHECKING
 
@@ -22,6 +23,7 @@ from scipy.interpolate import UnivariateSpline
 
 from sdsstools.logger import get_logger
 
+from lvmguider.actor.actor import ReferenceFocus
 from lvmguider.tools import run_in_executor
 
 
@@ -72,7 +74,7 @@ class Focuser:
         self,
         command: GuiderCommand,
         initial_guess: float | None = None,
-        step_size: float = 0.5,
+        step_size: float = 0.2,
         steps: int = 7,
         exposure_time: float = 5.0,
         fit_method="spline",
@@ -87,7 +89,8 @@ class Focuser:
         command
             The actor command to use to talk to other actors.
         initial_guess
-            An initial guess of the focus position, in DT.
+            An initial guess of the focus position, in DT. If not provided,
+            uses the current focuser position.
         step_size
             The resolution of the focus sweep in DT steps.
         steps
@@ -121,10 +124,7 @@ class Focuser:
             steps += 1
 
         if initial_guess is None:
-            cmd = await command.send_command(self.foc_actor, "getPosition")
-            if cmd.status.did_fail:
-                raise RuntimeError("Failed retrieving position from focuser.")
-            initial_guess = cmd.replies.get("Position")
+            initial_guess = await self.get_focus_position(command)
             command.debug(f"Using focuser position: {initial_guess} DT")
 
         assert initial_guess is not None
@@ -231,7 +231,63 @@ class Focuser:
 
         await self.goto_focus_position(command, numpy.round(fit_data["xmin"], 2))
 
+        current_temperature = await self.get_bench_temperature(command)
+        command.actor._reference_focus = ReferenceFocus(
+            focus=fit_data["xmin"],
+            temperature=current_temperature,
+            timestamp=time(),
+        )
+
         return sources, fit_data
+
+    async def get_from_temperature(
+        self,
+        command: GuiderCommand,
+        temperature: float | None = None,
+        offset: float = 0.0,
+    ) -> float:
+        """Returns the estimated focus position for a given temperature.
+
+        Parameters
+        ----------
+        command
+            The actor command to use to talk to other actors.
+        temperature
+            The temperature for which to calculate the focus position. If :obj:`None`,
+            the current bench internal temperature will be used.
+        offset
+            An additive offset to the resulting focus position.
+
+        """
+
+        if temperature is None:
+            temperature = await self.get_bench_temperature(command)
+
+        assert temperature is not None
+
+        focus_model = command.actor.config["focus.model"]
+        new_focus = focus_model["a"] * temperature + focus_model["b"]
+
+        return new_focus + offset
+
+    async def get_bench_temperature(self, command: GuiderCommand) -> float:
+        """Returns the current bench temperature."""
+
+        telem_actor = f"lvm.{self.telescope}.telem"
+        telem_command = await command.send_command(telem_actor, "status")
+        if telem_command.status.did_fail:
+            raise RuntimeError("Failed retrieving temperature from telemetry.")
+
+        return telem_command.replies.get("sensor1")["temperature"]
+
+    async def get_focus_position(self, command: GuiderCommand) -> float:
+        """Returns the current focus position."""
+
+        cmd = await command.send_command(self.foc_actor, "getPosition")
+        if cmd.status.did_fail:
+            raise RuntimeError("Failed retrieving position from focuser.")
+
+        return cmd.replies.get("Position")
 
     async def goto_focus_position(self, command: GuiderCommand, focus_position: float):
         """Moves the focuser to a position."""
