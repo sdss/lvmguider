@@ -149,8 +149,10 @@ async def adjust_focus(
             if abs(delta_focus) > 0.01:
                 command.debug(f"Focus will be adjusted by {delta_focus:.2f} DT.")
             else:
-                command.debug(f"Delta focus {delta_focus:.2f} DT is too small.")
-                return command.finish("Focus was not adjusted.")
+                return command.finish(
+                    f"Delta focus {delta_focus:.2f} DT is too small. "
+                    "Focus was not adjusted."
+                )
 
     if relative:
         focus_value = c_focus + focus_value
