@@ -53,13 +53,13 @@ class LVMGuiderActor(AMQPActor):
 
         # Update package config.
         config._BASE = dict(config)
-        config.update(aconfig)
+        config.load(aconfig)
 
         name = aconfig["actor"]["name"]
         self.telescope: str = aconfig.get("telescope", name.split(".")[1])
 
         # Update the config that will be set in the actor instance.
-        kwargs["config"] = dict(config)
+        kwargs["config"] = config
 
         super().__init__(*args, log=log, version=__version__, **kwargs)
 
