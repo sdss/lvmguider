@@ -193,7 +193,7 @@ class CameraSolution(BaseSolution):
             )
             return False
 
-        return proc_ext.header["ISFSWEEP"]
+        return proc_ext.header["ISFSWEEP"] is True
 
     def to_framedata(self):
         """Returns a `.FrameData` instance."""

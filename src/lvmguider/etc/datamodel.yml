@@ -13,7 +13,7 @@ PROC:
   ORIGFILE: [null, 'Original file name']
   REPROC: [false, 'Has this file been reprocessed?']
   REFFILE: [null, 'Reference file for astrometric solution']
-  ISFSWEEP: [null, 'Is the exposure part of a focus sweep?']
+  ISFSWEEP: [false, 'Is the exposure part of a focus sweep?']
   SOLVED: [false, 'Was an astrometric solution found?']
   WCSMODE: ['none', 'Method for fitting the astrometric solution']
 
