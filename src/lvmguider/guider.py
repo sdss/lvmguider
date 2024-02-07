@@ -664,9 +664,11 @@ class Guider:
                 for card in cards:
                     wcs_cards[card.keyword] = (card.value, card.comment)
 
+            ra = solution.pointing[0]
+            dec = solution.pointing[1]
             proc_update = {
-                "RA": solution.pointing[0],
-                "DEC": solution.pointing[1],
+                "RA": ra if not numpy.isnan(ra) else None,
+                "DEC": dec if not numpy.isnan(dec) else None,
                 "PA": pa if not numpy.isnan(pa) else None,
                 "ZEROPT": zeropt if not numpy.isnan(zeropt) else None,
                 "REFFILE": reffile,
