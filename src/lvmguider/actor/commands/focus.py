@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from time import time
 
 from typing import TYPE_CHECKING
@@ -167,3 +168,36 @@ async def adjust_focus(
         )
 
     return command.finish(f"New focuser position: {focus_value:.2f} DT.")
+
+
+@lvmguider_parser.command(name="focus-info")
+async def focus_info(command: GuiderCommand):
+    """Returns the current and reference focus position."""
+
+    focuser = Focuser(command.actor.telescope)
+
+    current_temperature = await focuser.get_bench_temperature(command)
+    current_focus = await focuser.get_focus_position(command)
+
+    ref = command.actor._reference_focus
+    timestamp = datetime.fromtimestamp(ref.timestamp).isoformat() if ref else None
+
+    command.info(
+        reference_focus={
+            "focus": ref.focus if ref else None,
+            "fwhm": ref.fwhm if ref else None,
+            "temperature": ref.temperature if ref else None,
+            "timestamp": timestamp,
+        }
+    )
+
+    command.info(
+        current_focus={
+            "focus": current_focus,
+            "temperature": current_temperature,
+            "delta_temperature": current_temperature - ref.temperature if ref else None,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+    )
+
+    return command.finish()
