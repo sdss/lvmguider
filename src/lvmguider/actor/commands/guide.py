@@ -65,6 +65,11 @@ def is_stopping(command: GuiderCommand):
     is_flag=True,
     help="Do one single iteration and exit.",
 )
+@click.option(
+    "--sleep",
+    type=float,
+    help="Sleep this number of seconds before taking another exposure.",
+)
 async def guide(
     command: GuiderCommand,
     ra: float,
@@ -75,6 +80,7 @@ async def guide(
     guide_tolerance: float | None = None,
     apply_corrections: bool = True,
     one: bool = False,
+    sleep: float | None = None,
 ):
     """Starts the guide loop."""
 
@@ -125,6 +131,9 @@ async def guide(
 
         if one:
             break
+
+        if sleep:
+            await asyncio.sleep(sleep)
 
     actor.status = GuiderStatus.IDLE
     command.actor.guider = None
