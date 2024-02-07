@@ -1,5 +1,19 @@
 # Changelog
 
+## Next version
+
+### 🚀 New
+
+* Added `RA`, `DEC`, `FWHM`, `ISFSWEEP` to the `PROC` headers, `FrameData`, and `lvmops.agcam_frame`. All AG frames are now loaded to the database, not only those associated with an exposure. ([#16](https://github.com/sdss/lvmguider/pr/16))
+* `Focuser` now uses a temperature model to estimate the initial best focus.
+* Added `adjust-focus` and `focus-info` commands. If a focus sweep has been previously executed, `adjust-focus` can be used to adjust the focuser position based on the delta temperature between the bench temperature during the focus sweep and the current temperature.
+
+### ✨ Improved
+
+* Use inverse standard deviation as weights for the focus spline fit.
+* `Focuser` now has an option to require the best resulting focus to be in the range of focuser positions tested or it will automatically repeat the focus sweep with a larger step size. ([#16](https://github.com/sdss/lvmguider/pr/16))
+
+
 ## 0.4.2 - January 31, 2024
 
 ### ✨ Improved
