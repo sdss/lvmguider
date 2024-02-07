@@ -113,7 +113,7 @@ async def guide(
             )
             await actor.guide_task
         except CriticalGuiderError as err:
-            command.actor.status |= GuiderStatus.FAILED
+            command.actor.status = GuiderStatus.IDLE | GuiderStatus.FAILED
             return command.fail(f"Stopping the guide loop due to critical error: {err}")
         except asyncio.CancelledError:
             # This means that the stop command was issued. All good.
