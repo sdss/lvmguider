@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 from clu.actor import AMQPActor
 
@@ -24,6 +24,21 @@ if TYPE_CHECKING:
 
 
 __all__ = ["LVMGuiderActor"]
+
+
+class ReferenceFocus(NamedTuple):
+    """A named tuple to store the reference focus."""
+
+    focus: float
+    fwhm: float
+    temperature: float
+    timestamp: float
+
+    def __str__(self):
+        return (
+            f"focus={self.focus:.2f}, fwhm={self.fwhm: .2f}, "
+            "temperature={self.temperature:.2f}"
+        )
 
 
 class LVMGuiderActor(AMQPActor):
@@ -42,13 +57,13 @@ class LVMGuiderActor(AMQPActor):
 
         # Update package config.
         config._BASE = dict(config)
-        config.update(aconfig)
+        config.load(aconfig)
 
         name = aconfig["actor"]["name"]
         self.telescope: str = aconfig.get("telescope", name.split(".")[1])
 
         # Update the config that will be set in the actor instance.
-        kwargs["config"] = dict(config)
+        kwargs["config"] = config
 
         super().__init__(*args, log=log, version=__version__, **kwargs)
 
@@ -58,6 +73,7 @@ class LVMGuiderActor(AMQPActor):
         self.cameras = Cameras(self.telescope)
 
         self._status = GuiderStatus.IDLE
+        self._reference_focus: ReferenceFocus | None = None
 
         self.guider: Guider | None = None
         self.guide_task: asyncio.Task | None = None

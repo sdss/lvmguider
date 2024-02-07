@@ -22,10 +22,11 @@ from simple_pid import PID
 
 from sdsstools.time import get_sjd
 
-from lvmguider import __version__
+from lvmguider import __version__, config
 from lvmguider.dataclasses import CameraSolution, GuiderSolution
 from lvmguider.maskbits import GuiderStatus
 from lvmguider.tools import (
+    dataframe_to_database,
     elapsed_time,
     estimate_zeropoint,
     get_dark_subtracted_data,
@@ -395,7 +396,7 @@ class Guider:
                 telescope=self.telescope,
             )
 
-        sources = pandas.read_parquet(sources_file)
+        sources = pandas.read_parquet(sources_file, dtype_backend="pyarrow")
         matched_sources = sources.copy()
 
         ra: float = hdul["RAW"].header["RA"]
@@ -646,6 +647,7 @@ class Guider:
         """Updates the ``lvm.agcam`` files and creates the ``lvm.guider`` file."""
 
         coros = []
+        update_agcam_database: bool = False
 
         assert guider_solution.sources is not None
 
@@ -662,7 +664,11 @@ class Guider:
                 for card in cards:
                     wcs_cards[card.keyword] = (card.value, card.comment)
 
+            ra = solution.pointing[0]
+            dec = solution.pointing[1]
             proc_update = {
+                "RA": ra if not numpy.isnan(ra) else None,
+                "DEC": dec if not numpy.isnan(dec) else None,
                 "PA": pa if not numpy.isnan(pa) else None,
                 "ZEROPT": zeropt if not numpy.isnan(zeropt) else None,
                 "REFFILE": reffile,
@@ -672,6 +678,7 @@ class Guider:
             }
 
             coros.append(run_in_executor(update_fits, file, "PROC", header=proc_update))
+            update_agcam_database = True
 
             # Update the sources file for each camera.
             sources_cam_path = file.with_suffix(".parquet")
@@ -740,3 +747,20 @@ class Guider:
 
         with elapsed_time(self.command, "update PROC HDU and create lvm.guider file"):
             await asyncio.gather(*coros)
+
+        # If we have solved the cameras, update the database.
+        if update_agcam_database:
+            with elapsed_time(self.command, "updating lvm.agcam DB records"):
+                camera_frame_dfs = []
+                for solution in guider_solution.solutions:
+                    fn = solution.path.absolute()
+                    cs = CameraSolution.open(fn)
+                    camera_frame_dfs.append(cs.to_framedata().to_dataframe())
+
+                await run_in_executor(
+                    dataframe_to_database,
+                    pandas.concat(camera_frame_dfs, axis=0, ignore_index=True),
+                    config["database"]["agcam_frame_table"],
+                    delete_columns=["frameno", "telescope", "camera"],
+                    raise_on_error=False,
+                )

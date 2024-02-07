@@ -73,7 +73,8 @@ class BaseSolution:
         """Returns the median zero point."""
 
         if self.sources is not None:
-            return float(self.sources.zp.dropna().median())
+            if len(data := self.sources.zp.dropna()) > 0:
+                return float(data.median())
 
         return numpy.nan
 
@@ -113,6 +114,7 @@ class CameraSolution(BaseSolution):
     ref_frame: pathlib.Path | None = None
     wcs_mode: WCS_MODE_T = "none"
     guider_version: Version = Version("0.0.0")
+    hdul: fits.HDUList | None = None
 
     @classmethod
     def open(cls, file: str | pathlib.Path):
@@ -139,7 +141,10 @@ class CameraSolution(BaseSolution):
         sources: pandas.DataFrame | None = None
         if proc["SOURCESF"]:
             dirname = file.parent
-            sources = pandas.read_parquet(dirname / proc["SOURCESF"])
+            sources = pandas.read_parquet(
+                dirname / proc["SOURCESF"],
+                dtype_backend="pyarrow",
+            )
 
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", category=FITSFixedWarning)
@@ -167,6 +172,64 @@ class CameraSolution(BaseSolution):
             matched=len(sources.ra.dropna()) > 0 if sources is not None else False,
             ref_frame=ref_frame,
             guider_version=guiderv,
+            hdul=hdul,
+        )
+
+    @property
+    def is_focus_sweep(self):
+        """Returns whether the frame is part of a focus sweep."""
+
+        proc_ext = (
+            self.hdul["PROC"]
+            if self.hdul
+            and "PROC" in self.hdul
+            and "ISFSWEEP" in self.hdul["PROC"].header
+            else None
+        )
+        if proc_ext is None:
+            log.warning(
+                f"Cannot determine focus sweep status for {self.path!s}. "
+                "Returning False."
+            )
+            return False
+
+        return proc_ext.header["ISFSWEEP"] is True
+
+    def to_framedata(self):
+        """Returns a `.FrameData` instance."""
+
+        raw_header = {}
+        exptime = numpy.nan
+        image_type = ""
+        kmirror_drot = numpy.nan
+        focusdt = numpy.nan
+        data = None
+
+        raw_ext = self.hdul["RAW"] if self.hdul and "RAW" in self.hdul else None
+        if self.hdul is not None and raw_ext is not None:
+            raw_header = dict(raw_ext.header)
+            exptime = raw_ext.header["EXPTIME"]
+            image_type = raw_ext.header["IMAGETYP"]
+            kmirror_drot = raw_ext.header["KMIRDROT"]
+            focusdt = raw_ext.header["FOCUSDT"]
+            data = raw_ext.data
+
+        return FrameData(
+            frameno=self.frameno,
+            path=self.path,
+            raw_header=raw_header,
+            date_obs=self.date_obs,
+            sjd=get_sjd("LCO", self.date_obs.to_datetime()),
+            camera=self.camera,
+            telescope=self.telescope,
+            exptime=exptime,
+            image_type=image_type,
+            kmirror_drot=kmirror_drot,
+            focusdt=focusdt,
+            stacked=False,
+            reprocessed=False,
+            data=data,
+            solution=self,
         )
 
 
@@ -347,6 +410,35 @@ class FrameData:
 
         return self.solution.sources
 
+    def to_dataframe(self):
+        """Returns a dataframe with the `.FrameData` information."""
+
+        df = dataframe_from_model("FRAMEDATA")
+        pointing = self.solution.pointing
+
+        new_row = dict(
+            frameno=self.frameno,
+            mjd=self.sjd,
+            date_obs=self.date_obs.isot,
+            camera=self.camera,
+            telescope=self.telescope,
+            exptime=numpy.float32(self.exptime),
+            kmirror_drot=numpy.float32(self.kmirror_drot),
+            focusdt=numpy.float32(self.focusdt),
+            fwhm=numpy.float32(self.solution.fwhm),
+            ra=numpy.float64(pointing[0]),
+            dec=numpy.float64(pointing[1]),
+            pa=numpy.float32(self.solution.pa),
+            zero_point=numpy.float32(self.solution.zero_point),
+            stacked=bool(self.stacked),
+            solved=bool(self.solution.solved),
+            wcs_mode=self.solution.wcs_mode,
+            is_focus_sweep=self.solution.is_focus_sweep,
+        )
+        df.loc[0, list(new_row)] = list(new_row.values())
+
+        return df
+
 
 class CoAddWarningsMixIn:
     """Methods to calculate warnings for co-added data classes."""
@@ -399,32 +491,15 @@ class CoAdd_CameraSolution(CameraSolution, CoAddWarningsMixIn):
     def frame_data(self):
         """Returns a Pandas data frame from a list of `.FrameData`."""
 
-        df = dataframe_from_model("FRAMEDATA")
-
         if self.frames is None:
-            return df
+            return dataframe_from_model("FRAMEDATA")
 
-        for ii, fd in enumerate(self.frames):
-            new_row = dict(
-                frameno=fd.frameno,
-                mjd=fd.sjd,
-                date_obs=fd.date_obs.isot,
-                camera=fd.camera,
-                telescope=fd.telescope,
-                exptime=numpy.float32(fd.exptime),
-                kmirror_drot=numpy.float32(fd.kmirror_drot),
-                focusdt=numpy.float32(fd.focusdt),
-                fwhm=numpy.float32(fd.solution.fwhm),
-                pa=numpy.float32(fd.solution.pa),
-                zero_point=numpy.float32(fd.solution.zero_point),
-                stacked=int(fd.stacked),
-                solved=int(fd.solution.solved),
-                wcs_mode=fd.solution.wcs_mode,
-            )
-            df.loc[ii, list(new_row)] = list(new_row.values())
+        fd_dfs: list[pandas.DataFrame] = []
+        for fd in self.frames:
+            fd_dfs.append(fd.to_dataframe())
 
+        df = pandas.concat(fd_dfs, axis=0, ignore_index=True)
         df = df.sort_values(["frameno", "camera"])
-
         df.reset_index(drop=True, inplace=True)
 
         return df
@@ -496,7 +571,7 @@ class GlobalSolution(BaseSolution, CoAddWarningsMixIn):
                 fwhm=numpy.float32(gs.fwhm),
                 pa=numpy.float32(pa),
                 zero_point=numpy.float32(gs.zero_point),
-                solved=int(gs.solved),
+                solved=bool(gs.solved),
                 n_cameras_solved=int(gs.n_cameras_solved),
                 guide_mode=gs.guide_mode,
                 x_ff_pixel=numpy.float32(gs.guide_pixel[0]),
@@ -511,7 +586,7 @@ class GlobalSolution(BaseSolution, CoAddWarningsMixIn):
                 pa_off=numpy.float32(gs.pa_off),
                 axis0_off=numpy.float32(gs.axis0_off),
                 axis1_off=numpy.float32(gs.axis1_off),
-                applied=int(gs.correction_applied),
+                applied=bool(gs.correction_applied),
                 ax0_applied=numpy.float32(gs.correction[0]),
                 ax1_applied=numpy.float32(gs.correction[1]),
                 rot_applied=numpy.float32(gs.correction[2]),

@@ -13,7 +13,7 @@ import os
 import pathlib
 import re
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy
 import pandas
@@ -21,10 +21,12 @@ from astropy.io import fits
 
 from sdsstools.time import get_sjd
 
-from lvmguider import __version__
+from lvmguider import __version__, config
+from lvmguider.dataclasses import CameraSolution
 from lvmguider.extraction import extract_sources as extract_sources_func
 from lvmguider.maskbits import GuiderStatus
 from lvmguider.tools import (
+    dataframe_to_database,
     elapsed_time,
     header_from_model,
     run_in_executor,
@@ -63,6 +65,7 @@ class Cameras:
         flavour: str = "object",
         extract_sources: bool = False,
         nretries: int = 3,
+        header_keywords: dict[str, Any] = {},
     ) -> tuple[list[pathlib.Path], int, list[pandas.DataFrame] | None]:
         """Exposes the cameras and returns the filenames."""
 
@@ -148,6 +151,9 @@ class Cameras:
             header["GUIDERV"] = __version__
             header["WCSMODE"] = "none"
 
+            for key, value in header_keywords.items():
+                header[key] = value
+
             headers[fn] = header
 
         sources: list[pandas.DataFrame] = []
@@ -170,6 +176,8 @@ class Cameras:
             all_sources = pandas.concat(sources)
             valid = all_sources.loc[all_sources.valid == 1]
             fwhm = numpy.percentile(valid["fwhm"], 25) if len(valid) > 0 else None
+            for fn in filenames:
+                headers[fn]["FWHM"] = fwhm
         else:
             valid = []
             fwhm = None
@@ -180,7 +188,7 @@ class Cameras:
                 "filenames": [str(fn) for fn in filenames],
                 "flavour": flavour,
                 "n_sources": len(valid),
-                "focus_position": round(focus_position, 1),
+                "focus_position": round(focus_position, 2),
                 "fwhm": numpy.round(float(fwhm), 3) if fwhm else -999.0,
             }
         )
@@ -191,12 +199,28 @@ class Cameras:
         if not command.actor.status & GuiderStatus.NON_IDLE:
             command.actor.status |= GuiderStatus.IDLE
 
+        # Update FITS file PROC extension.
         with elapsed_time(command, "updating lvm.agcam file"):
             await asyncio.gather(
                 *[
                     run_in_executor(update_fits, fn, "PROC", header=headers[fn])
                     for fn in filenames
                 ]
+            )
+
+        # Store data to DB.
+        with elapsed_time(command, "storing lvm.agcam to DB"):
+            camera_frame_dfs = []
+            for fn in filenames:
+                cs = CameraSolution.open(fn)
+                camera_frame_dfs.append(cs.to_framedata().to_dataframe())
+
+            await run_in_executor(
+                dataframe_to_database,
+                pandas.concat(camera_frame_dfs, axis=0, ignore_index=True),
+                config["database"]["agcam_frame_table"],
+                delete_columns=["frameno", "telescope", "camera"],
+                raise_on_error=False,
             )
 
         return (list(filenames), next_seqno, list(sources) if extract_sources else None)

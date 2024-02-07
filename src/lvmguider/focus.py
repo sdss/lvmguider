@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import pathlib
+from time import time
 
 from typing import TYPE_CHECKING
 
@@ -22,6 +23,7 @@ from scipy.interpolate import UnivariateSpline
 
 from sdsstools.logger import get_logger
 
+from lvmguider.actor.actor import ReferenceFocus
 from lvmguider.tools import run_in_executor
 
 
@@ -45,7 +47,7 @@ def fit_parabola(x_arr: list[float], y_arr: list[float], y_err: list[float]):
 def fit_spline(x: numpy.ndarray, y: numpy.ndarray, w: numpy.ndarray | None = None):
     """Fits a spline to data."""
 
-    spl = UnivariateSpline(x, y)
+    spl = UnivariateSpline(x, y, w=w)
 
     corr_matrix = numpy.corrcoef(y, spl(x))
     R2 = corr_matrix[0, 1] ** 2
@@ -72,12 +74,13 @@ class Focuser:
         self,
         command: GuiderCommand,
         initial_guess: float | None = None,
-        step_size: float = 0.5,
+        step_size: float = 0.2,
         steps: int = 7,
         exposure_time: float = 5.0,
-        fit_method="parabola",
+        fit_method="spline",
         plot: bool = True,
         plot_dir: str = "qa/focus",
+        require_best_to_be_in_range: bool = True,
     ) -> tuple[pandas.DataFrame, dict]:
         """Performs the focus routine.
 
@@ -86,7 +89,8 @@ class Focuser:
         command
             The actor command to use to talk to other actors.
         initial_guess
-            An initial guess of the focus position, in DT.
+            An initial guess of the focus position, in DT. If not provided,
+            uses the current focuser position.
         step_size
             The resolution of the focus sweep in DT steps.
         steps
@@ -106,6 +110,10 @@ class Focuser:
             ``{plot_dir}/focus_{telescope}_{frame0}_{frame1}.pdf`` where
             ``{frame0}`` and ``{frame1}`` are the first and last frame number
             of the sweep sequence.
+        require_best_to_be_in_range
+            If `True`, the best focus must be in the range of the focus sweep. If
+            that is not the case the focus sweep will be repeaded with the same
+            initial guess but twice the step size.
 
         """
 
@@ -116,11 +124,8 @@ class Focuser:
             steps += 1
 
         if initial_guess is None:
-            cmd = await command.send_command(self.foc_actor, "getPosition")
-            if cmd.status.did_fail:
-                raise RuntimeError("Failed retrieving position from focuser.")
-            initial_guess = cmd.replies.get("Position")
-            command.debug(f"Using focuser position: {initial_guess} DT")
+            initial_guess = await self.get_from_temperature(command)
+            command.debug(f"Using initial focus position: {initial_guess:.2f} DT")
 
         assert initial_guess is not None
 
@@ -144,6 +149,7 @@ class Focuser:
                 command,
                 exposure_time=exposure_time,
                 extract_sources=True,
+                header_keywords={"ISFSWEEP": True},
             )
 
             files += step_files
@@ -178,18 +184,44 @@ class Focuser:
             raise ValueError("Insufficient number of focus points.")
 
         sources = pandas.concat(source_list)
+        fit_data = self.fit_focus(sources, fit_method=fit_method)
 
-        fit_data = self.fit_focus(
-            sources,
-            fit_method=fit_method,
-        )
+        focus = fit_data["xmin"]
+        if focus < numpy.min(focus_grid) or focus > numpy.max(focus_grid):
+            command.warning("Best focus is outside the range of the focus sweep.")
+            if require_best_to_be_in_range:
+                command.warning("Repeating the focus sweep with double step size.")
+                return await self.focus(
+                    command,
+                    initial_guess=initial_guess,
+                    step_size=step_size * 2,
+                    steps=steps,
+                    exposure_time=exposure_time,
+                    fit_method=fit_method,
+                    plot=plot,
+                    plot_dir=plot_dir,
+                    require_best_to_be_in_range=False,
+                )
 
+        await self.goto_focus_position(command, numpy.round(fit_data["xmin"], 2))
+
+        bench_temperature = await self.get_bench_temperature(command)
         command.info(
             best_focus=dict(
                 focus=numpy.round(fit_data["xmin"], 2),
                 fwhm=numpy.round(fit_data["ymin"], 2),
                 r2=numpy.round(fit_data["R2"], 3),
+                initial_guess=numpy.round(initial_guess, 2),
+                bench_temperature=numpy.round(bench_temperature, 2),
+                fit_method=fit_method,
             )
+        )
+
+        command.actor._reference_focus = ReferenceFocus(
+            focus=fit_data["xmin"],
+            fwhm=fit_data["ymin"],
+            temperature=bench_temperature,
+            timestamp=time(),
         )
 
         if plot:
@@ -210,23 +242,70 @@ class Focuser:
                 )
             )
 
-        await self.goto_focus_position(command, numpy.round(fit_data["xmin"], 2))
-
         return sources, fit_data
+
+    async def get_from_temperature(
+        self,
+        command: GuiderCommand,
+        temperature: float | None = None,
+        offset: float = 0.0,
+    ) -> float:
+        """Returns the estimated focus position for a given temperature.
+
+        Parameters
+        ----------
+        command
+            The actor command to use to talk to other actors.
+        temperature
+            The temperature for which to calculate the focus position. If :obj:`None`,
+            the current bench internal temperature will be used.
+        offset
+            An additive offset to the resulting focus position.
+
+        """
+
+        if temperature is None:
+            temperature = await self.get_bench_temperature(command)
+
+        assert temperature is not None
+
+        focus_model = command.actor.config["focus.model"]
+        new_focus = focus_model["a"] * temperature + focus_model["b"]
+
+        return round(new_focus + offset, 2)
+
+    async def get_bench_temperature(self, command: GuiderCommand) -> float:
+        """Returns the current bench temperature."""
+
+        telem_actor = f"lvm.{self.telescope}.telemetry"
+        telem_command = await command.send_command(telem_actor, "status")
+        if telem_command.status.did_fail:
+            raise RuntimeError("Failed retrieving temperature from telemetry.")
+
+        return round(telem_command.replies.get("sensor1")["temperature"], 2)
+
+    async def get_focus_position(self, command: GuiderCommand) -> float:
+        """Returns the current focus position."""
+
+        cmd = await command.send_command(self.foc_actor, "getPosition")
+        if cmd.status.did_fail:
+            raise RuntimeError("Failed retrieving position from focuser.")
+
+        return round(cmd.replies.get("Position"), 2)
 
     async def goto_focus_position(self, command: GuiderCommand, focus_position: float):
         """Moves the focuser to a position."""
 
         cmd = await command.send_command(
             self.foc_actor,
-            f"moveAbsolute {focus_position} DT",
+            f"moveAbsolute {round(focus_position, 3)} DT",
         )
         if cmd.status.did_fail:
-            raise RuntimeError(f"Failed reaching focus {focus_position:.2f} DT.")
+            raise RuntimeError(f"Failed reaching focus {focus_position:.3f} DT.")
         if cmd.replies.get("AtLimit") is True:
             raise RuntimeError("Hit a limit while focusing.")
 
-    def fit_focus(self, sources: pandas.DataFrame, fit_method: str = "parabola"):
+    def fit_focus(self, sources: pandas.DataFrame, fit_method: str = "spline"):
         """Fits the data and returns the best focus and measured FWHM."""
 
         sources_valid = sources.loc[sources.valid == 1]

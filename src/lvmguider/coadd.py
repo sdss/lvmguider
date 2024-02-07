@@ -54,7 +54,6 @@ from lvmguider.tools import (
     get_raw_extension,
     get_spec_frameno,
     header_from_model,
-    isot_to_sjd,
     nan_or_none,
     polyfit_with_sigclip,
     sort_files_by_camera,
@@ -484,7 +483,7 @@ def create_summary_file(
 
     dfs: list[pandas.DataFrame] = []
     for ii, file in enumerate(files):
-        df = pandas.read_parquet(file)
+        df = pandas.read_parquet(file, dtype_backend="pyarrow")
 
         if spec_framenos is not None and len(spec_framenos) > 0:
             df["spec_frameno"] = spec_framenos[ii]
@@ -1353,12 +1352,12 @@ def reprocess_legacy_guider_frame(
         found: bool = False
         if (root / filex).with_suffix(".parquet").exists():
             sources_file = (root / filex).with_suffix(".parquet")
-            sources.append(pandas.read_parquet(sources_file))
+            sources.append(pandas.read_parquet(sources_file, dtype_backend="pyarrow"))
             found = True
 
         elif (root / "reprocessed" / filex).with_suffix(".parquet").exists():
             sources_file = (root / "reprocessed" / filex).with_suffix(".parquet")
-            sources.append(pandas.read_parquet(sources_file))
+            sources.append(pandas.read_parquet(sources_file, dtype_backend="pyarrow"))
             found = True
 
         if found:
@@ -1605,43 +1604,19 @@ def coadd_to_database(
     except Exception as err:
         log.error(f"Failed loading frames to database: {str(err).strip()}")
 
-    # Load AG frames.
-    ag_frames_file = coadd_file.with_name(coadd_file.stem + "_frames.parquet")
-    if ag_frames_file.exists():
-        log.debug("Loading AG frames to database.")
-        try:
-            ag_frames = pandas.read_parquet(ag_frames_file)
-            if exposure_no:
-                ag_frames["exposure_no"] = exposure_no
-            if len(ag_frames) > 0:
-                ag_frames_mjd = isot_to_sjd(ag_frames["date_obs"].iloc[0])
-                ag_frames["mjd"] = ag_frames_mjd
-                ag_frames["stacked"] = ag_frames.stacked.astype(bool)
-                ag_frames["solved"] = ag_frames.solved.astype(bool)
-                table_name = config["database"]["agcam_frame_table"]
-                dataframe_to_database(
-                    ag_frames,
-                    table_name,
-                    delete_columns=delete_columns,
-                    **db_connection_params,
-                )
-        except Exception as err:
-            log.error(f"Failed loading frames to database: {str(err).strip()}")
-    else:
-        log.error(f"Cannot find AG frames file {ag_frames_file}")
-
     # Load guider data.
     guider_frames_file = coadd_file.with_name(coadd_file.stem + "_guiderdata.parquet")
     if guider_frames_file.exists():
         log.debug("Loading guider frames to database.")
         try:
-            guider_frames = pandas.read_parquet(guider_frames_file)
+            guider_frames = pandas.read_parquet(
+                guider_frames_file,
+                dtype_backend="pyarrow",
+            )
             if exposure_no:
                 guider_frames["exposure_no"] = exposure_no
             if len(guider_frames) > 0:
                 guider_frames["mjd"] = sjd
-                guider_frames["solved"] = guider_frames.solved.astype(bool)
-                guider_frames["applied"] = guider_frames.applied.astype(bool)
                 table_name = config["database"]["guider_frame_table"]
                 dataframe_to_database(
                     guider_frames,
