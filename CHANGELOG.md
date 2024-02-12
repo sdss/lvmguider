@@ -1,5 +1,12 @@
 # Changelog
 
+## Next version
+
+### ✨ Improved
+
+* Added `AIRMASS` and `GUIDERV` keywords to co-add FITS files and data frames.
+
+
 ## 0.5.0 - February 7, 2024
 
 ### 🚀 New

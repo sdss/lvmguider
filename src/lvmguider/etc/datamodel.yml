@@ -131,6 +131,7 @@ FRAMEDATA:
   ra: 'f8[pyarrow]'
   dec: 'f8[pyarrow]'
   pa: 'f4[pyarrow]'
+  airmass: 'f4[pyarrow]'
   zero_point: 'f4[pyarrow]'
   stacked: 'bool[pyarrow]'
   solved: 'bool[pyarrow]'
@@ -152,6 +153,7 @@ GUIDERDATA_FRAME:
   ra: 'f8[pyarrow]'
   dec: 'f8[pyarrow]'
   pa: 'f4[pyarrow]'
+  airmass: 'f4[pyarrow]'
   ra_field: 'f8[pyarrow]'
   dec_field: 'f8[pyarrow]'
   pa_field: 'f4[pyarrow]'
@@ -170,6 +172,7 @@ CAMERA_COADD:
   CAMNAME: [null, 'Camera name']
   INSTRUME: ['LVM', 'SDSS-V Local Volume Mapper']
   OBSERVAT: ['LCO', 'Observatory']
+  GUIDERV: [null, 'Guider version used to create the co-add']
   MJD: [null, 'SDSS MJD (MJD+0.4)']
   FRAME0: [null, 'First frame in guide sequence']
   FRAMEN: [null, 'Last frame in guide sequence']
@@ -182,6 +185,7 @@ CAMERA_COADD:
   SIGMA: [null, 'Sigma used for sigma-clipping']
   OBSTIME0: [null, 'DATE-OBS of first frame']
   OBSTIMEN: [null, 'DATE-OBS of last frame']
+  AIRMASS: [null, 'Average airmass during the sequence']
   FWHM0: [null, '[arcsec] FWHM of sources in first frame']
   FWHMN: [null, '[arcsec] FWHM of sources in last frame']
   FWHMMED: [null, '[arcsec] Median of the FHWM of all frames']
@@ -203,12 +207,14 @@ GLOBAL_COADD:
   TELESCOP: [null, 'Telescope that took the data']
   INSTRUME: ['LVM', 'SDSS-V Local Volume Mapper']
   OBSERVAT: ['LCO', 'Observatory']
+  GUIDERV: [null, 'Guider version used to create the co-add']
   MJD: [null, 'SDSS MJD (MJD+0.4)']
   FRAME0: [null, 'First frame in guide sequence']
   FRAMEN: [null, 'Last frame in guide sequence']
   NFRAMES: [null, 'Number of frames in sequence']
   OBSTIME0: [null, 'DATE-OBS of first frame']
   OBSTIMEN: [null, 'DATE-OBS of last frame']
+  AIRMASS: [null, 'Average airmass during the sequence']
   FWHM0: [null, '[arcsec] FWHM of sources in first frame']
   FWHMN: [null, '[arcsec] FWHM of sources in last frame']
   FWHMMED: [null, '[arcsec] Median of the FHWM of all frames']

@@ -34,7 +34,7 @@ from watchdog.observers.polling import PollingObserver
 
 from sdsstools.time import get_sjd
 
-from lvmguider import config, log
+from lvmguider import __version__, config, log
 from lvmguider.dataclasses import (
     CameraSolution,
     CoAdd_CameraSolution,
@@ -795,6 +795,7 @@ def create_framedata(
         camera=camname,
         telescope=telescope,
         date_obs=date_obs,
+        airmass=raw_header.get("AIRMASS", numpy.nan),
         sjd=get_sjd("LCO", date_obs.to_datetime()),
         exptime=raw_header["EXPTIME"],
         image_type=raw_header["IMAGETYP"],
@@ -970,6 +971,7 @@ def create_coadd_header(solution: CoAdd_CameraSolution):
     header["CAMNAME"] = frame_data.iloc[0].camera
     header["MJD"] = sjd
     header.insert("TELESCOP", ("", "/*** BASIC DATA ***/"))
+    header["GUIDERV"] = __version__
 
     # Frame info
     header["FRAME0"] = frame0
@@ -985,6 +987,7 @@ def create_coadd_header(solution: CoAdd_CameraSolution):
 
     header["OBSTIME0"] = frame_data.iloc[0].date_obs
     header["OBSTIMEN"] = frame_data.iloc[-1].date_obs
+    header["AIRMASS"] = nan_or_none(solution.airmass(), 3)
     header["FWHM0"] = nan_or_none(fwhm0, 3)
     header["FWHMN"] = nan_or_none(fwhmn, 3)
     header["FWHMMED"] = nan_or_none(fwhm_median, 3)
@@ -1104,6 +1107,7 @@ def create_global_header(solution: GlobalSolution):
     header["TELESCOP"] = frame_data.iloc[0].telescope
     header["MJD"] = sjd
     header.insert("TELESCOP", ("", "/*** BASIC DATA ***/"))
+    header["GUIDERV"] = __version__
 
     # Frame info
     header["FRAME0"] = frame0
@@ -1112,6 +1116,8 @@ def create_global_header(solution: GlobalSolution):
 
     header["OBSTIME0"] = frame_data.iloc[0].date_obs
     header["OBSTIMEN"] = frame_data.iloc[-1].date_obs
+
+    header["AIRMASS"] = nan_or_none(solution.airmass(), 3)
 
     header["FWHM0"] = nan_or_none(fwhm0, 3)
     header["FWHMN"] = nan_or_none(fwhmn, 3)
@@ -1561,6 +1567,7 @@ def coadd_to_database(
         "nframes",
         "obstime0",
         "obstimen",
+        "airmass",
         "fwhm0",
         "fwhmn",
         "fwhmmed",

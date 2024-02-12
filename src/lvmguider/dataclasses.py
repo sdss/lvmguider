@@ -203,6 +203,7 @@ class CameraSolution(BaseSolution):
         image_type = ""
         kmirror_drot = numpy.nan
         focusdt = numpy.nan
+        airmass = numpy.nan
         data = None
 
         raw_ext = self.hdul["RAW"] if self.hdul and "RAW" in self.hdul else None
@@ -212,6 +213,7 @@ class CameraSolution(BaseSolution):
             image_type = raw_ext.header["IMAGETYP"]
             kmirror_drot = raw_ext.header["KMIRDROT"]
             focusdt = raw_ext.header["FOCUSDT"]
+            airmass = raw_ext.header["AIRMASS"]
             data = raw_ext.data
 
         return FrameData(
@@ -223,6 +225,7 @@ class CameraSolution(BaseSolution):
             camera=self.camera,
             telescope=self.telescope,
             exptime=exptime,
+            airmass=airmass,
             image_type=image_type,
             kmirror_drot=kmirror_drot,
             focusdt=focusdt,
@@ -396,6 +399,7 @@ class FrameData:
     camera: str
     telescope: str
     exptime: float
+    airmass: float
     image_type: str
     kmirror_drot: float
     focusdt: float
@@ -429,6 +433,7 @@ class FrameData:
             ra=numpy.float64(pointing[0]),
             dec=numpy.float64(pointing[1]),
             pa=numpy.float32(self.solution.pa),
+            airmass=numpy.float32(self.airmass),
             zero_point=numpy.float32(self.solution.zero_point),
             stacked=bool(self.stacked),
             solved=bool(self.solution.solved),
@@ -488,6 +493,13 @@ class CoAdd_CameraSolution(CameraSolution, CoAddWarningsMixIn):
     sigmaclip: bool = False
     sigmaclip_sigma: float | None = None
 
+    def airmass(self):
+        """Returns the average airmass of the guide sequence."""
+
+        fd = self.frame_data()
+
+        return float(numpy.mean(fd.airmass))
+
     def frame_data(self):
         """Returns a Pandas data frame from a list of `.FrameData`."""
 
@@ -539,6 +551,13 @@ class GlobalSolution(BaseSolution, CoAddWarningsMixIn):
         skyc = self.wcs.pixel_to_world(*config["xz_full_frame"])
         return numpy.array([skyc.ra.deg, skyc.dec.deg])
 
+    def airmass(self):
+        """Returns the average airmass of the guide sequence."""
+
+        fd = self.frame_data()
+
+        return float(numpy.mean(fd.airmass))
+
     def frame_data(self):
         """Concatenates the frame data and returns a Pandas data frame."""
 
@@ -562,6 +581,7 @@ class GlobalSolution(BaseSolution, CoAddWarningsMixIn):
             if len(gs.solutions) > 0:
                 date_obs = gs.solutions[0].date_obs.isot
                 mjd = get_sjd("LCO", gs.solutions[0].date_obs.to_datetime())
+                airmass = gs.solutions[0].to_framedata().airmass
 
             new_row = dict(
                 frameno=gs.frameno,
@@ -578,6 +598,7 @@ class GlobalSolution(BaseSolution, CoAddWarningsMixIn):
                 z_ff_pixel=numpy.float32(gs.guide_pixel[1]),
                 ra=numpy.float64(pointing[0]),
                 dec=numpy.float64(pointing[1]),
+                airmass=numpy.float32(airmass),
                 ra_field=numpy.float64(gs.ra_field),
                 dec_field=numpy.float64(gs.dec_field),
                 pa_field=numpy.float32(gs.pa_field),
