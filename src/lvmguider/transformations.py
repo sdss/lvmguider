@@ -219,7 +219,7 @@ def solve_locs(
 
     lower_bound = 0.8  # Pixel scale hints (arcsec/pixel)
     upper_bound = 1.2
-    radius = 5  # Search radius in degrees
+    radius = 20  # Search radius in degrees
 
     if full_frame:
         midX, midZ = config["xz_full_frame"]  # Middle of full Frame
