@@ -69,7 +69,7 @@ class Guider:
     command
         The actor command used to communicate with the actor system.
     field_centre
-        The field centre on which we want to guider (RA, Dec, PA).
+        The field centre on which we want to guide (RA, Dec, PA).
     pixel
         The ``(x,y)`` pixel of the full frame to use to determine the pointing.
         Default to the central pixel.
