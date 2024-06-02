@@ -37,7 +37,7 @@ class ReferenceFocus(NamedTuple):
     def __str__(self):
         return (
             f"focus={self.focus:.2f}, fwhm={self.fwhm: .2f}, "
-            "temperature={self.temperature:.2f}"
+            f"temperature={self.temperature:.2f}"
         )
 
 
