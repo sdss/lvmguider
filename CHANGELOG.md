@@ -1,5 +1,12 @@
 # Changelog
 
+## Next version
+
+### 🔧 Fixed
+
+* Fixed dynamically setting `additionalProperties: true` in the schama. Apparently something has changed with `jsonschema 4.22.0` and now changing the schema in the actor is not sufficient; one must then recreate the validator with the modified schema.
+
+
 ## 0.5.2 - June 1, 2024
 
 ### 🔧 Fixed

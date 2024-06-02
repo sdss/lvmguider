@@ -69,6 +69,7 @@ class LVMGuiderActor(AMQPActor):
 
         if self.model and self.model.schema:
             self.model.schema["additionalProperties"] = True
+            self.model.validator = self.model.VALIDATOR(self.model.schema)
 
         self.cameras = Cameras(self.telescope)
 
