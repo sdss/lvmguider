@@ -152,7 +152,9 @@ def save_subplot(
                     ]
                 )
             ).transformed(
-                (fig.transFigure - fig.dpi_scale_trans)  # type: ignore
+                (
+                    fig.transFigure - fig.dpi_scale_trans  # type: ignore
+                )
             ),
         )
         return
