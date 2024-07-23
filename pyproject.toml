@@ -28,7 +28,7 @@ include = ["src/lvmguider/etc/*"]
 lvmguider = "lvmguider.__main__:main"
 
 [tool.poetry.dependencies]
-python = "^3.10,<3.13"
+python = "^3.10,<4"
 sdsstools = "^1.2.3"
 sdss-clu = "^2.2.0"
 click-default-group = "^1.2.2"

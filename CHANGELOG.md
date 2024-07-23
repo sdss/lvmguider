@@ -9,6 +9,7 @@
 ### ⚙️ Engineering
 
 * Format and lint using `ruff`.
+* Relax Python requirement to `>=3.10,<4`.
 
 
 ## 0.5.3 - June 1, 2024
