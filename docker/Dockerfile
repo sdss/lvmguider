@@ -33,6 +33,11 @@ RUN cd lvmguider && pip3 install .
 RUN rm -Rf lvmguider
 
 # Set umask so that new files inherit the parent folder permissions.
+# Not sure this works so we are also setting the permissions in the entrypoint.
 RUN echo "umask 0002" >> /etc/bash.bashrc
 
-ENTRYPOINT pip3 install -U astropy-iers-data; lvmguider actor start --debug
+COPY ./docker/docker-entrypoint.sh /
+RUN ["chmod", "+x", "/docker-entrypoint.sh"]
+
+ENTRYPOINT ["/docker-entrypoint.sh"]
+CMD ["sh", "-c", "lvmguider actor start --debug"]
