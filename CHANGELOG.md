@@ -2,6 +2,8 @@
 
 ## Next version
 
+### ✨ Improved
+
 * [#24](https://github.com/sdss/lvmguider/pull/24) Ensure group write permissions for new files in Docker container.
 
 
