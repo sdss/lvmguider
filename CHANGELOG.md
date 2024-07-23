@@ -1,5 +1,10 @@
 # Changelog
 
+## Next version
+
+* [#24](https://github.com/sdss/lvmguider/pull/24) Ensure group write permissions for new files in Docker container.
+
+
 ## 0.5.3 - June 1, 2024
 
 ### 🔧 Fixed
