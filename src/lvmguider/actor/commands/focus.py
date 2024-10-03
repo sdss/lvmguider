@@ -180,7 +180,11 @@ async def focus_info(command: GuiderCommand):
     current_focus = await focuser.get_focus_position(command)
 
     ref = command.actor._reference_focus
-    timestamp = datetime.fromtimestamp(ref.timestamp).isoformat() if ref else None
+    timestamp = (
+        datetime.fromtimestamp(ref.timestamp, tz=timezone.utc).isoformat()
+        if ref
+        else None
+    )
 
     command.info(
         reference_focus={
