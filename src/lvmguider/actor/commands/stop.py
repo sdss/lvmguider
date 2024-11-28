@@ -35,7 +35,7 @@ async def stop(command: GuiderCommand, soft: bool = False):
         command.actor.status = GuiderStatus.IDLE
         return command.finish("Guider is not active.")
 
-    if soft:
+    if soft and not (command.actor.status & GuiderStatus.WAITING):
         if command.actor.status & GuiderStatus.STOPPING:
             return command.fail("Guider loop is already stopping.")
 

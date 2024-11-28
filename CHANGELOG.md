@@ -2,6 +2,10 @@
 
 ## Next version
 
+### ✨ Improved
+
+* Improve stopping the guider when it is sleeping between exposures.
+
 ### ⚙️ Engineering
 
 * Use `uv` for packaging and update workflows.
