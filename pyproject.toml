@@ -1,6 +1,6 @@
 [project]
 name = "lvmguider"
-version = "0.6.0"
+version = "0.6.1a0"
 description = "LVM guiding and focusing"
 authors = [
     { name = "José Sánchez-Gallego", email = "gallegoj@uw.edu" }
