@@ -138,7 +138,11 @@ async def guide(
             # Schedule the sleep as the guide task so that lvmguider stop will
             # cancel it if needed.
             actor.guide_task = asyncio.create_task(asyncio.sleep(sleep))
-            await actor.guide_task
+
+            try:
+                await actor.guide_task
+            except asyncio.CancelledError:
+                break
 
             actor.status &= ~GuiderStatus.WAITING
 
