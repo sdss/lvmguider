@@ -1,5 +1,12 @@
 # Changelog
 
+## Next version
+
+### ⚙️ Engineering
+
+* Use `uv` for packaging and update workflows.
+
+
 ## 0.5.4 - July 23, 2024
 
 ### ✨ Improved
