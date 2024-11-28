@@ -6,6 +6,10 @@
 
 * Improve stopping the guider when it is sleeping between exposures.
 
+### 🔧 Fixed
+
+* Do not show `PROCESSING` status after processing completes.
+
 ### ⚙️ Engineering
 
 * Use `uv` for packaging and update workflows.

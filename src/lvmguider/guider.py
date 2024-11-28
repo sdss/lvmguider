@@ -327,6 +327,7 @@ class Guider:
                 guider_solution.correction_applied = True
 
         finally:
+            self.command.actor.status &= ~GuiderStatus.PROCESSING
             self.command.actor.status &= ~GuiderStatus.CORRECTING
 
             guider_solution.correction = [*applied_motax.tolist(), applied_rot]
@@ -436,6 +437,7 @@ class Guider:
 
             # Now match with Gaia.
             if solution.solved:
+                # TODO: this should run in an executor.
                 matched_sources, _ = match_with_gaia(solution.wcs, sources, concat=True)
                 sources = matched_sources
                 matched = True
