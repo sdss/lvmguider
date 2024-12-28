@@ -143,7 +143,7 @@ class Focuser:
         framenos: list[int] = []
 
         for focus_position in focus_grid:
-            await self.goto_focus_position(command, focus_position)
+            await self.goto_focus_position(command, float(focus_position))
 
             step_files, frameno, sources = await cameras.expose(
                 command,

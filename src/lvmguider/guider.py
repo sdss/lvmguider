@@ -14,6 +14,7 @@ import pathlib
 from typing import TYPE_CHECKING
 
 import numpy
+import numpy.typing as npt
 import pandas
 from astropy.coordinates import EarthLocation
 from astropy.io import fits
@@ -306,7 +307,7 @@ class Guider:
         else:
             apply_correction_this = self.apply_corrections
 
-        applied_motax = numpy.array([0.0, 0.0])
+        applied_motax: npt.NDArray = numpy.array([0.0, 0.0])
         applied_rot: float = 0.0
         try:
             if apply_correction_this:
@@ -330,7 +331,7 @@ class Guider:
             self.command.actor.status &= ~GuiderStatus.PROCESSING
             self.command.actor.status &= ~GuiderStatus.CORRECTING
 
-            guider_solution.correction = [*applied_motax.tolist(), applied_rot]
+            guider_solution.correction = [*applied_motax.tolist(), applied_rot]  # type: ignore
 
             self.command.info(
                 correction_applied={
@@ -559,7 +560,7 @@ class Guider:
         off_rot: float,
         timeout: float = 10,
         use_motor_axes: bool = False,
-    ):
+    ) -> tuple[npt.NDArray, npt.NDArray, float]:
         """Sends a correction offset to the telescope.
 
         Parameters

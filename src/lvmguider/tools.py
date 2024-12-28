@@ -21,8 +21,8 @@ from time import time
 
 from typing import TYPE_CHECKING, Any, Sequence, cast
 
-import nptyping
 import numpy
+import numpy.typing as npt
 import pandas
 import peewee
 import pgpasslib
@@ -289,7 +289,7 @@ def header_from_model(model_name: str):
 def update_fits(
     file: str | pathlib.Path,
     ext: int | str,
-    data: nptyping.NDArray | None = None,
+    data: npt.ArrayLike | None = None,
     header: fits.Header | dict[str, Any | tuple[Any, str]] | None = None,
 ):
     """Updates or creates an image HDU in an existing FITS.

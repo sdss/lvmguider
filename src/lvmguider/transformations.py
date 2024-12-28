@@ -290,7 +290,7 @@ def radec2azel(raD, decD, lstD, site: EarthLocation | None = None):
 
     assert isinstance(site, EarthLocation)
 
-    lat_r = numpy.radians(site.lat.deg)
+    lat_r = numpy.radians(float(site.lat.deg))  # type: ignore
 
     ra, dec, lst = (
         numpy.radians(raD),

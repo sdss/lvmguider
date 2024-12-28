@@ -14,8 +14,8 @@ from dataclasses import dataclass, field
 
 from typing import TYPE_CHECKING, Literal
 
-import nptyping as npt
 import numpy
+import numpy.typing as npt
 import pandas
 from astropy.io import fits
 from astropy.time import Time
@@ -92,7 +92,7 @@ class BaseSolution:
         return numpy.nan
 
     @property
-    def pointing(self) -> npt.NDArray[npt.Shape["2"], npt.Float64]:
+    def pointing(self) -> npt.NDArray[numpy.float64]:
         """Returns the camera pointing at its central pixel."""
 
         if not self.wcs:
@@ -248,7 +248,7 @@ class GuiderSolution(BaseSolution):
     frameno: int
     telescope: str
     solutions: list[CameraSolution]
-    guide_pixel: npt.NDArray[npt.Shape["2"], npt.Float32]
+    guide_pixel: npt.NDArray[numpy.float32]
     ra_field: float = numpy.nan
     dec_field: float = numpy.nan
     pa_field: float = numpy.nan
@@ -281,7 +281,7 @@ class GuiderSolution(BaseSolution):
         raise KeyError(f"Invalid camera name {key!r}.")
 
     @property
-    def pointing(self) -> npt.NDArray[npt.Shape["2"], npt.Float64]:
+    def pointing(self) -> npt.NDArray[numpy.float64]:
         """Returns the telescope pointing at boresight from the WCS."""
 
         if not self.wcs:
@@ -291,7 +291,7 @@ class GuiderSolution(BaseSolution):
         return numpy.array([skyc.ra.deg, skyc.dec.deg])
 
     @property
-    def pixel_pointing(self) -> npt.NDArray[npt.Shape["2"], npt.Float64]:
+    def pixel_pointing(self) -> npt.NDArray[numpy.float64]:
         """Returns the telescope pointing at the full frame pixel from the WCS."""
 
         if not self.wcs:
@@ -542,7 +542,7 @@ class GlobalSolution(BaseSolution, CoAddWarningsMixIn):
         )
 
     @property
-    def pointing(self) -> npt.NDArray[npt.Shape["2"], npt.Float64]:
+    def pointing(self) -> npt.NDArray[numpy.float64]:
         """Returns the camera pointing at its central pixel."""
 
         if not self.wcs:

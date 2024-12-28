@@ -163,6 +163,8 @@ def save_subplot(
     # For text objects, we need to draw the figure first, otherwise
     # the extents are undefined.
     for ax in axes:
+        assert ax.figure, "Axes must belong to a figure."
+
         ax.figure.canvas.draw()
 
         items += ax.get_xticklabels()
@@ -216,7 +218,7 @@ def get_camera_figure(
             ax.set_title(f"Camera {str(name).capitalize()}")
 
         ax.ticklabel_format(useOffset=False)
-        ax.xaxis.get_major_locator().set_params(integer=True)
+        ax.xaxis.get_major_locator().set_params(integer=True)  # type: ignore
 
     return fig, axd
 
@@ -409,7 +411,7 @@ def plot_zero_point_or_fwhm(
         if "gaia" in frame_data.wcs_mode.values:
             frame_data = frame_data.loc[frame_data.wcs_mode == "gaia", :]
         else:
-            valid = numpy.in1d(frame_data.frameno, guider_data.frameno)
+            valid = numpy.isin(frame_data.frameno, guider_data.frameno)
             frame_data = frame_data.loc[valid]
 
         coadd_value = getattr(camera_solution, column)

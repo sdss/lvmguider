@@ -1481,12 +1481,17 @@ class SpecPatternEventHandler(PatternMatchingEventHandler):
 
         try:
             if event.event_type == "moved":
-                new_file = event.dest_path  # type: ignore
+                new_file = event.dest_path
             elif event.event_type == "created":
                 new_file = event.src_path
             else:
                 log.debug(f"Not handling event {event!r}")
                 return
+
+            if isinstance(new_file, bytes):
+                new_file = new_file.decode("utf-8")
+
+            assert isinstance(new_file, str), f"new_file is not a string: {new_file!r}"
 
             if new_file is None or new_file == "":
                 return
