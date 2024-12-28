@@ -1,5 +1,14 @@
 # Changelog
 
+## Next version
+
+### ⚙️ Engineering
+
+* Remove `nptyping` which is not compatible with Numpy 2.0.
+* Ensure support for 3.10-3.13.
+* Update workflows and Docker image building.
+
+
 ## 0.6.0 - November 28, 2024
 
 ### ✨ Improved
