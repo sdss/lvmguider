@@ -196,7 +196,7 @@ def elapsed_time(command: GuiderCommand, task_name: str = "unnamed"):
 
     yield
 
-    command.actor.log.debug(f"Elapsed time for task {task_name!r}: {time()-t0:.3f} s")
+    command.actor.log.debug(f"Elapsed time for task {task_name!r}: {time() - t0:.3f} s")
 
 
 def get_frameno(file: os.PathLike | str) -> int:

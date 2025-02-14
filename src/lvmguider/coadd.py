@@ -181,8 +181,7 @@ def coadd_telescope(
     """
 
     log.info(
-        f"Generating co-added frame for {telescope!r} for "
-        f"spectrograph file {file!s}"
+        f"Generating co-added frame for {telescope!r} for spectrograph file {file!s}"
     )
 
     try:
