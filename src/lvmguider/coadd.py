@@ -964,6 +964,15 @@ def create_coadd_header(solution: CoAdd_CameraSolution):
 
     wcs_header = solution.wcs.to_header() if solution.wcs is not None else []
 
+    # Bench temperatures.
+    bentempo = stacked.bentempo.dropna().mean()
+    bentempi = stacked.bentempi.dropna().mean()
+
+    if bentempo < -100:
+        bentempo = numpy.nan
+    if bentempi < -100:
+        bentempi = numpy.nan
+
     header = header_from_model("CAMERA_COADD")
 
     # Basic info
@@ -1004,6 +1013,9 @@ def create_coadd_header(solution: CoAdd_CameraSolution):
     header["PADRIFT"] = nan_or_none(pa_drift, 4)
 
     header["ZEROPT"] = nan_or_none(solution.zero_point, 3)
+
+    header["BENTEMPO"] = nan_or_none(bentempo, 1)
+    header["BENTEMPI"] = nan_or_none(bentempi, 1)
 
     header["SOLVED"] = solution.solved
     header.insert("FRAME0", ("", "/*** CO-ADDED PARAMETERS ***/"))
@@ -1089,6 +1101,15 @@ def create_global_header(solution: GlobalSolution):
 
         drift_warn = pa_drift > config["coadds"]["warnings"]["pa_drift"]
 
+    # Bench temperatures.
+    bentempo = frame_data.bentempo.dropna().mean()
+    bentempi = frame_data.bentempi.dropna().mean()
+
+    if bentempo < -100:
+        bentempo = numpy.nan
+    if bentempi < -100:
+        bentempi = numpy.nan
+
     wcs_header = []
     pa_warn: bool = False
     if solution.wcs is not None:
@@ -1132,6 +1153,9 @@ def create_global_header(solution: GlobalSolution):
     header["PADRIFT"] = nan_or_none(pa_drift, 4)
 
     header["ZEROPT"] = nan_or_none(solution.zero_point, 3)
+
+    header["BENTEMPO"] = nan_or_none(bentempo, 1)
+    header["BENTEMPI"] = nan_or_none(bentempi, 1)
 
     header["SOLVED"] = solution.solved
     header["NCAMSOL"] = solution.n_cameras_solved

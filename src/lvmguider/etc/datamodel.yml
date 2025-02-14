@@ -133,6 +133,8 @@ FRAMEDATA:
   pa: 'f4[pyarrow]'
   airmass: 'f4[pyarrow]'
   zero_point: 'f4[pyarrow]'
+  bentempo: 'f4[pyarrow]'
+  bentempi: 'f4[pyarrow]'
   stacked: 'bool[pyarrow]'
   solved: 'bool[pyarrow]'
   wcs_mode: 'string[pyarrow]'
@@ -197,6 +199,8 @@ CAMERA_COADD:
   PAMAX: [null, '[deg] Maximum PA from WCS']
   PADRIFT: [null, '[deg] PA drift in frame range']
   ZEROPT: [null, '[mag] Instrumental zero-point']
+  BENTEMPO: [null, '[degC] Temperature outside the optical bench']
+  BENTEMPI: [null, '[degC] Temperature inside the optical bench']
   SOLVED: [false, 'Was the co-added frame astrometrically solved?']
   WARNPADR: [null, 'PA drift > 0.1 degrees']
   WARNTRAN: [null, 'Poor transparency warning']
@@ -224,6 +228,8 @@ GLOBAL_COADD:
   PAMAX: [null, '[deg] Maximum PA from WCS']
   PADRIFT: [null, '[deg] PA drift in frame range']
   ZEROPT: [null, '[mag] Instrumental zero-point']
+  BENTEMPO: [null, '[degC] Temperature outside the optical bench']
+  BENTEMPI: [null, '[degC] Temperature inside the optical bench']
   SOLVED: [false, 'Was the global frame astrometrically solved?']
   NCAMSOL: [0, 'Number of co-add cameras used for the WCS']
   XFFPIX: [null, 'The x pixel of the full frame']

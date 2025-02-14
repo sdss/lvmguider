@@ -2,6 +2,10 @@
 
 ## Next version
 
+### ✨ Improved
+
+* Add `BENTEMPI` and `BENTEMPO` keywords to the co-added frames and Parquet files.
+
 ### ⚙️ Engineering
 
 * Remove `nptyping` which is not compatible with Numpy 2.0.

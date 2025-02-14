@@ -420,6 +420,9 @@ class FrameData:
         df = dataframe_from_model("FRAMEDATA")
         pointing = self.solution.pointing
 
+        bentempi = self.raw_header.get("BENTEMPI", numpy.nan)
+        bentempo = self.raw_header.get("BENTEMPO", numpy.nan)
+
         new_row = dict(
             frameno=self.frameno,
             mjd=self.sjd,
@@ -436,6 +439,8 @@ class FrameData:
             airmass=numpy.float32(self.airmass),
             zero_point=numpy.float32(self.solution.zero_point),
             stacked=bool(self.stacked),
+            bentempi=numpy.float32(bentempi),
+            bentempo=numpy.float32(bentempo),
             solved=bool(self.solution.solved),
             wcs_mode=self.solution.wcs_mode,
             is_focus_sweep=self.solution.is_focus_sweep,
