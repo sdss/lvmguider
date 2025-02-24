@@ -33,7 +33,7 @@ ENV UV_LINK_MODE=copy
 ENV PATH="$PATH:/opt/lvmguider/.venv/bin"
 
 # Sync the project
-RUN cd lvmgort && uv sync --frozen --no-cache --no-dev
+RUN cd lvmguider && uv sync --frozen --no-cache --no-dev
 
 # Set umask so that new files inherit the parent folder permissions.
 # Not sure this works so we are also setting the permissions in the entrypoint.
