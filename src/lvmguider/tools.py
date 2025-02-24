@@ -512,7 +512,7 @@ def get_dark_subtracted_data(
 
         dark: ARRAY_2D_F32 = dark_raw.data.astype("f4")
         dark_exptime: float = dark_raw.header["EXPTIME"]
-        data = data - dark / dark_exptime
+        data = data - (dark / dark_exptime).astype("f4")
 
         dark_sub = True
 
