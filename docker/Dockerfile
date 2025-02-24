@@ -1,5 +1,4 @@
-FROM python:3.12-slim-bookworm
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+FROM ghcr.io/astral-sh/uv:python3.13-bookworm-slim
 
 LABEL org.opencontainers.image.authors="Jose Sanchez-Gallego, gallegoj@uw.edu"
 LABEL org.opencontainers.image.source=https://github.com/sdss/lvmguider
@@ -34,7 +33,7 @@ ENV UV_LINK_MODE=copy
 ENV PATH="$PATH:/opt/lvmguider/.venv/bin"
 
 # Sync the project
-RUN cd lvmguider && uv sync --frozen --no-cache --no-dev
+RUN cd lvmgort && uv sync --frozen --no-cache --no-dev
 
 # Set umask so that new files inherit the parent folder permissions.
 # Not sure this works so we are also setting the permissions in the entrypoint.
