@@ -815,6 +815,7 @@ async def wait_until_cameras_are_idle(
     command: GuiderCommand,
     timeout: float | None = 30.0,
     interval: float = 2.0,
+    reconnect: bool = True,
 ):
     """Blocks until all the AG cameras for the telescope are idle."""
 
@@ -843,7 +844,21 @@ async def wait_until_cameras_are_idle(
         if elapsed == 0:
             command.warning("Waiting until cameras are idle.")
         elif timeout is not None and elapsed >= timeout:
-            raise TimeoutError("Timed out waiting for cameras to become idle.")
+            if not reconnect:
+                raise TimeoutError("Timed out waiting for cameras to become idle.")
+            else:
+                command.warning(
+                    "Timed out waiting for cameras to become idle. "
+                    "Reconnecting cameras."
+                )
+                reconnect_cmd = await command.send_command(
+                    agcam,
+                    "reconnect",
+                    internal=True,
+                )
+                if reconnect_cmd.status.did_fail:
+                    raise ValueError(f"Command '{agcam} reconnect' failed.")
+                return True
 
         await asyncio.sleep(interval)
         elapsed += interval

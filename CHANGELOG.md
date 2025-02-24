@@ -5,6 +5,7 @@
 ### ✨ Improved
 
 * Add `BENTEMPI` and `BENTEMPO` keywords to the co-added frames and Parquet files.
+* By default, `wait_until_cameras_are_idle` will reconnect the cameras if they are not idle after the timeout.
 
 ### ⚙️ Engineering
 
