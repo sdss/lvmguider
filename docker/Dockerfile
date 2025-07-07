@@ -38,6 +38,7 @@ RUN cd lvmguider && uv sync --frozen --no-cache --no-dev
 # Set umask so that new files inherit the parent folder permissions.
 # Not sure this works so we are also setting the permissions in the entrypoint.
 RUN echo "umask 0002" >> /etc/bash.bashrc
+RUN echo "umask 0002" >> /etc/profile
 
 COPY ./docker/docker-entrypoint.sh /
 RUN ["chmod", "+x", "/docker-entrypoint.sh"]
