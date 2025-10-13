@@ -560,6 +560,7 @@ class Guider:
         off_rot: float,
         timeout: float = 10,
         use_motor_axes: bool = False,
+        apply_all_at_once: bool = False,
     ) -> tuple[npt.NDArray, npt.NDArray, float]:
         """Sends a correction offset to the telescope.
 
@@ -586,6 +587,9 @@ class Guider:
             is applied as RA/Dec.
         applied_rot
             Correction applied to the k-mirror, in degrees.
+        apply_all_at_once
+            If :obj:`True`, applies the rotation and translation offsets in one go.
+            Otherwise applies the rotation correction first, if any, and returns.
 
         """
 
@@ -598,12 +602,37 @@ class Guider:
         min_rot_correction = self.config.get("min_rot_correction", 0.01)
         max_rot_correction = self.config.get("max_rot_correction", 3)
 
+        telescope = self.command.actor.telescope
+
+        # Rotation
+        guide_in_rot = self.config["has_kmirror"] and self.config["guide_in_rot"]
+
+        if guide_in_rot and not self.is_guiding():
+            if off_rot > max_rot_correction:
+                self.command.warning("Requested rotator correction is too big.")
+
+            # Note that we do not take abs(off_rot) here because we cannot apply
+            # correction in negative direction. This prevents that.
+            elif off_rot > min_rot_correction:
+                km = f"lvm.{telescope}.km"
+                cmd_km_str = f"slewAdjust --offset_angle {off_rot:.6f}"
+                cmd_km = await self.command.send_command(km, cmd_km_str)
+
+                if cmd_km.status.did_fail:
+                    self.command.error(f"Failed offsetting k-mirror {telescope}.")
+                    apply_all_at_once = True  # Rotation failed, so do translation.
+                else:
+                    applied_rot = off_rot
+
+                if not apply_all_at_once:
+                    return applied_radec, applied_motax, applied_rot
+
+        # Translation
+        pwi = f"lvm.{telescope}.pwi"
+
         if numpy.any(numpy.abs([off0, off1]) > max_ax_correction):
             self.command.error("Requested correction is too big. Not applying it.")
             return applied_radec, applied_motax, applied_rot
-
-        telescope = self.command.actor.telescope
-        pwi = f"lvm.{telescope}.pwi"
 
         if use_motor_axes is False:
             cmd_str = f"offset --ra_add_arcsec {off0} --dec_add_arcsec {off1}"
@@ -625,24 +654,6 @@ class Guider:
 
         if cmd.status.did_fail:
             raise RuntimeError(f"Failed offsetting telescope {telescope}.")
-
-        guide_in_rot = self.config["has_kmirror"] and self.config["guide_in_rot"]
-
-        if guide_in_rot and not self.is_guiding():
-            if off_rot > max_rot_correction:
-                self.command.warning("Requested rotator correction is too big.")
-
-            # Note that we do not take abs(off_rot) here because we cannot apply
-            # correction in negative direction. This prevents that.
-            elif off_rot > min_rot_correction:
-                km = f"lvm.{telescope}.km"
-                cmd_km_str = f"slewAdjust --offset_angle {off_rot:.6f}"
-                cmd_km = await self.command.send_command(km, cmd_km_str)
-
-                if cmd_km.status.did_fail:
-                    self.command.error(f"Failed offsetting k-mirror {telescope}.")
-                else:
-                    applied_rot = off_rot
 
         return applied_radec, applied_motax, applied_rot
 
