@@ -6,6 +6,7 @@
 
 * Back to using the official `sep` package from `sep-developers/sep` now that it's maintained again.
 * Apply rotation and translation corrections independently, starting with rotation until the rotator has converged. The first correction, however, applies both rotation and translation at once to minimize the number of telescope offsets.
+* Add solve time to the guider solution metadata and output files.
 
 
 ## 0.7.0 - February 27, 2025

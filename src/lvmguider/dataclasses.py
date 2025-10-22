@@ -114,6 +114,7 @@ class CameraSolution(BaseSolution):
     ref_frame: pathlib.Path | None = None
     wcs_mode: WCS_MODE_T = "none"
     guider_version: Version = Version("0.0.0")
+    solve_time: float | None = None
     hdul: fits.HDUList | None = None
 
     @classmethod
@@ -149,6 +150,7 @@ class CameraSolution(BaseSolution):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", category=FITSFixedWarning)
             solved = proc["SOLVED"]
+            solve_time = proc.get("SOLVET", None)
             wcs_mode = proc["WCSMODE"].lower()
             wcs = WCS(proc) if solved and wcs_mode != "none" else None
 
@@ -172,6 +174,7 @@ class CameraSolution(BaseSolution):
             matched=len(sources.ra.dropna()) > 0 if sources is not None else False,
             ref_frame=ref_frame,
             guider_version=guiderv,
+            solve_time=solve_time,
             hdul=hdul,
         )
 
@@ -386,6 +389,15 @@ class GuiderSolution(BaseSolution):
             guider_version=guiderv,
         )
 
+    @property
+    def solve_time(self):
+        """Returns the total time required to solve all cameras.."""
+
+        if all(cs.solve_time is None for cs in self.solutions):
+            return None
+
+        return max([cs.solve_time or 0.0 for cs in self.solutions])
+
 
 @dataclass(kw_only=True)
 class FrameData:
@@ -597,6 +609,7 @@ class GlobalSolution(BaseSolution, CoAddWarningsMixIn):
                 pa=numpy.float32(pa),
                 zero_point=numpy.float32(gs.zero_point),
                 solved=bool(gs.solved),
+                solve_time=numpy.float32(gs.solve_time),
                 n_cameras_solved=int(gs.n_cameras_solved),
                 guide_mode=gs.guide_mode,
                 x_ff_pixel=numpy.float32(gs.guide_pixel[0]),

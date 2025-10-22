@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import pathlib
+import time
 
 from typing import TYPE_CHECKING
 
@@ -383,6 +384,8 @@ class Guider:
     ):
         """Astrometrically solves a single camera using astrometry.net or k-d tree."""
 
+        t0 = time.time()
+
         file = pathlib.Path(file)
         frameno = get_frameno(file)
         hdul = fits.open(str(file))
@@ -491,6 +494,8 @@ class Guider:
         zp = estimate_zeropoint(data, sources)
         sources.update(zp)
 
+        solve_time = round(time.time() - t0, 3)
+
         camera_solution = CameraSolution(
             frameno=frameno,
             camera=camname,
@@ -501,6 +506,7 @@ class Guider:
             matched=matched,
             ref_frame=ref_frame if wcs is not None else None,
             telescope=self.telescope,
+            solve_time=solve_time,
         )
 
         if camera_solution.solved is False:
@@ -730,7 +736,8 @@ class Guider:
         gheader["PAFIELD"] = numpy.round(self.field_centre[2], 4)
         gheader["XFFPIX"] = guider_solution.guide_pixel[0]
         gheader["ZFFPIX"] = guider_solution.guide_pixel[1]
-        gheader["SOLVED"] = guider_solution.solved
+        gheader["SOLVED"] = nan_or_none(guider_solution.solved, 3)
+        gheader["SOLVET"] = guider_solution.solve_time
         gheader["NCAMSOL"] = guider_solution.n_cameras_solved
         gheader["RAMEAS"] = nan_or_none(guider_solution.pointing[0], 6)
         gheader["DECMEAS"] = nan_or_none(guider_solution.pointing[1], 6)

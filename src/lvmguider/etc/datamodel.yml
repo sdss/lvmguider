@@ -90,6 +90,7 @@ GUIDERDATA_HEADER:
   DIRNAME: [null, 'Original file directory']
   SOURCESF: [null, 'Sources file']
   SOLVED: [False, 'Astrometric solution found?']
+  SOLVET: [null, '[s] Time needed to solve the frame']
   NCAMSOL: [0, 'Number of cameras combined for the WCS']
   XFFPIX: [null, 'The x pixel of the full frame']
   ZFFPIX: [null, 'The z pixel of the full frame']
@@ -146,6 +147,7 @@ GUIDERDATA_FRAME:
   mjd: 'int32[pyarrow]'
   date_obs: 'string[pyarrow]'
   solved: 'bool[pyarrow]'
+  solve_time: 'f4[pyarrow]'
   n_cameras_solved: 'int8[pyarrow]'
   guide_mode: 'string[pyarrow]'
   fwhm: 'f4[pyarrow]'
