@@ -124,6 +124,8 @@ class Guider:
 
         self.solutions: dict[int, GuiderSolution] = {}
 
+        self.n_iteration: int = 1
+
     @property
     def last(self):
         """Returns the last solution."""
@@ -323,6 +325,7 @@ class Guider:
                     corr_rot,
                     use_motor_axes=True,
                     timeout=timeout,
+                    apply_all_at_once=(self.n_iteration == 1) and mode == "acquisition",
                 )
 
                 guider_solution.correction_applied = True
@@ -370,6 +373,8 @@ class Guider:
                 self.revert_to_acquisition()
 
             await self.update_fits(guider_solution)
+
+            self.n_iteration += 1
 
     async def solve_camera(
         self,
