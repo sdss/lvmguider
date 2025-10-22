@@ -436,21 +436,27 @@ class Guider:
             basename = file.name.replace(".fits.gz", "").replace(".fits", "")
             astrometrynet_output_root = str(file.parent / "astrometry" / basename)
 
-            solution: AstrometrySolution = await run_in_executor(
-                solve_camera_with_astrometrynet,
-                sources,
-                ra=ra,
-                dec=dec,
-                solve_locs_kwargs={"output_root": astrometrynet_output_root},
-            )
+            with elapsed_time(self.command, "solve cameras with astrometry.net"):
+                solution: AstrometrySolution = await run_in_executor(
+                    solve_camera_with_astrometrynet,
+                    sources,
+                    ra=ra,
+                    dec=dec,
+                    solve_locs_kwargs={"output_root": astrometrynet_output_root},
+                )
 
             # Now match with Gaia.
             if solution.solved:
-                # TODO: this should run in an executor.
-                matched_sources, _ = match_with_gaia(solution.wcs, sources, concat=True)
-                sources = matched_sources
-                matched = True
-                wcs = solution.wcs
+                with elapsed_time(self.command, "match sources with Gaia"):
+                    # TODO: this should run in an executor.
+                    matched_sources, _ = match_with_gaia(
+                        solution.wcs,
+                        sources,
+                        concat=True,
+                    )
+                    sources = matched_sources
+                    matched = True
+                    wcs = solution.wcs
             else:
                 self.command.warning(
                     f"Failed solving camera {camname} with astrometry.net."
@@ -469,12 +475,13 @@ class Guider:
 
             # Here we match with Gaia first, then use those matches to
             # define the WCS.
-            matched_sources, nmatches = match_with_gaia(
-                ref_wcs,
-                sources,
-                concat=True,
-                max_separation=5,
-            )
+            with elapsed_time(self.command, "match sources with Gaia"):
+                matched_sources, nmatches = match_with_gaia(
+                    ref_wcs,
+                    sources,
+                    concat=True,
+                    max_separation=5,
+                )
 
             sources = matched_sources
             matched = True
@@ -487,12 +494,14 @@ class Guider:
                 )
                 return await self.solve_camera(file, force_astrometry_net=True)
             else:
-                wcs = wcs_from_gaia(matched_sources)
-                wcs = wcs
+                with elapsed_time(self.command, "creating WCS from Gaia sources"):
+                    wcs = wcs_from_gaia(matched_sources)
+                    wcs = wcs
 
         # Get zero-point. This is safe even if it did not solve.
-        zp = estimate_zeropoint(data, sources)
-        sources.update(zp)
+        with elapsed_time(self.command, "estimating zero point"):
+            zp = estimate_zeropoint(data, sources)
+            sources.update(zp)
 
         solve_time = round(time.time() - t0, 3)
 
