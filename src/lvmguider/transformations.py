@@ -217,9 +217,11 @@ def solve_locs(
 
     """
 
-    lower_bound = 0.8  # Pixel scale hints (arcsec/pixel)
-    upper_bound = 1.2
-    radius = 20  # Search radius in degrees
+    astronet_config = config.get("astrometrynet", {})
+
+    lower_bound = astronet_config.get("pixel_scale_lo", 0.9)  # Pixel scale (arcsec/pix)
+    upper_bound = astronet_config.get("pixel_scale_hi", 1.1)
+    radius = astronet_config.get("radius", 3)  # Search radius (degrees)
 
     if full_frame:
         midX, midZ = config["xz_full_frame"]  # Middle of full Frame
