@@ -436,7 +436,7 @@ class Guider:
             basename = file.name.replace(".fits.gz", "").replace(".fits", "")
             astrometrynet_output_root = str(file.parent / "astrometry" / basename)
 
-            with elapsed_time(self.command, "solve cameras with astrometry.net"):
+            with elapsed_time(self.command, f"{camname}: solve with astrometry.net"):
                 solution: AstrometrySolution = await run_in_executor(
                     solve_camera_with_astrometrynet,
                     sources,
@@ -447,7 +447,7 @@ class Guider:
 
             # Now match with Gaia.
             if solution.solved:
-                with elapsed_time(self.command, "match sources with Gaia"):
+                with elapsed_time(self.command, f"{camname}: match sources with Gaia"):
                     # TODO: this should run in an executor.
                     matched_sources, _ = match_with_gaia(
                         solution.wcs,
@@ -475,7 +475,7 @@ class Guider:
 
             # Here we match with Gaia first, then use those matches to
             # define the WCS.
-            with elapsed_time(self.command, "match sources with Gaia"):
+            with elapsed_time(self.command, f"{camname}: match sources with Gaia"):
                 matched_sources, nmatches = match_with_gaia(
                     ref_wcs,
                     sources,
@@ -499,7 +499,7 @@ class Guider:
                     wcs = wcs
 
         # Get zero-point. This is safe even if it did not solve.
-        with elapsed_time(self.command, "estimating zero point"):
+        with elapsed_time(self.command, f"{camname}: estimating zero point"):
             zp = estimate_zeropoint(data, sources)
             sources.update(zp)
 
