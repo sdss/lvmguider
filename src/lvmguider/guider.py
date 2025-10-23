@@ -745,7 +745,7 @@ class Guider:
         gheader["PAFIELD"] = numpy.round(self.field_centre[2], 4)
         gheader["XFFPIX"] = guider_solution.guide_pixel[0]
         gheader["ZFFPIX"] = guider_solution.guide_pixel[1]
-        gheader["SOLVED"] = nan_or_none(guider_solution.solved, 3)
+        gheader["SOLVED"] = guider_solution.solved
         gheader["SOLVET"] = guider_solution.solve_time
         gheader["NCAMSOL"] = guider_solution.n_cameras_solved
         gheader["RAMEAS"] = nan_or_none(guider_solution.pointing[0], 6)
