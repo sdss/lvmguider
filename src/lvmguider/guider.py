@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import pathlib
+import time
 
 from typing import TYPE_CHECKING
 
@@ -123,6 +124,8 @@ class Guider:
         self.site = EarthLocation(**self.config["site"])
 
         self.solutions: dict[int, GuiderSolution] = {}
+
+        self.n_iteration: int = 1
 
     @property
     def last(self):
@@ -323,6 +326,7 @@ class Guider:
                     corr_rot,
                     use_motor_axes=True,
                     timeout=timeout,
+                    apply_all_at_once=(self.n_iteration == 1) and mode == "acquisition",
                 )
 
                 guider_solution.correction_applied = True
@@ -371,12 +375,16 @@ class Guider:
 
             await self.update_fits(guider_solution)
 
+            self.n_iteration += 1
+
     async def solve_camera(
         self,
         file: str | pathlib.Path,
         force_astrometry_net: bool = False,
     ):
         """Astrometrically solves a single camera using astrometry.net or k-d tree."""
+
+        t0 = time.time()
 
         file = pathlib.Path(file)
         frameno = get_frameno(file)
@@ -428,21 +436,27 @@ class Guider:
             basename = file.name.replace(".fits.gz", "").replace(".fits", "")
             astrometrynet_output_root = str(file.parent / "astrometry" / basename)
 
-            solution: AstrometrySolution = await run_in_executor(
-                solve_camera_with_astrometrynet,
-                sources,
-                ra=ra,
-                dec=dec,
-                solve_locs_kwargs={"output_root": astrometrynet_output_root},
-            )
+            with elapsed_time(self.command, f"{camname}: solve with astrometry.net"):
+                solution: AstrometrySolution = await run_in_executor(
+                    solve_camera_with_astrometrynet,
+                    sources,
+                    ra=ra,
+                    dec=dec,
+                    solve_locs_kwargs={"output_root": astrometrynet_output_root},
+                )
 
             # Now match with Gaia.
             if solution.solved:
-                # TODO: this should run in an executor.
-                matched_sources, _ = match_with_gaia(solution.wcs, sources, concat=True)
-                sources = matched_sources
-                matched = True
-                wcs = solution.wcs
+                with elapsed_time(self.command, f"{camname}: match sources with Gaia"):
+                    # TODO: this should run in an executor.
+                    matched_sources, _ = match_with_gaia(
+                        solution.wcs,
+                        sources,
+                        concat=True,
+                    )
+                    sources = matched_sources
+                    matched = True
+                    wcs = solution.wcs
             else:
                 self.command.warning(
                     f"Failed solving camera {camname} with astrometry.net."
@@ -461,12 +475,13 @@ class Guider:
 
             # Here we match with Gaia first, then use those matches to
             # define the WCS.
-            matched_sources, nmatches = match_with_gaia(
-                ref_wcs,
-                sources,
-                concat=True,
-                max_separation=5,
-            )
+            with elapsed_time(self.command, f"{camname}: match sources with Gaia"):
+                matched_sources, nmatches = match_with_gaia(
+                    ref_wcs,
+                    sources,
+                    concat=True,
+                    max_separation=5,
+                )
 
             sources = matched_sources
             matched = True
@@ -479,12 +494,16 @@ class Guider:
                 )
                 return await self.solve_camera(file, force_astrometry_net=True)
             else:
-                wcs = wcs_from_gaia(matched_sources)
-                wcs = wcs
+                with elapsed_time(self.command, "creating WCS from Gaia sources"):
+                    wcs = wcs_from_gaia(matched_sources)
+                    wcs = wcs
 
         # Get zero-point. This is safe even if it did not solve.
-        zp = estimate_zeropoint(data, sources)
-        sources.update(zp)
+        with elapsed_time(self.command, f"{camname}: estimating zero point"):
+            zp = estimate_zeropoint(data, sources)
+            sources.update(zp)
+
+        solve_time = round(time.time() - t0, 3)
 
         camera_solution = CameraSolution(
             frameno=frameno,
@@ -496,6 +515,7 @@ class Guider:
             matched=matched,
             ref_frame=ref_frame if wcs is not None else None,
             telescope=self.telescope,
+            solve_time=solve_time,
         )
 
         if camera_solution.solved is False:
@@ -726,6 +746,7 @@ class Guider:
         gheader["XFFPIX"] = guider_solution.guide_pixel[0]
         gheader["ZFFPIX"] = guider_solution.guide_pixel[1]
         gheader["SOLVED"] = guider_solution.solved
+        gheader["SOLVET"] = guider_solution.solve_time
         gheader["NCAMSOL"] = guider_solution.n_cameras_solved
         gheader["RAMEAS"] = nan_or_none(guider_solution.pointing[0], 6)
         gheader["DECMEAS"] = nan_or_none(guider_solution.pointing[1], 6)

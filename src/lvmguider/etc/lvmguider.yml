@@ -28,6 +28,11 @@ apply_guider_corrections: true
 xz_full_frame: [2500.0, 1000.0]
 xz_ag_frame: [800.0, 550.0]
 
+astrometrynet:
+  pixel_scale_lo: 0.9
+  pixel_scale_hi: 1.1
+  radius: 3.0
+
 offset:
   axis_error: 1.0
   timeout:
