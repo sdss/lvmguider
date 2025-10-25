@@ -10,6 +10,7 @@
 ### ⚙️ Engineering
 
 * Back to using the official `sep` package from `sep-developers/sep` now that it's maintained again.
+* Test using Python 3.14.
 
 
 ## 0.7.0 - February 27, 2025
