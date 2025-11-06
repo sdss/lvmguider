@@ -129,8 +129,9 @@ async def adjust_focus(
     ref_focus = command.actor._reference_focus
 
     if focus_value is None:
+        temperature_focus_value = await focuser.get_from_temperature(command, c_temp)
         if ref_focus is None:
-            focus_value = await focuser.get_from_temperature(command, c_temp)
+            focus_value = temperature_focus_value
             reference = True
             if relative:
                 command.warning("No reference focus found. Using bench temperature.")
@@ -145,6 +146,9 @@ async def adjust_focus(
                 f"Reference temperature: {c_temp:.2f} C. "
                 f"Delta temperature: {delta_t:.2f} C."
             )
+
+            offset = focus_value - temperature_focus_value
+            command.debug(f"Offset from temperature focus: {offset:.2f} DT")
 
             delta_focus = round(focus_value - c_focus, 2)
             if abs(delta_focus) > 0.01:

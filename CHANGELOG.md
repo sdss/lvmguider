@@ -1,5 +1,12 @@
 # Changelog
 
+## Next release
+
+### ✨ Improved
+
+* Report offset from temperature focus.
+
+
 ## 0.8.0 - October 25, 2025
 
 ### ✨ Improved
