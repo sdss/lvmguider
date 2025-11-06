@@ -14,6 +14,7 @@ from datetime import datetime
 from typing import Any, cast
 
 import numpy
+import numpy.typing as npt
 import pandas
 from astropy.coordinates import EarthLocation, SkyCoord
 from astropy.time import Time
@@ -538,6 +539,8 @@ def match_with_gaia(
 
     tree = KDTree(gaia_sources.loc[:, ["xpix", "ypix"]].to_numpy())
     dd, ii = tree.query(sources.loc[:, ["x", "y"]].to_numpy())
+    dd, ii = cast(ARRAY_1D_F32, dd), cast(npt.NDArray[numpy.int32], ii)
+
     valid = dd < max_separation
 
     # Get Gaia rows for the valid matches. Change their indices to those
