@@ -5,6 +5,7 @@
 ### ✨ Improved
 
 * Report offset from temperature focus.
+* Upgrade to `sdsstools>=1.9.5` and `sdss-clu>=2.6.0`.
 
 
 ## 0.8.0 - October 25, 2025

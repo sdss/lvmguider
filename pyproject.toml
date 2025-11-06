@@ -10,8 +10,8 @@ readme = "README.md"
 requires-python = ">=3.10,<4"
 
 dependencies = [
-    "sdsstools>=1.2.3",
-    "sdss-clu>=2.2.0",
+    "sdsstools>=1.9.5",
+    "sdss-clu>=2.6.0",
     "click-default-group>=1.2.2",
     "typing-extensions>=4.5.0",
     "astropy>=6.0.0; python_version < '3.11'",
