@@ -337,9 +337,9 @@ class Focuser:
                 )
             )
 
-            x = fwhm.index.to_numpy()
-            y = fwhm.fwhm.to_numpy()
-            w = 1.0 / fwhm["std"].to_numpy()
+            x = fwhm.index.to_numpy(dtype=numpy.float32)
+            y = fwhm.fwhm.to_numpy(dtype=numpy.float32)
+            w = 1.0 / fwhm["std"].to_numpy(dtype=numpy.float32)
             spline, R2 = fit_spline(x, y, w=w)
 
             x_refine = numpy.arange(numpy.min(x), numpy.max(x), 0.01)
