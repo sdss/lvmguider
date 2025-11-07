@@ -217,6 +217,11 @@ class Focuser:
             )
         )
 
+        focus_value = fit_data["xmin"]
+        temperature_focus = await self.get_from_temperature(command, bench_temperature)
+        offset = focus_value - temperature_focus
+        command.debug(f"Offset from temperature focus: {offset:.2f} DT")
+
         command.actor._reference_focus = ReferenceFocus(
             focus=fit_data["xmin"],
             fwhm=fit_data["ymin"],

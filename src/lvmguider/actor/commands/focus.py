@@ -147,9 +147,6 @@ async def adjust_focus(
                 f"Delta temperature: {delta_t:.2f} C."
             )
 
-            offset = focus_value - temperature_focus_value
-            command.debug(f"Offset from temperature focus: {offset:.2f} DT")
-
             delta_focus = round(focus_value - c_focus, 2)
             if abs(delta_focus) > 0.01:
                 command.debug(f"Focus will be adjusted by {delta_focus:.2f} DT.")
