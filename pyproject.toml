@@ -16,7 +16,7 @@ dependencies = [
     "typing-extensions>=4.5.0",
     "astropy>=6.0.0; python_version < '3.11'",
     "astropy>=7.0.0; python_version >= '3.11'",
-    "pandas>=2.0.0",
+    "pandas>=2.0.0,<3.0.0",
     "sep>=1.4.1",
     "seaborn>=0.13.2",
     "numpy>=2.0.0; python_version >= '3.11'",
