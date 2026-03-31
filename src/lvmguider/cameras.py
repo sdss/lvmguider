@@ -235,7 +235,7 @@ class Cameras:
 
         self.last_seqno = -1
 
-    def get_next_seqno(self):
+    def get_next_seqno(self) -> int:
         """Determines the next exposure sequence number."""
 
         if get_sjd("LCO") == self.sjd and self.last_seqno >= 0:
