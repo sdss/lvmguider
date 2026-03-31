@@ -55,7 +55,7 @@ def plot_qa(
         style="darkgrid",
         palette="deep",
         font="serif",
-        font_scale=1.2,  # type: ignore
+        font_scale=1.2,
     )
 
     with plt.ioff():
@@ -151,11 +151,7 @@ def save_subplot(
                         [bbox_range[2], bbox_range[3]],
                     ]
                 )
-            ).transformed(
-                (
-                    fig.transFigure - fig.dpi_scale_trans  # type: ignore
-                )
-            ),
+            ).transformed((fig.transFigure - fig.dpi_scale_trans)),
         )
         return
 
@@ -170,7 +166,7 @@ def save_subplot(
         items += ax.get_xticklabels()
         items += ax.get_yticklabels()
         items += [ax.get_xaxis().get_label(), ax.get_yaxis().get_label()]
-        items += [ax, ax.title]  # type: ignore
+        items += [ax, ax.title]
 
     bbox = Bbox.union([item.get_window_extent() for item in items])
 
@@ -179,7 +175,7 @@ def save_subplot(
     else:
         bbox = bbox.expanded(1.0 + pad, 1.0 + pad)
 
-    extent = bbox.transformed(fig.dpi_scale_trans.inverted())  # type: ignore
+    extent = bbox.transformed(fig.dpi_scale_trans.inverted())
 
     fig.savefig(str(path), bbox_inches=extent)
 
@@ -218,7 +214,7 @@ def get_camera_figure(
             ax.set_title(f"Camera {str(name).capitalize()}")
 
         ax.ticklabel_format(useOffset=False)
-        ax.xaxis.get_major_locator().set_params(integer=True)  # type: ignore
+        ax.xaxis.get_major_locator().set_params(integer=True)
 
     return fig, axd
 
@@ -249,7 +245,7 @@ def plot_position_angle(
             continue
 
         # Unhide plot.
-        ax = axd[camera]  # type: ignore
+        ax = axd[camera]
         ax.axis("on")
 
         # Plot PA.
@@ -283,7 +279,7 @@ def plot_position_angle(
     guider_data = guider_data.loc[guider_data.guide_mode == "guide"]
 
     if len(guider_data.pa.dropna()) >= 2:
-        ax = axd["global"]  # type: ignore
+        ax = axd["global"]
         ax.axis("on")
 
         _plot_pa_axes(ax, guider_data, pa_error_mode="mean", legend=True)
@@ -369,9 +365,9 @@ def _plot_pa_axes(
     # The left and right y-axis are different z-stacks so it's not possible to mix
     # and match. This moves the right y-axis to the background.
     right_ax.set_zorder(-1)
-    ax.patch.set_visible(False)  # type: ignore
+    ax.patch.set_visible(False)
     ax.grid(False)
-    right_ax.patch.set_visible(True)  # type: ignore
+    right_ax.patch.set_visible(True)
 
     ax.set_xlabel("Frame number")
     ax.set_ylabel("Position angle [deg]", labelpad=10)
@@ -420,7 +416,7 @@ def plot_zero_point_or_fwhm(
             continue
 
         # Un-hide the axes.
-        ax = axd[camera]  # type: ignore
+        ax = axd[camera]
         ax.axis("on")
 
         # Plot data.
@@ -456,7 +452,7 @@ def plot_zero_point_or_fwhm(
     global_value = getattr(solution, column)
 
     if len(guider_data.zero_point.dropna()) >= 2 or not numpy.isnan(global_value):
-        ax = axd["global"]  # type: ignore
+        ax = axd["global"]
         ax.axis("on")
 
         _plot_zero_point_or_fwhm_axes(
@@ -591,7 +587,7 @@ def plot_guider_offsets(
     gdata["separation"] = numpy.hypot(gdata.ra_off, gdata.dec_off)
     sep_data = gdata.loc[:, ["frameno", "separation"]]
 
-    sep_ax = axd["sep"]  # type: ignore
+    sep_ax = axd["sep"]
     (sep_plot,) = sep_ax.plot(sep_data.frameno, sep_data.separation, "b-")
     sep_ax.set_xlabel("Frame number")
     sep_ax.set_ylabel("Separation [arcsec]", labelpad=10)
@@ -608,7 +604,7 @@ def plot_guider_offsets(
     sep_ax_r.grid(False)
 
     # Bottom left panel. Plot the measured offsets in RA, Dec..
-    meas_ax = axd["meas"]  # type: ignore
+    meas_ax = axd["meas"]
     meas_ax.plot(gdata.frameno, gdata.ra_off, "b-", label="RA", linewidth=0.5)
     meas_ax.plot(gdata.frameno, gdata.dec_off, "r-", label="Dec", linewidth=0.5)
     meas_ax.legend(loc="lower left")
@@ -618,7 +614,7 @@ def plot_guider_offsets(
     # Bottom right panel. Plot the applied corrections in RA, Dec.
     # No point in plotting PA corrections since they are not applied
     # during guiding and we have excluded acquisition.
-    appl_ax = axd["applied"]  # type: ignore
+    appl_ax = axd["applied"]
     appl_ax.plot(gdata.frameno, gdata.ax0_applied, "b-", linewidth=0.5)
     appl_ax.plot(gdata.frameno, gdata.ax1_applied, "r-", linewidth=0.5)
     appl_ax.set_xlabel("Frame number")

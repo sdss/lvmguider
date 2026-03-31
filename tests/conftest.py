@@ -35,7 +35,7 @@ actor_config = {
 async def actor():
     _actor = LVMGuiderActor.from_config(actor_config)
 
-    _actor = await setup_test_actor(_actor)  # type: ignore
+    _actor = await setup_test_actor(_actor)
 
     yield _actor
 

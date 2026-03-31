@@ -335,7 +335,7 @@ class Guider:
             self.command.actor.status &= ~GuiderStatus.PROCESSING
             self.command.actor.status &= ~GuiderStatus.CORRECTING
 
-            guider_solution.correction = [*applied_motax.tolist(), applied_rot]  # type: ignore
+            guider_solution.correction = [*applied_motax.tolist(), applied_rot]
 
             self.command.info(
                 correction_applied={

@@ -364,7 +364,7 @@ def extract_marginal(
     # Reject non-stellar objects and mark them as invalid.
     valid_fwhm = detections.loc[detections.valid == 1, "fwhm"]
     fwhm_masked = sigma_clip(valid_fwhm.to_numpy(), sigma=2)
-    invalid_index = valid_fwhm.index[fwhm_masked.mask]  # type: ignore
+    invalid_index = valid_fwhm.index[fwhm_masked.mask]
     detections.loc[invalid_index, "valid"] = 0
 
     if plot is not None:
