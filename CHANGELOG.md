@@ -5,6 +5,7 @@
 ### ⚙️ Engineering
 
 * Update configuration for Ruff and ty and reformat files.
+* Update workflows.
 
 
 ## 0.8.1 - November 11, 2025
