@@ -15,6 +15,7 @@ pid:
 
 max_ax_correction: 3600
 
+acquire_in_rot: false
 guide_in_rot: false
 has_kmirror: true
 min_rot_correction: 0.01

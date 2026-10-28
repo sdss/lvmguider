@@ -153,6 +153,11 @@ class Guider:
 
         return bool(self.command.actor.status & GuiderStatus.GUIDING)
 
+    def is_acquiring(self):
+        """Are we acquiring?"""
+
+        return bool(self.command.actor.status & GuiderStatus.ACQUIRING)
+
     def revert_to_acquisition(self):
         """Reset the flags for acquisition mode."""
 
@@ -347,7 +352,7 @@ class Guider:
             sep_reached = guider_solution.separation < self.guide_tolerance
 
             # Have we converged in PA?
-            if self.config["has_kmirror"] and self.config["guide_in_rot"]:
+            if self._should_guide_in_rot():
                 pa_is_finite = not numpy.isnan(offset_pa)
                 pa_reached = pa_is_finite and abs(offset_pa) < self.pa_tolerance
             else:
@@ -356,6 +361,8 @@ class Guider:
             # If the separation is > certain threshold (which usually is larger
             # than the threshold for considering we are guiding in the first place)
             # then we revert to acquisition.
+            # We don't do this for PA. Once the PA has been reached we normally won't
+            # be guiding on it and, regardless, the algorithm would not change.
             revert = guider_solution.separation > revert_to_acquistion_threshold
 
             if sep_reached and pa_reached and not self.is_guiding():
@@ -371,6 +378,21 @@ class Guider:
             await self.update_fits(guider_solution)
 
             self.n_iteration += 1
+
+    def _should_guide_in_rot(self):
+        """Returns whether we should guide in rotation."""
+
+        has_kmirror = self.config["has_kmirror"]
+        guide_in_rot = self.config["guide_in_rot"]
+        acquire_in_rot = self.config["acquire_in_rot"]
+
+        is_guiding = self.is_guiding()
+        is_acquiring = self.is_acquiring()
+
+        if not has_kmirror or (not is_acquiring and not is_guiding):
+            return False
+
+        return bool((is_guiding and guide_in_rot) or (is_acquiring and acquire_in_rot))
 
     async def solve_camera(
         self,
@@ -619,9 +641,7 @@ class Guider:
         telescope = self.command.actor.telescope
 
         # Rotation
-        guide_in_rot = self.config["has_kmirror"] and self.config["guide_in_rot"]
-
-        if guide_in_rot and not self.is_guiding():
+        if self._should_guide_in_rot():
             if abs(off_rot) > max_rot_correction:
                 self.command.warning("Requested rotator correction is too big.")
 
