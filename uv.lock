@@ -1169,6 +1169,7 @@ name = "lvmguider"
 version = "0.8.2a1"
 source = { editable = "." }
 dependencies = [
+    { name = "anyio" },
     { name = "astropy" },
     { name = "click-default-group" },
     { name = "fastparquet" },
@@ -1218,6 +1219,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "anyio", specifier = ">=4.15.1" },
     { name = "astropy", marker = "python_full_version < '3.11'", specifier = ">=6.0.0" },
     { name = "astropy", marker = "python_full_version >= '3.11'", specifier = ">=7.0.0" },
     { name = "click-default-group", specifier = ">=1.2.2" },
