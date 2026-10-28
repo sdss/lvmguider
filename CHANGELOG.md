@@ -2,6 +2,10 @@
 
 ## Next release
 
+### ✨ Improved
+
+* [#36](https://github.com/sdss/lvmguider/pull/36) Remove restriction that prevented the guider moving the k-mirror in the negative direction.
+
 ### ⚙️ Engineering
 
 * Update configuration for Ruff and ty and reformat files.
