@@ -15,11 +15,12 @@ import pathlib
 import re
 import warnings
 from collections import defaultdict
+from collections.abc import Sequence
 from contextlib import contextmanager
 from functools import partial
 from time import time
 
-from typing import TYPE_CHECKING, Any, Sequence, cast
+from typing import TYPE_CHECKING, Any
 
 import numpy
 import numpy.typing as npt
@@ -238,14 +239,14 @@ def get_db_connection(
     default_params = config.get("database", {}).get(profile, {}).copy()
     default_params = {kk: vv for kk, vv in default_params.items() if kk in PARAMS}
 
-    call_params = dict(
-        dbname=dbname,
-        host=host,
-        port=port,
-        user=user,
-        password=password,
-        pgpass_path=pgpass_path,
-    )
+    call_params = {
+        "dbname": dbname,
+        "host": host,
+        "port": port,
+        "user": user,
+        "password": password,
+        "pgpass_path": pgpass_path,
+    }
     call_params = {kk: vv for kk, vv in call_params.items() if vv is not None}
 
     db_params = default_params
@@ -337,7 +338,7 @@ def update_fits(
                 hdu.header[key] = value
 
 
-def get_gaia_sources(wcs: WCS, db_connection_params: dict[str, Any] = {}):
+def get_gaia_sources(wcs: WCS, db_connection_params: dict[str, Any] | None = None):
     """Returns a data frame with Gaia source information from a WCS.
 
     Parameters
@@ -350,6 +351,8 @@ def get_gaia_sources(wcs: WCS, db_connection_params: dict[str, Any] = {}):
 
     """
 
+    if db_connection_params is None:
+        db_connection_params = {}
     XZ_AG_FRAME = config["xz_ag_frame"]
 
     # A bit larger than reality to account for WCS imprecision.
@@ -573,8 +576,6 @@ def get_agcam_in_time_range(
 ):
     """Similar to `.get_files_in_time_range` but uses the keyword ``DATE-OBS``."""
 
-    global _DATEOBS_CACHE
-
     files = path.glob(pattern)
 
     matched: list[pathlib.Path] = []
@@ -739,7 +740,7 @@ def get_frame_range(
         if frameno >= frameno0 and frameno <= frameno1:
             selected.append(file)
 
-    return list(sorted(selected))
+    return sorted(selected)
 
 
 def polyfit_with_sigclip(
@@ -750,7 +751,7 @@ def polyfit_with_sigclip(
 ):
     """Fits a polynomial to data after sigma-clipping the dependent variable."""
 
-    valid = ~sigma_clip(y, sigma=sigma, masked=True).mask  # type:ignore
+    valid = ~sigma_clip(y, sigma=sigma, masked=True).mask
 
     return numpy.polyfit(x[valid], y[valid], deg)
 
@@ -803,8 +804,6 @@ def get_raw_extension(file: AnyPath | fits.HDUList):
     else:
         hdul = fits.open(str(file))
 
-    hdul = cast(Any, hdul)
-
     if "RAW" in hdul:
         return hdul["RAW"]
     else:
@@ -832,7 +831,7 @@ async def wait_until_cameras_are_idle(
             if "status" in reply.message:
                 states.append(reply.message["status"]["camera_state"])
 
-        if all([state == "idle" for state in states]):
+        if all(state == "idle" for state in states):
             # After the exposure is complete basecam sleeps for 0.5 seconds to
             # allow notification catchup and such. If a check happens during that
             # time the cameras would be idle but the command not done, so if we
@@ -919,7 +918,6 @@ def dataframe_to_database(
         schema, table_name = table_name.split(".")
     else:
         schema = None
-        table_name = table_name
 
     table = peewee.Table(table_name, schema=schema, columns=list(df.columns))
     table.bind(conn)

@@ -10,8 +10,9 @@ from __future__ import annotations
 
 import os
 import pathlib
+from collections.abc import Callable, Sequence
 
-from typing import TYPE_CHECKING, Callable, Sequence
+from typing import TYPE_CHECKING
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -151,7 +152,7 @@ def save_subplot(
                         [bbox_range[2], bbox_range[3]],
                     ]
                 )
-            ).transformed((fig.transFigure - fig.dpi_scale_trans)),
+            ).transformed(fig.transFigure - fig.dpi_scale_trans),
         )
         return
 
@@ -214,7 +215,7 @@ def get_camera_figure(
             ax.set_title(f"Camera {str(name).capitalize()}")
 
         ax.ticklabel_format(useOffset=False)
-        ax.xaxis.get_major_locator().set_params(integer=True)
+        ax.xaxis.get_major_locator().set_params(integer=True)  # ty: ignore[unknown-argument]
 
     return fig, axd
 

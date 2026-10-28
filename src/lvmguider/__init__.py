@@ -21,4 +21,4 @@ log = get_logger(NAME, use_rich_handler=True)
 
 
 pandas.options.future.infer_string = True
-pandas.options.mode.copy_on_write = "warn"
+pandas.options.mode.copy_on_write = "warn"  # ty: ignore[invalid-assignment]

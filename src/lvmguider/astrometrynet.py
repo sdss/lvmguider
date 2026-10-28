@@ -18,8 +18,9 @@ import warnings
 from dataclasses import dataclass
 from glob import glob
 
-from typing import NamedTuple, Optional, TypeVar
+from typing import NamedTuple, TypeVar
 
+import anyio
 import numpy
 import pandas
 from astropy.io import fits
@@ -52,6 +53,7 @@ class AstrometryNet:
             "which solve-field",
             shell=True,
             capture_output=True,
+            check=False,
         )
         solve_field_cmd.check_returncode()
 
@@ -62,19 +64,19 @@ class AstrometryNet:
 
     def configure(
         self,
-        backend_config: Optional[str] = None,
-        width: Optional[int] = None,
-        height: Optional[int] = None,
-        sort_column: Optional[str] = None,
-        sort_ascending: Optional[bool] = None,
-        no_plots: Optional[bool] = None,
-        ra: Optional[float] = None,
-        dec: Optional[float] = None,
-        radius: Optional[float] = None,
-        scale_low: Optional[float] = None,
-        scale_high: Optional[float] = None,
-        scale_units: Optional[str] = None,
-        dir: Optional[str] = None,
+        backend_config: str | None = None,
+        width: int | None = None,
+        height: int | None = None,
+        sort_column: str | None = None,
+        sort_ascending: bool | None = None,
+        no_plots: bool | None = None,
+        ra: float | None = None,
+        dec: float | None = None,
+        radius: float | None = None,
+        scale_low: float | None = None,
+        scale_high: float | None = None,
+        scale_units: str | None = None,
+        dir: str | None = None,
         **kwargs,
     ):
         """Configures how to run of ``solve-field```.
@@ -136,8 +138,6 @@ class AstrometryNet:
         }
         self._options.update(self._format_options(kwargs))
 
-        return
-
     def _format_options(self, options: dict):
         """Formats the option names."""
 
@@ -177,8 +177,8 @@ class AstrometryNet:
         self,
         files: PathLike | list[PathLike],
         shell: bool = True,
-        stdout: Optional[PathLike] = None,
-        stderr: Optional[PathLike] = None,
+        stdout: PathLike | None = None,
+        stderr: PathLike | None = None,
         **kwargs,
     ):
         """Runs astrometry.net synchronously.
@@ -222,11 +222,12 @@ class AstrometryNet:
             shell=shell,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            check=False,
         )
 
         elapsed = time.time() - t0
 
-        if stdout:
+        if stdout is not None:
             with open(stdout, "wb") as out:
                 if isinstance(args, str):
                     out.write(args.encode() + b"\n")
@@ -234,7 +235,7 @@ class AstrometryNet:
                     out.write(" ".join(args).encode() + b"\n")
                 out.write(cmd.stdout)
 
-        if stderr:
+        if stderr is not None:
             with open(stderr, "wb") as err:
                 err.write(cmd.stderr)
 
@@ -244,8 +245,8 @@ class AstrometryNet:
         self,
         files: PathLike | list[PathLike],
         shell: bool = True,
-        stdout: Optional[PathLike] = None,
-        stderr: Optional[PathLike] = None,
+        stdout: PathLike | None = None,
+        stderr: PathLike | None = None,
         **kwargs,
     ) -> TimedProcess:
         """Runs astrometry.net asynchronously.
@@ -300,17 +301,17 @@ class AstrometryNet:
 
         elapsed = time.time() - t0
 
-        if stdout:
-            with open(stdout, "wb") as out:
+        if stdout is not None:
+            async with await anyio.open_file(stdout, "wb") as out:
                 if isinstance(args, str):
-                    out.write(args.encode() + b"\n")
+                    await out.write(args.encode() + b"\n")
                 else:
-                    out.write(" ".join(args).encode() + b"\n")
-                out.write(stdout_bytes)
+                    await out.write(" ".join(args).encode() + b"\n")
+                await out.write(stdout_bytes)
 
-        if stderr:
-            with open(stderr, "wb") as err:
-                err.write(stderr_bytes)
+        if stderr is not None:
+            async with await anyio.open_file(stderr, "wb") as err:
+                await err.write(stderr_bytes)
 
         return TimedProcess(cmd, elapsed)
 
@@ -395,7 +396,8 @@ def astrometrynet_quick(
     if output_root:
         output_root = os.path.abspath(output_root)
     else:
-        output_root = tempfile.NamedTemporaryFile().name
+        with tempfile.NamedTemporaryFile() as tf:
+            output_root = tf.name
         plot = False
 
     dirname = os.path.dirname(output_root)
@@ -411,45 +413,43 @@ def astrometrynet_quick(
         ff.write("inparallel\n")
         ff.write(f"cpulimit {cpulimit}\n")
 
-        for index_path in index_paths.values():
-            ff.write(f"add_path {os.path.abspath(index_path)}\n")
+        ff.writelines(
+            f"add_path {os.path.abspath(index_path)}\n"
+            for index_path in index_paths.values()
+        )
 
         for series, index_path in index_paths.items():
             index_path = os.path.abspath(index_path)
             this_scales = scales.get(series, None) if scales is not None else None
             if this_scales is None:
                 scale_files = glob("index-*", root_dir=index_path)
-                for scale_file in scale_files:
-                    ff.write(f"index {scale_file}\n")
+                ff.writelines(f"index {scale_file}\n" for scale_file in scale_files)
             else:
                 for this_scale in this_scales:
                     series_scale = series + this_scale
                     scale_files = glob(f"index-{series_scale}*", root_dir=index_path)
                     if len(scale_files) == 0:
                         warnings.warn(f"No indices found for scale {series_scale}.")
-                    for scale_file in scale_files:
-                        ff.write(f"index {scale_file}\n")
+                    ff.writelines(f"index {scale_file}\n" for scale_file in scale_files)
 
-    opts = dict(
-        backend_config=str(backend_config),
-        width=width or max(regions.loc[:, "x"]),
-        height=height or max(regions.loc[:, "y"]),
-        no_plots=not plot,
-        scale_low=pixel_scale * pixel_scale_factor_lo,
-        scale_high=pixel_scale * pixel_scale_factor_hi,
-        scale_units="arcsecperpix",
-        sort_column="flux",
-        radius=radius,
-        corr=corr_file,
-    )
+    opts = {
+        "backend_config": str(backend_config),
+        "width": width or max(regions.loc[:, "x"]),
+        "height": height or max(regions.loc[:, "y"]),
+        "no_plots": not plot,
+        "scale_low": pixel_scale * pixel_scale_factor_lo,
+        "scale_high": pixel_scale * pixel_scale_factor_hi,
+        "scale_units": "arcsecperpix",
+        "sort_column": "flux",
+        "radius": radius,
+        "corr": corr_file,
+    }
     opts.update(kwargs)
 
     astrometry = AstrometryNet(**opts)
 
     xyls_path = os.path.join(dirname, outfile + ".xyls")
-    hdus = fits.HDUList(
-        [fits.PrimaryHDU(), fits.BinTableHDU(data=xyls.as_array())]  # type:ignore
-    )
+    hdus = fits.HDUList([fits.PrimaryHDU(), fits.BinTableHDU(data=xyls.as_array())])
     hdus.writeto(xyls_path, overwrite=True)
 
     wcs_output = pathlib.Path(dirname) / (outfile + ".wcs")
@@ -465,8 +465,17 @@ def astrometrynet_quick(
         dec=dec,
     )
 
-    stdout_s = open(stdout).read() if os.path.exists(stdout) else ""
-    stderr_s = open(stderr).read() if os.path.exists(stderr) else ""
+    if os.path.exists(stdout):
+        with open(stdout) as stdout_file:
+            stdout_s = stdout_file.read()
+    else:
+        stdout_s = ""
+
+    if os.path.exists(stderr):
+        with open(stderr) as stderr_file:
+            stderr_s = stderr_file.read()
+    else:
+        stderr_s = ""
 
     solution = AstrometrySolution(wcs=None, xyls=xyls.to_pandas(), stdout="", stderr="")
 
@@ -481,11 +490,13 @@ def astrometrynet_quick(
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", category=FITSFixedWarning)
-        wcs = WCS(open(wcs_output).read(), relax=True)
+        with open(wcs_output) as ff:
+            wcs = WCS(ff.read(), relax=True)
 
     solution.wcs = wcs
-    solution.stdout = open(stdout).read()
-    solution.stderr = open(stderr).read()
+    with open(stdout) as stdout_file, open(stderr) as stderr_file:
+        solution.stdout = stdout_file.read()
+        solution.stderr = stderr_file.read()
 
     if os.path.exists(corr_file):
         with warnings.catch_warnings():

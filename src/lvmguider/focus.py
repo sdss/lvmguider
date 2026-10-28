@@ -12,7 +12,7 @@ import asyncio
 import pathlib
 from time import time
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import matplotlib.pyplot as plt
 import numpy
@@ -171,11 +171,11 @@ class Focuser:
 
             fwhm = float(numpy.percentile(asources.loc[asources.valid == 1].fwhm, 25))
             command.info(
-                focus_point=dict(
-                    focus=round(focus_position, 2),
-                    n_sources=len(asources),
-                    fwhm=round(fwhm, 2),
-                )
+                focus_point={
+                    "focus": round(focus_position, 2),
+                    "n_sources": len(asources),
+                    "fwhm": round(fwhm, 2),
+                }
             )
 
             source_list.append(asources)
@@ -207,14 +207,14 @@ class Focuser:
 
         bench_temperature = await self.get_bench_temperature(command)
         command.info(
-            best_focus=dict(
-                focus=numpy.round(fit_data["xmin"], 2),
-                fwhm=numpy.round(fit_data["ymin"], 2),
-                r2=numpy.round(fit_data["R2"], 3),
-                initial_guess=numpy.round(initial_guess, 2),
-                bench_temperature=numpy.round(bench_temperature, 2),
-                fit_method=fit_method,
-            )
+            best_focus={
+                "focus": numpy.round(fit_data["xmin"], 2),
+                "fwhm": numpy.round(fit_data["ymin"], 2),
+                "r2": numpy.round(fit_data["R2"], 3),
+                "initial_guess": numpy.round(initial_guess, 2),
+                "bench_temperature": numpy.round(bench_temperature, 2),
+                "fit_method": fit_method,
+            }
         )
 
         focus_value = fit_data["xmin"]
@@ -310,7 +310,11 @@ class Focuser:
         if cmd.replies.get("AtLimit") is True:
             raise RuntimeError("Hit a limit while focusing.")
 
-    def fit_focus(self, sources: pandas.DataFrame, fit_method: str = "spline"):
+    def fit_focus(
+        self,
+        sources: pandas.DataFrame,
+        fit_method: str = "spline",
+    ) -> dict[str, Any]:
         """Fits the data and returns the best focus and measured FWHM."""
 
         sources_valid = sources.loc[sources.valid == 1]
@@ -359,10 +363,12 @@ class Focuser:
         data: pandas.DataFrame,
         fit_method: str,
         plot_path: pathlib.Path,
-        fit_params: dict = {},
+        fit_params: dict | None = None,
     ):
         """Produces a plot for the focus sequence."""
 
+        if fit_params is None:
+            fit_params = {}
         seaborn.set_theme(palette="deep")
 
         data_valid = data.loc[(data.xfitvalid == 1) & (data.yfitvalid == 1)]

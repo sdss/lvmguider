@@ -42,7 +42,7 @@ class GuiderStatus(Flag):
     def get_names(self):
         """Returns a list of active bit names."""
 
-        return [bit.name for bit in GuiderStatus if self & bit and bit.name]
+        return [bit.name for bit in GuiderStatus if self & bit and bit.name]  # ty: ignore[redundant-condition]
 
     def __repr__(self):
         return str(" | ".join(self.get_names()))

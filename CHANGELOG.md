@@ -1,5 +1,12 @@
 # Changelog
 
+## Next release
+
+### ⚙️ Engineering
+
+* Update configuration for Ruff and ty and reformat files.
+
+
 ## 0.8.1 - November 11, 2025
 
 ### ✨ Improved

@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from time import time
 
 from typing import TYPE_CHECKING
@@ -182,9 +182,7 @@ async def focus_info(command: GuiderCommand):
 
     ref = command.actor._reference_focus
     timestamp = (
-        datetime.fromtimestamp(ref.timestamp, tz=timezone.utc).isoformat()
-        if ref
-        else None
+        datetime.fromtimestamp(ref.timestamp, tz=UTC).isoformat() if ref else None
     )
 
     command.info(
@@ -201,7 +199,7 @@ async def focus_info(command: GuiderCommand):
             "focus": current_focus,
             "temperature": current_temperature,
             "delta_temperature": current_temperature - ref.temperature if ref else None,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
     )
 

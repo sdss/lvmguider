@@ -1,7 +1,5 @@
 import os
 
-from pkg_resources import parse_version
-
 from lvmguider import __version__
 
 
@@ -43,7 +41,7 @@ master_doc = "index"
 
 # General information about the project.
 project = "lvmguider"
-copyright = "{0}, {1}".format("2023-", "José Sánchez-Gallego")
+copyright = "{}, {}".format("2023-", "José Sánchez-Gallego")
 author = "José Sánchez-Gallego"
 
 # The version info for the project you're documenting, acts as replacement for
@@ -51,7 +49,7 @@ author = "José Sánchez-Gallego"
 # built documents.
 
 # The short X.Y version.
-version = parse_version(__version__).base_version
+version = __version__
 # The full version, including alpha/beta/rc tags.
 release = __version__
 

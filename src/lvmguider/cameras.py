@@ -65,10 +65,12 @@ class Cameras:
         flavour: str = "object",
         extract_sources: bool = False,
         nretries: int = 3,
-        header_keywords: dict[str, Any] = {},
+        header_keywords: dict[str, Any] | None = None,
     ) -> tuple[list[pathlib.Path], int, list[pandas.DataFrame] | None]:
         """Exposes the cameras and returns the filenames."""
 
+        if header_keywords is None:
+            header_keywords = {}
         command.actor._status &= ~GuiderStatus.IDLE
         command.actor.status |= GuiderStatus.EXPOSING
 
@@ -119,7 +121,7 @@ class Cameras:
         if len(filenames) == 0:
             raise ValueError("Exposure did not produce any images.")
 
-        if any([self.is_shifted(filename) for filename in filenames]):
+        if any(self.is_shifted(filename) for filename in filenames):
             if nretries > 0:
                 command.warning("Found shifted images. Retrying.")
                 return await self.expose(
@@ -279,10 +281,7 @@ class Cameras:
             return True
 
         # Another case of a bad image.
-        if data.sum() == 0:
-            return True
-
-        return False
+        return data.sum() == 0
 
     async def _get_focus_position(self, command: GuiderCommand):
         """Retrieves the focuser position,"""
@@ -318,7 +317,8 @@ class Cameras:
         path = dirname / f"lvm.{self.telescope}.agcam.{cam_name}.dark.dat"
 
         if path.exists():
-            dark_file = open(path, "r").read().strip()
+            with open(path, "r") as fd:
+                dark_file = fd.read().strip()
             self.dark_file[cam_name] = dark_file
             return pathlib.Path(dark_file)
 

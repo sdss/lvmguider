@@ -14,10 +14,11 @@ import os.path
 import pathlib
 import re
 import time
+from collections.abc import Sequence
 from functools import partial
 from threading import Lock
 
-from typing import TYPE_CHECKING, Literal, Sequence
+from typing import TYPE_CHECKING, Literal
 
 import numpy
 import pandas
@@ -26,8 +27,7 @@ from astropy.stats import sigma_clip
 from astropy.time import Time
 from packaging.version import Version
 from watchdog.events import (
-    FileCreatedEvent,
-    FileMovedEvent,
+    FileSystemEvent,
     PatternMatchingEventHandler,
 )
 from watchdog.observers.polling import PollingObserver
@@ -74,7 +74,7 @@ if TYPE_CHECKING:
 
 AnyPath = str | os.PathLike
 
-MULTIPROCESS_MODE_TYPE = Literal["frames"] | Literal["cameras"] | Literal["telescopes"]
+MULTIPROCESS_MODE_TYPE = Literal["frames", "cameras", "telescopes"]
 MULTIPROCESS_NCORES: dict[str, int] = {"frames": 4, "cameras": 2, "telescopes": 4}
 
 TELESCOPES: list[str] = ["sci", "spec", "skye", "skyw"]
@@ -143,9 +143,9 @@ def process_all_spec_frames(
         gs_paths: list[pathlib.Path] = []
         spec_nos: list[int] = []
 
-        for spec_no in all_paths:
-            gs_paths += all_paths[spec_no]
-            spec_nos += [spec_no] * len(all_paths[spec_no])
+        for spec_no, paths in all_paths.items():
+            gs_paths += paths
+            spec_nos += [spec_no] * len(paths)
 
         g_fs = [pp.with_name(pp.stem + "_guiderdata.parquet") for pp in gs_paths]
         g_fs = [path for path in g_fs if path.exists()]
@@ -339,7 +339,7 @@ def create_global_coadd(
     cameras = [camera for camera in camera_to_files if len(camera_to_files[camera]) > 0]
     camera_files = [camera_to_files[camera] for camera in cameras]
 
-    frame_nos = set([get_frameno(file) for file in files])
+    frame_nos = {get_frameno(file) for file in files}
 
     # Co-add each camera independently.
     coadd_camera_partial = partial(coadd_camera, **coadd_camera_kwargs)
@@ -508,7 +508,7 @@ def coadd_camera(
     use_sigmaclip: bool = False,
     sigma: float = 3.0,
     database_profile: str = "default",
-    database_params: dict = {},
+    database_params: dict | None = None,
     overwrite_reprocess: bool = False,
     multiprocess_mode: MULTIPROCESS_MODE_TYPE | None = None,
 ):
@@ -566,6 +566,8 @@ def coadd_camera(
 
     """
 
+    if database_params is None:
+        database_params = {}
     db_connection_params = {"profile": database_profile, **database_params}
 
     if outpath == "default":
@@ -712,12 +714,14 @@ def coadd_camera(
 
 def create_framedata(
     path: pathlib.Path,
-    db_connection_params: dict = {},
+    db_connection_params: dict | None = None,
     overwrite_reprocess: bool = False,
 ):
     """Collects information from a guider frame into a `.FrameData` object."""
 
     # Copy the original path.
+    if db_connection_params is None:
+        db_connection_params = {}
     orig_path: pathlib.Path = path
     reprocessed: bool = False
 
@@ -809,10 +813,12 @@ def create_framedata(
 def process_camera_coadd(
     data: ARRAY_2D_F32,
     framedata: list[FrameData],
-    db_connection_params={},
+    db_connection_params=None,
 ):
     """Processes co-added data, extracts sources, and determines the WCS."""
 
+    if db_connection_params is None:
+        db_connection_params = {}
     frame: FrameData | None = None
     for fd in framedata[::-1]:  # In reverse order. Last file is likely to be guiding.
         if fd.solution.solved:
@@ -1186,7 +1192,7 @@ def create_global_header(solution: GlobalSolution):
     return header
 
 
-def reprocess_agcam(file: AnyPath, overwrite: bool = False, db_connection_params={}):
+def reprocess_agcam(file: AnyPath, overwrite: bool = False, db_connection_params=None):
     """Reprocesses an old file and converts it to the ``>=0.4.0`` format.
 
     .. warning::
@@ -1214,6 +1220,8 @@ def reprocess_agcam(file: AnyPath, overwrite: bool = False, db_connection_params
 
     """
 
+    if db_connection_params is None:
+        db_connection_params = {}
     file = pathlib.Path(file)
     reproc_path = file.parent / "reprocessed" / file.name
     sources_path = reproc_path.with_suffix(".parquet")
@@ -1493,7 +1501,7 @@ class SpecPatternEventHandler(PatternMatchingEventHandler):
             case_sensitive=True,
         )
 
-    def on_any_event(self, event: FileCreatedEvent | FileMovedEvent):
+    def on_any_event(self, event: FileSystemEvent):
         """Runs the co-add code when a new file is created/moved."""
 
         # Do not process more than one file at the same time.

@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from lvmguider.actor import GuiderCommand
 
 
-__all__ = ["set_pixel", "reset_pixel"]
+__all__ = ["reset_pixel", "set_pixel"]
 
 
 @lvmguider_parser.command()

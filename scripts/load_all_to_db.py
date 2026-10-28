@@ -23,7 +23,7 @@ def load_all_to_db():
 
     log.sh.setLevel(5)
 
-    ag_mjd_paths = list(sorted(AGCAM_PATH.glob("601*")))
+    ag_mjd_paths = sorted(AGCAM_PATH.glob("601*"))
 
     for ag_mjd_path in ag_mjd_paths[::-1]:
         if not (ag_mjd_path / "coadds").exists():

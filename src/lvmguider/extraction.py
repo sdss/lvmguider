@@ -30,7 +30,7 @@ from lvmguider.tools import (
 )
 
 
-__all__ = ["sextractor_quick", "extract_marginal", "extract_sources"]
+__all__ = ["extract_marginal", "extract_sources", "sextractor_quick"]
 
 
 seaborn.set_color_codes("deep")
@@ -238,7 +238,7 @@ def extract_marginal(
     sigma_0: float | None = None,
     max_detections: int | None = None,
     exclude_border: bool = True,
-    sextractor_quick_options: dict = {},
+    sextractor_quick_options: dict | None = None,
     plot: pathlib.Path | str | None = None,
     n_rows_plot: int = 9,
     plot_title: str | None = None,
@@ -285,6 +285,8 @@ def extract_marginal(
     """
 
     # Create an initial, empty sources DF with all the columns and types.
+    if sextractor_quick_options is None:
+        sextractor_quick_options = {}
     detections = dataframe_from_model("SOURCES")
 
     data = data.astype("f8")
@@ -336,7 +338,7 @@ def extract_marginal(
         ax = "x" if axis == 1 else "y"
 
         fit_df = detections.apply(
-            lambda d: pandas.Series(
+            lambda d, axis=axis, ax=ax: pandas.Series(
                 fit_gaussian_to_marginal(
                     sub,
                     d.x,
@@ -356,7 +358,7 @@ def extract_marginal(
 
     # Calculate FWHM as average of xstd and ystd.
     detections.loc[:, "fwhm"] = 0.5 * (detections.xstd + detections.ystd).astype("f4")
-    detections.fwhm *= 2.355
+    detections.loc[:, "fwhm"] *= 2.355
 
     invalid = (detections.xfitvalid == 0) | (detections.yfitvalid == 0)
     detections.loc[invalid, "valid"] = 0
@@ -389,7 +391,7 @@ def extract_marginal(
                     ax.scatter(
                         detections.x,
                         detections.y,
-                        marker="x",  # type:ignore
+                        marker="x",
                         c="r",
                     )
 

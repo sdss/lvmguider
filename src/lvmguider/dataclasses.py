@@ -35,10 +35,10 @@ if TYPE_CHECKING:
     from lvmguider.types import ARRAY_2D_F32
 
 
-__all__ = ["CameraSolution", "GuiderSolution", "FrameData"]
+__all__ = ["CameraSolution", "FrameData", "GuiderSolution"]
 
 
-WCS_MODE_T = Literal["none"] | Literal["astrometrynet"] | Literal["gaia"]
+WCS_MODE_T = Literal["none", "astrometrynet", "gaia"]
 
 
 @dataclass(kw_only=True)
@@ -72,9 +72,8 @@ class BaseSolution:
     def zero_point(self):
         """Returns the median zero point."""
 
-        if self.sources is not None:
-            if len(data := self.sources.zp.dropna()) > 0:
-                return float(data.median())
+        if self.sources is not None and len(data := self.sources.zp.dropna()) > 0:
+            return float(data.median())
 
         return numpy.nan
 
@@ -113,7 +112,7 @@ class CameraSolution(BaseSolution):
     sources: pandas.DataFrame | None = None
     ref_frame: pathlib.Path | None = None
     wcs_mode: WCS_MODE_T = "none"
-    guider_version: Version = Version("0.0.0")
+    guider_version: Version = field(default_factory=lambda: Version("0.0.0"))
     solve_time: float | None = None
     hdul: fits.HDUList | None = None
 
@@ -263,7 +262,7 @@ class GuiderSolution(BaseSolution):
     correction_applied: bool = False
     correction: list[float] = field(default_factory=lambda: [0.0, 0.0, 0.0])
     guide_mode: str = "guide"
-    guider_version: Version = Version("0.0.0")
+    guider_version: Version = field(default_factory=lambda: Version("0.0.0"))
 
     @property
     def sources(self):
@@ -330,7 +329,7 @@ class GuiderSolution(BaseSolution):
     def all_cameras_solved(self):
         """Returns `True` if all the cameras have solved."""
 
-        return all([cs.solved for cs in self.solutions])
+        return all(cs.solved for cs in self.solutions)
 
     @classmethod
     def open(cls, file: str | pathlib.Path, dirname: str | pathlib.Path | None = None):
@@ -435,28 +434,28 @@ class FrameData:
         bentempi = self.raw_header.get("BENTEMPI", numpy.nan)
         bentempo = self.raw_header.get("BENTEMPO", numpy.nan)
 
-        new_row = dict(
-            frameno=self.frameno,
-            mjd=self.sjd,
-            date_obs=self.date_obs.isot,
-            camera=self.camera,
-            telescope=self.telescope,
-            exptime=numpy.float32(self.exptime),
-            kmirror_drot=numpy.float32(self.kmirror_drot),
-            focusdt=numpy.float32(self.focusdt),
-            fwhm=numpy.float32(self.solution.fwhm),
-            ra=numpy.float64(pointing[0]),
-            dec=numpy.float64(pointing[1]),
-            pa=numpy.float32(self.solution.pa),
-            airmass=numpy.float32(self.airmass),
-            zero_point=numpy.float32(self.solution.zero_point),
-            stacked=bool(self.stacked),
-            bentempi=numpy.float32(bentempi),
-            bentempo=numpy.float32(bentempo),
-            solved=bool(self.solution.solved),
-            wcs_mode=self.solution.wcs_mode,
-            is_focus_sweep=self.solution.is_focus_sweep,
-        )
+        new_row = {
+            "frameno": self.frameno,
+            "mjd": self.sjd,
+            "date_obs": self.date_obs.isot,
+            "camera": self.camera,
+            "telescope": self.telescope,
+            "exptime": numpy.float32(self.exptime),
+            "kmirror_drot": numpy.float32(self.kmirror_drot),
+            "focusdt": numpy.float32(self.focusdt),
+            "fwhm": numpy.float32(self.solution.fwhm),
+            "ra": numpy.float64(pointing[0]),
+            "dec": numpy.float64(pointing[1]),
+            "pa": numpy.float32(self.solution.pa),
+            "airmass": numpy.float32(self.airmass),
+            "zero_point": numpy.float32(self.solution.zero_point),
+            "stacked": bool(self.stacked),
+            "bentempi": numpy.float32(bentempi),
+            "bentempo": numpy.float32(bentempo),
+            "solved": bool(self.solution.solved),
+            "wcs_mode": self.solution.wcs_mode,
+            "is_focus_sweep": self.solution.is_focus_sweep,
+        }
         df.loc[0, list(new_row)] = list(new_row.values())
 
         return df
@@ -467,7 +466,7 @@ class CoAddWarningsMixIn:
 
     zero_point: float
     fwhm: float
-    sources: pandas.DataFrame
+    sources: pandas.DataFrame | None
 
     def transp_warning(self):
         """Determines whether to raise a transparency warning."""
@@ -490,6 +489,8 @@ class CoAddWarningsMixIn:
         # during guiding.
         if numpy.isnan(self.zero_point):
             return True
+        elif self.sources is None or len(self.sources) == 0:
+            return False
         else:
             fwhm_factor_warn = config["coadds"]["warnings"]["fwhm_factor_warning"]
             sources_fwhm = self.sources.loc[self.sources.valid == 1, "fwhm"].dropna()
@@ -600,36 +601,36 @@ class GlobalSolution(BaseSolution, CoAddWarningsMixIn):
                 mjd = get_sjd("LCO", gs.solutions[0].date_obs.to_datetime())
                 airmass = gs.solutions[0].to_framedata().airmass
 
-            new_row = dict(
-                frameno=gs.frameno,
-                telescope=gs.telescope,
-                mjd=mjd,
-                date_obs=date_obs,
-                fwhm=numpy.float32(gs.fwhm),
-                pa=numpy.float32(pa),
-                zero_point=numpy.float32(gs.zero_point),
-                solved=bool(gs.solved),
-                solve_time=numpy.float32(gs.solve_time),
-                n_cameras_solved=int(gs.n_cameras_solved),
-                guide_mode=gs.guide_mode,
-                x_ff_pixel=numpy.float32(gs.guide_pixel[0]),
-                z_ff_pixel=numpy.float32(gs.guide_pixel[1]),
-                ra=numpy.float64(pointing[0]),
-                dec=numpy.float64(pointing[1]),
-                airmass=numpy.float32(airmass),
-                ra_field=numpy.float64(gs.ra_field),
-                dec_field=numpy.float64(gs.dec_field),
-                pa_field=numpy.float32(gs.pa_field),
-                ra_off=numpy.float32(gs.ra_off),
-                dec_off=numpy.float32(gs.dec_off),
-                pa_off=numpy.float32(gs.pa_off),
-                axis0_off=numpy.float32(gs.axis0_off),
-                axis1_off=numpy.float32(gs.axis1_off),
-                applied=bool(gs.correction_applied),
-                ax0_applied=numpy.float32(gs.correction[0]),
-                ax1_applied=numpy.float32(gs.correction[1]),
-                rot_applied=numpy.float32(gs.correction[2]),
-            )
+            new_row = {
+                "frameno": gs.frameno,
+                "telescope": gs.telescope,
+                "mjd": mjd,
+                "date_obs": date_obs,
+                "fwhm": numpy.float32(gs.fwhm),
+                "pa": numpy.float32(pa),
+                "zero_point": numpy.float32(gs.zero_point),
+                "solved": bool(gs.solved),
+                "solve_time": numpy.float32(gs.solve_time),
+                "n_cameras_solved": int(gs.n_cameras_solved),
+                "guide_mode": gs.guide_mode,
+                "x_ff_pixel": numpy.float32(gs.guide_pixel[0]),
+                "z_ff_pixel": numpy.float32(gs.guide_pixel[1]),
+                "ra": numpy.float64(pointing[0]),
+                "dec": numpy.float64(pointing[1]),
+                "airmass": numpy.float32(airmass),
+                "ra_field": numpy.float64(gs.ra_field),
+                "dec_field": numpy.float64(gs.dec_field),
+                "pa_field": numpy.float32(gs.pa_field),
+                "ra_off": numpy.float32(gs.ra_off),
+                "dec_off": numpy.float32(gs.dec_off),
+                "pa_off": numpy.float32(gs.pa_off),
+                "axis0_off": numpy.float32(gs.axis0_off),
+                "axis1_off": numpy.float32(gs.axis1_off),
+                "applied": bool(gs.correction_applied),
+                "ax0_applied": numpy.float32(gs.correction[0]),
+                "ax1_applied": numpy.float32(gs.correction[1]),
+                "rot_applied": numpy.float32(gs.correction[2]),
+            }
             df.loc[ii, list(new_row)] = list(new_row.values())
 
         df = df.sort_values(["frameno"])

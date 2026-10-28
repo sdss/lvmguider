@@ -125,11 +125,8 @@ async def guide(
                 exposure_time = numpy.clip(exposure_time * 1.5, 1, MAX_EXPTIME)
                 exposure_time = numpy.round(exposure_time, 1)
                 command.warning(f"Exposure time increased to {exposure_time:.1f} s")
-        finally:
-            if is_stopping(command):
-                break
 
-        if one:
+        if is_stopping(command) or one:
             break
 
         if sleep:

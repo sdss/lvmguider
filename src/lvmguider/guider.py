@@ -54,13 +54,11 @@ if TYPE_CHECKING:
     from lvmguider.astrometrynet import AstrometrySolution
 
 
-__all__ = ["Guider", "CriticalGuiderError"]
+__all__ = ["CriticalGuiderError", "Guider"]
 
 
 class CriticalGuiderError(Exception):
     """An exception that should stop the guide loop."""
-
-    pass
 
 
 class Guider:
@@ -496,7 +494,6 @@ class Guider:
             else:
                 with elapsed_time(self.command, "creating WCS from Gaia sources"):
                     wcs = wcs_from_gaia(matched_sources)
-                    wcs = wcs
 
         # Get zero-point. This is safe even if it did not solve.
         with elapsed_time(self.command, f"{camname}: estimating zero point"):

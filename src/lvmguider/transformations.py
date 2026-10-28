@@ -8,8 +8,8 @@
 
 from __future__ import annotations
 
+import datetime
 import pathlib
-from datetime import datetime
 
 from typing import Any, cast
 
@@ -88,9 +88,9 @@ def ag_to_full_frame(
         th, Sx, Sz = (numpy.radians(rot_shift[0]), rot_shift[1], rot_shift[2])
 
     if verbose:
-        print("")
+        print()
         print("ag_to_full_frame: rot_shift for ", camera, numpy.degrees(th), Sx, Sz)
-        print("")
+        print()
 
     # Rotation matrix
     M = numpy.array(([numpy.cos(th), -numpy.sin(th)], [numpy.sin(th), numpy.cos(th)]))
@@ -259,7 +259,7 @@ def solve_locs(
     )
 
     if verbose:
-        print("")
+        print()
         print("Solution has match ? ", solution.solved)
 
     return solution
@@ -312,11 +312,9 @@ def radec2azel(raD, decD, lstD, site: EarthLocation | None = None):
         numpy.cos(el) * numpy.cos(lat_r)
     )  # Ratio - need to pin [-1,1]
 
-    if rat < -1.0:  # Goes wonky if roundoff puts it outside [1,1]
-        rat = -1.0
+    rat = max(rat, -1.0)
 
-    if rat > 1.0:
-        rat = 1.0
+    rat = min(rat, 1.0)
 
     if numpy.sin(ha) < 0.0:
         az = numpy.arccos(rat)
@@ -360,7 +358,7 @@ def delta_radec2mot_axis(
     dec_ref,
     ra_new,
     dec_new,
-    date: datetime | None = None,
+    date: datetime.datetime | None = None,
     site: EarthLocation | None = None,
 ):
     """RA/Dec offset to motor axes.
@@ -378,7 +376,7 @@ def delta_radec2mot_axis(
 
     assert isinstance(site, EarthLocation)
 
-    date = date or datetime.utcnow()
+    date = date or datetime.datetime.now(tz=datetime.UTC)
     observing_time = Time(date, scale="utc", location=site)
     lst = observing_time.sidereal_time("mean")
 
@@ -470,7 +468,7 @@ def match_with_gaia(
     gaia_sources: pandas.DataFrame | None = None,
     max_separation: float = 2,
     concat: bool = False,
-    db_connection_params: dict[str, Any] = {},
+    db_connection_params: dict[str, Any] | None = None,
 ) -> tuple[pandas.DataFrame, int]:
     """Match detections to Gaia sources using nearest neighbours.
 
@@ -502,6 +500,8 @@ def match_with_gaia(
 
     from lvmguider.tools import get_gaia_sources
 
+    if db_connection_params is None:
+        db_connection_params = {}
     PIXSCALE = 1.009  # arcsec/pix
 
     # Epoch difference with Gaia DR3.
@@ -559,15 +559,17 @@ def match_with_gaia(
 
     if concat:
         sources.loc[:, matches.columns] = matches
-        return sources, valid.sum()
+        return sources, int(valid.sum())
 
-    return matches, valid.sum()
+    return matches, int(valid.sum())
 
 
-def wcs_from_gaia(sources: pandas.DataFrame, xy_cols: list[str] = ["x", "y"]) -> WCS:
+def wcs_from_gaia(sources: pandas.DataFrame, xy_cols: list[str] | None = None) -> WCS:
     """Creates a WCS from Gaia-matched sources."""
 
     # Get useful columns. Drop NaNs.
+    if xy_cols is None:
+        xy_cols = ["x", "y"]
     matched_sources = sources.loc[:, ["ra_epoch", "dec_epoch", *xy_cols]]
     matched_sources.dropna(inplace=True)
 

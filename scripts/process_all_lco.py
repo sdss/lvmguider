@@ -21,7 +21,7 @@ SPECTRO_PATH = pathlib.Path("/data/spectro")
 def process_all_lco():
     """Processes all the MJDs. Customised for LVM@LCO paths."""
 
-    ag_mjd_paths = list(sorted(AGCAM_PATH.glob("601*")))
+    ag_mjd_paths = sorted(AGCAM_PATH.glob("601*"))
 
     for ag_mjd_path in ag_mjd_paths[::-1]:
         mjd = ag_mjd_path.absolute().name
