@@ -346,13 +346,10 @@ class Guider:
             # Are we close enough to the field centre to guide using Gaia?
             sep_reached = guider_solution.separation < self.guide_tolerance
 
-            # Have we converged in PA? Note that we can only move in positive
-            # offsets in the k-mirror, so if the offset_pa is < 0 we've gone
-            # too far and we cannot easily fix it. That's why here we don't
-            # take abs(offset_pa) since self.pa_tolerance is positive.
-            pa_reached: bool
+            # Have we converged in PA?
             if self.config["has_kmirror"] and self.config["guide_in_rot"]:
-                pa_reached = numpy.isnan(offset_pa) or offset_pa < self.pa_tolerance
+                pa_is_finite = not numpy.isnan(offset_pa)
+                pa_reached = pa_is_finite and abs(offset_pa) < self.pa_tolerance
             else:
                 pa_reached = True
 
@@ -625,12 +622,10 @@ class Guider:
         guide_in_rot = self.config["has_kmirror"] and self.config["guide_in_rot"]
 
         if guide_in_rot and not self.is_guiding():
-            if off_rot > max_rot_correction:
+            if abs(off_rot) > max_rot_correction:
                 self.command.warning("Requested rotator correction is too big.")
 
-            # Note that we do not take abs(off_rot) here because we cannot apply
-            # correction in negative direction. This prevents that.
-            elif off_rot > min_rot_correction:
+            elif abs(off_rot) > min_rot_correction:
                 km = f"lvm.{telescope}.km"
                 cmd_km_str = f"slewAdjust --offset_angle {off_rot:.6f}"
                 cmd_km = await self.command.send_command(km, cmd_km_str)
