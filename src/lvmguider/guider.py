@@ -209,8 +209,6 @@ class Guider:
 
         """
 
-        self.guide_tolerance = guide_tolerance or self.guide_tolerance
-
         filenames, frameno, sources = await self.cameras.expose(
             self.command,
             extract_sources=True,
@@ -223,7 +221,8 @@ class Guider:
         self.command.actor.status &= ~GuiderStatus.IDLE
 
         default_guide_tolerance: float = self.config.get("guide_tolerance", 5)
-        guide_tolerance = guide_tolerance or default_guide_tolerance
+        self.guide_tolerance = guide_tolerance or default_guide_tolerance
+
         revert_to_acquistion_threshold = self.config["revert_to_acquistion_threshold"]
 
         # Get astrometric solutions for individual cameras.
