@@ -2,6 +2,10 @@
 
 ## Next release
 
+### ✨ Improved
+
+* [#36](https://github.com/sdss/lvmguider/pull/36) Improves handling of rotator corrections. This PR also introduces the `acquire_in_rot` option which allows defining whether to acquire or guide in rotation separately. By default, both `acquire_in_rot` and `guide_in_rot` are set to `false`.
+
 ### ⚙️ Engineering
 
 * Update configuration for Ruff and ty and reformat files.

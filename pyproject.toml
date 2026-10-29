@@ -30,6 +30,7 @@ dependencies = [
     "fastparquet>=2023.8.0",
     "watchdog>=3.0.0",
     "pyarrow>=18.0.0",
+    "anyio>=4.15.1",
 ]
 
 [project.urls]

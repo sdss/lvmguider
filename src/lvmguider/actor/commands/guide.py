@@ -103,6 +103,9 @@ async def guide(
     # Force the cameras to check the last image.
     command.actor.cameras.reset_seqno()
 
+    # Set the acquisition flags.
+    guider.revert_to_acquisition()
+
     while True:
         try:
             actor.guide_task = asyncio.create_task(
