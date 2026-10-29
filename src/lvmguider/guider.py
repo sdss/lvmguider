@@ -350,8 +350,9 @@ class Guider:
             # Are we close enough to the field centre to guide using Gaia?
             sep_reached = guider_solution.separation < self.guide_tolerance
 
-            # Have we converged in PA?
-            if self._should_guide_in_rot():
+            # Have we converged in PA? We cannot apply negative corrections; if the
+            # offset is negative we just assume we have converged.
+            if self._should_guide_in_rot() and offset_pa > 0.0:
                 pa_is_finite = not numpy.isnan(offset_pa)
                 pa_reached = pa_is_finite and abs(offset_pa) < self.pa_tolerance
             else:
@@ -641,7 +642,10 @@ class Guider:
 
         # Rotation
         if self._should_guide_in_rot():
-            if abs(off_rot) > max_rot_correction:
+            if off_rot <= 0.0:
+                self.command.debug("Cannot apply negative rotator correction.")
+
+            elif abs(off_rot) > max_rot_correction:
                 self.command.warning("Requested rotator correction is too big.")
 
             elif abs(off_rot) > min_rot_correction:
